@@ -6,6 +6,7 @@ license.workspace = true
 publish.workspace = true
 
 [dependencies]
+kdl = "6.7.1"
 
 [lints]
 workspace = true
