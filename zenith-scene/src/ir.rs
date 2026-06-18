@@ -117,11 +117,25 @@ pub enum SceneCommand {
     },
     // ── Text ──────────────────────────────────────────────────────────────
     /// Draw a shaped, positioned glyph run.
+    ///
+    /// `x` is the text-box origin x in pixels; `y` is the baseline y in
+    /// pixels (`text_box_top + ascent`).  The renderer re-resolves font bytes
+    /// via `FontProvider::by_id` using only the `font_id` string — no raw
+    /// font bytes appear in the IR.
     DrawGlyphRun {
+        /// Text-box origin x in pixels.
         x: f64,
+        /// Baseline y in pixels (`text_box_top + ascent`).
         y: f64,
-        /// Stable source node ID for golden-test diffing.
-        node_id: String,
+        /// Stable font-face identifier; renderer resolves bytes via
+        /// `FontProvider::by_id`.
+        font_id: String,
+        /// Font size at which glyphs were shaped, in pixels.
+        font_size: f32,
+        /// Fill color of the glyph run.
+        color: Color,
+        /// Positioned glyphs, baseline-relative.
+        glyphs: Vec<SceneGlyph>,
     },
     // ── Clip / layer stack ────────────────────────────────────────────────
     /// Push an axis-aligned clip rectangle onto the clip stack.
@@ -132,6 +146,23 @@ pub enum SceneCommand {
     PushLayer { opacity: f64 },
     /// Pop the most-recently pushed compositing layer.
     PopLayer,
+}
+
+// ── Scene glyph ───────────────────────────────────────────────────────────────
+
+/// A single positioned glyph within a [`SceneCommand::DrawGlyphRun`].
+///
+/// Offsets `dx` and `dy` are pen offsets from the run origin, baseline-relative.
+/// Positive `dx` is rightward; positive `dy` is downward (0 = on the baseline).
+/// No font bytes appear here — only the glyph ID within the resolved font face.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct SceneGlyph {
+    /// Glyph identifier within the resolved font face.
+    pub glyph_id: u16,
+    /// Horizontal pen offset from the run origin, in pixels.
+    pub dx: f32,
+    /// Vertical offset from the baseline, in pixels (positive = below baseline).
+    pub dy: f32,
 }
 
 // ── Scene ─────────────────────────────────────────────────────────────────────

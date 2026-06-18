@@ -9,9 +9,9 @@
 //!
 //! # Module layout
 //!
-//! - `ir`      — scene IR types (`Scene`, `SceneCommand`, `Color`).
+//! - `ir`      — scene IR types (`Scene`, `SceneCommand`, `Color`, `SceneGlyph`).
 //! - `color`   — sRGB hex parsing → `Color`.
-//! - `compile` — `compile(&Document) -> CompileResult`.
+//! - `compile` — `compile(&Document, &dyn FontProvider) -> CompileResult`.
 //!
 //! # Quick start
 //!
@@ -36,4 +36,4 @@ pub mod ir;
 
 // Curated flat re-exports.
 pub use compile::{CompileResult, compile};
-pub use ir::{Color, Scene, SceneCommand};
+pub use ir::{Color, Scene, SceneCommand, SceneGlyph};

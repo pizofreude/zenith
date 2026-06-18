@@ -2,18 +2,19 @@
 //!
 //! Entry point: [`compile`].
 //!
-//! Only `rect` nodes and the page are compiled in Unit 6; `text` and unknown
-//! nodes produce an advisory diagnostic and are skipped.
+//! Rect nodes and text nodes are compiled; the page background is emitted
+//! first; unknown nodes produce an advisory diagnostic and are skipped.
 
 use std::collections::BTreeMap;
 
 use zenith_core::{
-    Diagnostic, Document, Node, PropertyValue, ResolvedToken, ResolvedValue, Span, Unit,
-    resolve_tokens,
+    Diagnostic, Document, FontProvider, FontStyle, Node, PropertyValue, ResolvedToken,
+    ResolvedValue, Span, Unit, resolve_tokens,
 };
+use zenith_layout::{RustybuzzEngine, ShapeRequest, TextLayoutEngine};
 
 use crate::color::parse_srgb_hex;
-use crate::ir::{Color, Scene, SceneCommand};
+use crate::ir::{Color, Scene, SceneCommand, SceneGlyph};
 
 // ── Public result type ────────────────────────────────────────────────────────
 
@@ -29,17 +30,20 @@ pub struct CompileResult {
 
 // ── Entry point ───────────────────────────────────────────────────────────────
 
-/// Compile `doc` into a [`CompileResult`].
+/// Compile `doc` into a [`CompileResult`], using `fonts` to shape text nodes.
 ///
 /// Only the first page is compiled.  If the document has no pages an empty
 /// scene is returned with an advisory diagnostic.
+///
+/// Pass `&zenith_core::default_provider()` to use the bundled Noto Sans
+/// font, which is sufficient for basic text rendering.
 ///
 /// # No-panic guarantee
 ///
 /// This function never calls `unwrap`, `expect`, `panic!`, `todo!`,
 /// `unimplemented!`, or performs unchecked indexing.  All failure paths push a
 /// diagnostic and continue.
-pub fn compile(doc: &Document) -> CompileResult {
+pub fn compile(doc: &Document, fonts: &dyn FontProvider) -> CompileResult {
     let mut diagnostics: Vec<Diagnostic> = Vec::new();
 
     // ── Step 1: resolve tokens ────────────────────────────────────────────
@@ -123,8 +127,16 @@ pub fn compile(doc: &Document) -> CompileResult {
     }
 
     // ── Step 6: children in source order (z-order: first = bottom) ───────
+    let engine = RustybuzzEngine::new();
     for node in &page.children {
-        compile_node(node, resolved, &mut scene.commands, &mut diagnostics);
+        compile_node(
+            node,
+            resolved,
+            fonts,
+            &engine,
+            &mut scene.commands,
+            &mut diagnostics,
+        );
     }
 
     // ── Step 7: close the outermost clip ─────────────────────────────────
@@ -138,6 +150,8 @@ pub fn compile(doc: &Document) -> CompileResult {
 fn compile_node(
     node: &Node,
     resolved: &BTreeMap<String, ResolvedToken>,
+    fonts: &dyn FontProvider,
+    engine: &RustybuzzEngine,
     commands: &mut Vec<SceneCommand>,
     diagnostics: &mut Vec<Diagnostic>,
 ) {
@@ -167,19 +181,39 @@ fn compile_node(
             };
 
             let Some(x) = dim_to_px(x_dim.value, &x_dim.unit) else {
-                diagnostics.push(unsupported_unit_diag(&rect.id, "x", rect.source_span));
+                diagnostics.push(unsupported_unit_diag(
+                    "rect",
+                    &rect.id,
+                    "x",
+                    rect.source_span,
+                ));
                 return;
             };
             let Some(y) = dim_to_px(y_dim.value, &y_dim.unit) else {
-                diagnostics.push(unsupported_unit_diag(&rect.id, "y", rect.source_span));
+                diagnostics.push(unsupported_unit_diag(
+                    "rect",
+                    &rect.id,
+                    "y",
+                    rect.source_span,
+                ));
                 return;
             };
             let Some(w) = dim_to_px(w_dim.value, &w_dim.unit) else {
-                diagnostics.push(unsupported_unit_diag(&rect.id, "w", rect.source_span));
+                diagnostics.push(unsupported_unit_diag(
+                    "rect",
+                    &rect.id,
+                    "w",
+                    rect.source_span,
+                ));
                 return;
             };
             let Some(h) = dim_to_px(h_dim.value, &h_dim.unit) else {
-                diagnostics.push(unsupported_unit_diag(&rect.id, "h", rect.source_span));
+                diagnostics.push(unsupported_unit_diag(
+                    "rect",
+                    &rect.id,
+                    "h",
+                    rect.source_span,
+                ));
                 return;
             };
 
@@ -204,15 +238,146 @@ fn compile_node(
         }
 
         Node::Text(text) => {
-            diagnostics.push(Diagnostic::advisory(
-                "scene.unsupported_node",
-                format!(
-                    "text node '{}' cannot be compiled in this version (text compile is deferred)",
-                    text.id
-                ),
-                text.source_span,
-                Some(text.id.clone()),
-            ));
+            // Skip invisible text nodes.
+            if text.visible == Some(false) {
+                return;
+            }
+
+            // Resolve geometry — x and y are required; skip if absent or bad unit.
+            let (Some(x_dim), Some(y_dim)) = (&text.x, &text.y) else {
+                diagnostics.push(Diagnostic::advisory(
+                    "scene.missing_geometry",
+                    format!(
+                        "text node '{}' is missing x or y geometry; skipped",
+                        text.id
+                    ),
+                    text.source_span,
+                    Some(text.id.clone()),
+                ));
+                return;
+            };
+
+            let Some(text_x) = dim_to_px(x_dim.value, &x_dim.unit) else {
+                diagnostics.push(unsupported_unit_diag(
+                    "text node",
+                    &text.id,
+                    "x",
+                    text.source_span,
+                ));
+                return;
+            };
+            let Some(text_y) = dim_to_px(y_dim.value, &y_dim.unit) else {
+                diagnostics.push(unsupported_unit_diag(
+                    "text node",
+                    &text.id,
+                    "y",
+                    text.source_span,
+                ));
+                return;
+            };
+
+            // Concatenate span text; skip silently if empty (nothing to draw).
+            let content: String = text.spans.iter().map(|s| s.text.as_str()).collect();
+            if content.is_empty() {
+                return;
+            }
+
+            // Resolve font family.
+            // Priority: font_family property → default "Noto Sans".
+            let family_name: String = match &text.font_family {
+                Some(PropertyValue::TokenRef(token_id)) => match resolved.get(token_id.as_str()) {
+                    Some(rt) => match &rt.value {
+                        ResolvedValue::FontFamily(name) => name.clone(),
+                        _ => "Noto Sans".to_owned(),
+                    },
+                    None => "Noto Sans".to_owned(),
+                },
+                Some(PropertyValue::Literal(name)) => name.clone(),
+                None => "Noto Sans".to_owned(),
+            };
+            let families = vec![family_name];
+
+            // Resolve font size in pixels; default to 16.0 if absent.
+            let font_size: f32 = match &text.font_size {
+                Some(PropertyValue::TokenRef(token_id)) => match resolved.get(token_id.as_str()) {
+                    Some(rt) => match &rt.value {
+                        ResolvedValue::Dimension(dim) => dim_to_px(dim.value, &dim.unit)
+                            .map(|v| v as f32)
+                            .unwrap_or(16.0),
+                        _ => 16.0,
+                    },
+                    None => 16.0,
+                },
+                Some(PropertyValue::Literal(_)) => {
+                    // Literals for font-size are stored as property values; at
+                    // this point we have no numeric extraction for bare strings,
+                    // so fall back to the default.  Font-size as a token ref is
+                    // the idiomatic path.
+                    16.0
+                }
+                None => 16.0,
+            };
+
+            // Resolve fill color; default to opaque black.
+            let mut color = text
+                .fill
+                .as_ref()
+                .and_then(|fp| resolve_property_color(fp, resolved, diagnostics, &text.id))
+                .unwrap_or(Color {
+                    r: 0,
+                    g: 0,
+                    b: 0,
+                    a: 255,
+                });
+
+            // Apply opacity.
+            if let Some(opacity) = text.opacity {
+                let o = opacity.clamp(0.0, 1.0);
+                color.a = (color.a as f64 * o).round() as u8;
+            }
+
+            // Shape the text.
+            // Weight and style are hardcoded to 400/Normal — the TextNode AST
+            // does not yet carry weight/style fields (future unit).
+            let req = ShapeRequest {
+                text: &content,
+                families: &families,
+                weight: 400,
+                style: FontStyle::Normal,
+                font_size,
+            };
+
+            match engine.shape(&req, fonts) {
+                Err(e) => {
+                    diagnostics.push(Diagnostic::advisory(
+                        "scene.text_unshaped",
+                        format!("text node '{}' could not be shaped: {}", text.id, e.message),
+                        text.source_span,
+                        Some(text.id.clone()),
+                    ));
+                }
+                Ok(run) => {
+                    let baseline_y = text_y + run.ascent as f64;
+                    let glyphs: Vec<SceneGlyph> = run
+                        .glyphs
+                        .iter()
+                        .map(|g| SceneGlyph {
+                            glyph_id: g.glyph_id,
+                            dx: g.x,
+                            dy: g.y,
+                        })
+                        .collect();
+
+                    commands.push(SceneCommand::DrawGlyphRun {
+                        x: text_x,
+                        y: baseline_y,
+                        font_id: run.font_id,
+                        font_size: run.font_size,
+                        color,
+                        glyphs,
+                    });
+                }
+            }
         }
 
         Node::Unknown(unknown) => {
@@ -243,13 +408,16 @@ fn dim_to_px(value: f64, unit: &Unit) -> Option<f64> {
     }
 }
 
-/// Build an `scene.unsupported_unit` advisory for a named geometry field.
-fn unsupported_unit_diag(node_id: &str, field: &str, span: Option<Span>) -> Diagnostic {
+/// Build a `scene.unsupported_unit` advisory for a named geometry field.
+///
+/// `kind` is the human-readable node kind ("rect" or "text node") used in the
+/// diagnostic message.
+fn unsupported_unit_diag(kind: &str, node_id: &str, field: &str, span: Option<Span>) -> Diagnostic {
     Diagnostic::advisory(
         "scene.unsupported_unit",
         format!(
-            "rect '{}' field '{}' uses an unsupported unit; the rect is skipped",
-            node_id, field
+            "{} '{}' field '{}' uses an unsupported unit; the {} is skipped",
+            kind, node_id, field, kind
         ),
         span,
         Some(node_id.to_owned()),
@@ -343,7 +511,7 @@ fn resolve_property_color(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use zenith_core::{KdlAdapter, KdlSource};
+    use zenith_core::{KdlAdapter, KdlSource, default_provider};
 
     // ── Helper to parse a .zen source string ──────────────────────────────
 
@@ -374,7 +542,7 @@ mod tests {
 }
 "##;
         let doc = parse(src);
-        let result = compile(&doc);
+        let result = compile(&doc, &default_provider());
 
         assert!(
             result.diagnostics.is_empty(),
@@ -432,7 +600,7 @@ mod tests {
 }
 "##;
         let doc = parse(src);
-        let result = compile(&doc);
+        let result = compile(&doc, &default_provider());
 
         assert!(
             result.diagnostics.is_empty(),
@@ -472,7 +640,7 @@ mod tests {
 }
 "##;
         let doc = parse(src);
-        let result = compile(&doc);
+        let result = compile(&doc, &default_provider());
 
         // No diagnostics expected (visible=false is a normal skip, not an error).
         assert!(
@@ -493,55 +661,6 @@ mod tests {
         assert!(matches!(cmds[1], SceneCommand::PopClip));
     }
 
-    // ── text node → advisory, no draw command ────────────────────────────
-
-    #[test]
-    fn text_node_produces_advisory_not_draw_command() {
-        let src = r##"zenith version=1 {
-  project id="proj.t4" name="T4"
-  tokens format="zenith-token-v1" {
-    token id="color.text" type="color" value="#111827"
-  }
-  styles {}
-  document id="doc.t4" title="T4" {
-    page id="page.t4" w=(px)200 h=(px)100 {
-      text id="label.t4" x=(px)0 y=(px)0 w=(px)200 h=(px)50 fill=(token)"color.text" {
-        span "Hello"
-      }
-    }
-  }
-}
-"##;
-        let doc = parse(src);
-        let result = compile(&doc);
-
-        // Must have exactly one advisory with code "scene.unsupported_node".
-        let unsupported: Vec<_> = result
-            .diagnostics
-            .iter()
-            .filter(|d| d.code == "scene.unsupported_node")
-            .collect();
-        assert_eq!(
-            unsupported.len(),
-            1,
-            "expected 1 unsupported_node advisory; got: {:?}",
-            result.diagnostics
-        );
-
-        // No FillRect or DrawGlyphRun — only PushClip + PopClip.
-        let draw_cmds: Vec<_> = result
-            .scene
-            .commands
-            .iter()
-            .filter(|c| !matches!(c, SceneCommand::PushClip { .. } | SceneCommand::PopClip))
-            .collect();
-        assert!(
-            draw_cmds.is_empty(),
-            "no draw commands expected; got: {:?}",
-            draw_cmds
-        );
-    }
-
     // ── JSON schema field is "zenith-scene-v1" ────────────────────────────
 
     #[test]
@@ -556,7 +675,7 @@ mod tests {
 }
 "##;
         let doc = parse(src);
-        let result = compile(&doc);
+        let result = compile(&doc, &default_provider());
         let json = result.scene.to_json().expect("serialize must succeed");
         assert!(
             json.contains(r#""schema": "zenith-scene-v1""#),
@@ -583,8 +702,8 @@ mod tests {
 }
 "##;
         let doc = parse(src);
-        let r1 = compile(&doc);
-        let r2 = compile(&doc);
+        let r1 = compile(&doc, &default_provider());
+        let r2 = compile(&doc, &default_provider());
         let j1 = r1.scene.to_json().expect("serialize 1");
         let j2 = r2.scene.to_json().expect("serialize 2");
         assert_eq!(
@@ -612,7 +731,7 @@ mod tests {
 }
 "##;
         let doc = parse(src);
-        let result = compile(&doc);
+        let result = compile(&doc, &default_provider());
 
         assert!(
             result.diagnostics.is_empty(),
@@ -664,7 +783,7 @@ mod tests {
 }
 "##;
         let doc = parse(src);
-        let result = compile(&doc);
+        let result = compile(&doc, &default_provider());
         assert!(
             result.diagnostics.is_empty(),
             "unexpected diagnostics: {:?}",
@@ -678,5 +797,220 @@ mod tests {
             }
             other => panic!("expected FillRect, got {other:?}"),
         }
+    }
+
+    // ── Text node with token-resolved fill/font/size → DrawGlyphRun ───────
+
+    #[test]
+    fn text_node_token_resolved_compiles_to_draw_glyph_run() {
+        // A page with a text node whose fill, font-family, and font-size all
+        // reference tokens.  Shaping uses the bundled Noto Sans provider.
+        let src = r##"zenith version=1 {
+  project id="proj.tx1" name="TX1"
+  tokens format="zenith-token-v1" {
+    token id="color.ink"     type="color"      value="#111827"
+    token id="font.body"     type="fontFamily" value="Noto Sans"
+    token id="size.body"     type="dimension"  value=(px)24
+  }
+  styles {}
+  document id="doc.tx1" title="TX1" {
+    page id="page.tx1" w=(px)400 h=(px)200 {
+      text id="label.tx1" x=(px)10 y=(px)20 w=(px)380 h=(px)40 fill=(token)"color.ink" font-family=(token)"font.body" font-size=(token)"size.body" {
+        span "Hello Zenith"
+      }
+    }
+  }
+}
+"##;
+        let doc = parse(src);
+        let result = compile(&doc, &default_provider());
+
+        // No shaping errors expected.
+        let unshaped: Vec<_> = result
+            .diagnostics
+            .iter()
+            .filter(|d| d.code == "scene.text_unshaped")
+            .collect();
+        assert!(
+            unshaped.is_empty(),
+            "no text_unshaped diagnostics expected; got: {:?}",
+            result.diagnostics
+        );
+
+        // Commands: PushClip, DrawGlyphRun, PopClip.
+        let cmds = &result.scene.commands;
+        assert_eq!(cmds.len(), 3, "expected 3 commands; got: {:?}", cmds);
+        assert!(matches!(cmds[0], SceneCommand::PushClip { .. }));
+        assert!(matches!(cmds[2], SceneCommand::PopClip));
+
+        match &cmds[1] {
+            SceneCommand::DrawGlyphRun {
+                x,
+                y,
+                font_id,
+                font_size,
+                color,
+                glyphs,
+            } => {
+                // x is the text-box origin x.
+                assert_eq!(*x, 10.0, "x must be text-box origin (10px)");
+                // y is baseline = text_y + ascent; ascent > 0, so y > 20.0.
+                assert!(*y > 20.0, "baseline y must be > text_y (20px); got {}", y);
+                // font_id must be the stable Noto Sans id.
+                assert_eq!(
+                    font_id, "noto-sans-400-normal",
+                    "font_id must be noto-sans-400-normal"
+                );
+                assert_eq!(*font_size, 24.0, "font_size must be 24px");
+                // Fill color: #111827 → r=0x11=17, g=0x18=24, b=0x27=39.
+                assert_eq!(color.r, 0x11, "color.r must be 0x11");
+                assert_eq!(color.g, 0x18, "color.g must be 0x18");
+                assert_eq!(color.b, 0x27, "color.b must be 0x27");
+                assert_eq!(color.a, 255, "color.a must be 255 (opaque)");
+                // Glyph run must be non-empty.
+                assert!(
+                    !glyphs.is_empty(),
+                    "glyphs must be non-empty for 'Hello Zenith'"
+                );
+            }
+            other => panic!("expected DrawGlyphRun, got {other:?}"),
+        }
+    }
+
+    // ── Rect then text → FillRect before DrawGlyphRun (z-order) ──────────
+
+    #[test]
+    fn rect_then_text_z_order_preserved() {
+        let src = r##"zenith version=1 {
+  project id="proj.tx2" name="TX2"
+  tokens format="zenith-token-v1" {
+    token id="color.bg"  type="color"      value="#ffffff"
+    token id="color.ink" type="color"      value="#000000"
+    token id="font.body" type="fontFamily" value="Noto Sans"
+    token id="size.body" type="dimension"  value=(px)16
+  }
+  styles {}
+  document id="doc.tx2" title="TX2" {
+    page id="page.tx2" w=(px)400 h=(px)200 {
+      rect id="bg.rect" x=(px)0 y=(px)0 w=(px)400 h=(px)200 fill=(token)"color.bg"
+      text id="label.tx2" x=(px)10 y=(px)20 w=(px)380 h=(px)40 fill=(token)"color.ink" font-family=(token)"font.body" font-size=(token)"size.body" {
+        span "Hello"
+      }
+    }
+  }
+}
+"##;
+        let doc = parse(src);
+        let result = compile(&doc, &default_provider());
+
+        let cmds = &result.scene.commands;
+        // PushClip, FillRect, DrawGlyphRun, PopClip
+        assert_eq!(cmds.len(), 4, "expected 4 commands; got: {:?}", cmds);
+        assert!(
+            matches!(cmds[1], SceneCommand::FillRect { .. }),
+            "second command must be FillRect (rect comes first)"
+        );
+        assert!(
+            matches!(cmds[2], SceneCommand::DrawGlyphRun { .. }),
+            "third command must be DrawGlyphRun (text comes after rect)"
+        );
+    }
+
+    // ── Scene JSON of text contains DrawGlyphRun op + font_id, no byte arrays ─
+
+    #[test]
+    fn scene_json_draw_glyph_run_op_and_font_id_no_bytes() {
+        let src = r##"zenith version=1 {
+  project id="proj.tx3" name="TX3"
+  tokens format="zenith-token-v1" {
+    token id="color.ink" type="color"      value="#333333"
+    token id="font.body" type="fontFamily" value="Noto Sans"
+    token id="size.body" type="dimension"  value=(px)18
+  }
+  styles {}
+  document id="doc.tx3" title="TX3" {
+    page id="page.tx3" w=(px)300 h=(px)100 {
+      text id="label.tx3" x=(px)0 y=(px)0 w=(px)300 h=(px)50 fill=(token)"color.ink" font-family=(token)"font.body" font-size=(token)"size.body" {
+        span "Hi"
+      }
+    }
+  }
+}
+"##;
+        let doc = parse(src);
+        let result = compile(&doc, &default_provider());
+
+        let j1 = result.scene.to_json().expect("serialize 1");
+        let j2 = result.scene.to_json().expect("serialize 2");
+
+        // Must contain the op tag.
+        assert!(
+            j1.contains(r#""op": "DrawGlyphRun""#),
+            "JSON must contain DrawGlyphRun op; snippet: {}",
+            &j1[..j1.len().min(500)]
+        );
+        // Must contain the font_id string.
+        assert!(
+            j1.contains("noto-sans-400-normal"),
+            "JSON must contain font_id; snippet: {}",
+            &j1[..j1.len().min(500)]
+        );
+        // Must NOT contain a large byte array (no font bytes in IR).
+        // Large byte arrays appear as `[1, 2, 3, ...]` with > ~50 numbers.
+        // A simple heuristic: no run of more than 10 consecutive numbers separated by ", ".
+        // We check that the JSON does not contain "bytes" as a key.
+        assert!(
+            !j1.contains(r#""bytes""#),
+            "JSON must not contain a 'bytes' field; font bytes must not appear in the IR"
+        );
+        // Determinism: two serializations must be identical.
+        assert_eq!(j1, j2, "two serializations must be identical (determinism)");
+    }
+
+    // ── Unresolvable font → text_unshaped advisory, no DrawGlyphRun ──────
+
+    #[test]
+    fn unresolvable_font_family_produces_text_unshaped_advisory() {
+        let src = r##"zenith version=1 {
+  project id="proj.tx4" name="TX4"
+  tokens format="zenith-token-v1" {}
+  styles {}
+  document id="doc.tx4" title="TX4" {
+    page id="page.tx4" w=(px)200 h=(px)100 {
+      text id="label.tx4" x=(px)0 y=(px)0 w=(px)200 h=(px)50 fill="#000000" font-family="Nonexistent" {
+        span "test"
+      }
+    }
+  }
+}
+"##;
+        let doc = parse(src);
+        let result = compile(&doc, &default_provider());
+
+        // Must have exactly one advisory with code "scene.text_unshaped".
+        let unshaped: Vec<_> = result
+            .diagnostics
+            .iter()
+            .filter(|d| d.code == "scene.text_unshaped")
+            .collect();
+        assert_eq!(
+            unshaped.len(),
+            1,
+            "expected 1 text_unshaped advisory; got: {:?}",
+            result.diagnostics
+        );
+
+        // No DrawGlyphRun emitted.
+        let glyph_cmds: Vec<_> = result
+            .scene
+            .commands
+            .iter()
+            .filter(|c| matches!(c, SceneCommand::DrawGlyphRun { .. }))
+            .collect();
+        assert!(
+            glyph_cmds.is_empty(),
+            "no DrawGlyphRun expected when font is unresolvable; got: {:?}",
+            glyph_cmds
+        );
     }
 }

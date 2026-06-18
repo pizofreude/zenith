@@ -7,7 +7,7 @@
 //! Both operate entirely on in-memory source text; the caller is responsible
 //! for all filesystem I/O.
 
-use zenith_core::{KdlAdapter, KdlSource, validate};
+use zenith_core::{KdlAdapter, KdlSource, default_provider, validate};
 use zenith_render::render_png;
 use zenith_scene::compile;
 
@@ -83,7 +83,7 @@ fn parse_validate_compile(src: &str) -> Result<zenith_scene::CompileResult, Rend
     }
 
     // Compile ────────────────────────────────────────────────────────────────
-    Ok(compile(&doc))
+    Ok(compile(&doc, &default_provider()))
 }
 
 // ── Tests ─────────────────────────────────────────────────────────────────────
