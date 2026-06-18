@@ -10,7 +10,9 @@ use kdl::{KdlDocument, KdlEntry, KdlNode, KdlValue};
 use crate::ast::{
     Span,
     document::{Document, DocumentBody, Page, Project},
-    node::{Node, RectNode, TextNode, TextSpan, UnknownNode, UnknownProperty, UnknownValue},
+    node::{
+        EllipseNode, Node, RectNode, TextNode, TextSpan, UnknownNode, UnknownProperty, UnknownValue,
+    },
     style::{Style, StyleBlock},
     token::{Token, TokenBlock, TokenLiteral, TokenType, TokenValue},
     value::{Dimension, PropertyValue, Unit},
@@ -506,6 +508,7 @@ fn transform_page(node: &KdlNode) -> Result<Page, ParseError> {
 fn transform_node(node: &KdlNode) -> Result<Node, ParseError> {
     match node.name().value() {
         "rect" => transform_rect(node).map(Node::Rect),
+        "ellipse" => transform_ellipse(node).map(Node::Ellipse),
         "text" => transform_text(node).map(Node::Text),
         _ => Ok(Node::Unknown(UnknownNode {
             kind: node.name().value().to_owned(),
@@ -561,6 +564,35 @@ fn transform_rect(node: &KdlNode) -> Result<RectNode, ParseError> {
         stroke: optional_property_value(node, "stroke"),
         stroke_width,
         stroke_alignment,
+        opacity: optional_f64_prop(node, "opacity"),
+        visible: optional_bool_prop(node, "visible"),
+        locked: optional_bool_prop(node, "locked"),
+        rotate: optional_dimension_prop(node, "rotate"),
+        source_span: node_span(node),
+        unknown_props,
+    })
+}
+
+const ELLIPSE_KNOWN_PROPS: &[&str] = &[
+    "id", "name", "role", "x", "y", "w", "h", "style", "fill", "opacity", "visible", "locked",
+    "rotate",
+];
+
+fn transform_ellipse(node: &KdlNode) -> Result<EllipseNode, ParseError> {
+    let id = required_string_prop(node, "id")?.to_owned();
+
+    let unknown_props = collect_unknown_props(node, ELLIPSE_KNOWN_PROPS);
+
+    Ok(EllipseNode {
+        id,
+        name: optional_string_prop(node, "name").map(str::to_owned),
+        role: optional_string_prop(node, "role").map(str::to_owned),
+        x: optional_dimension_prop(node, "x"),
+        y: optional_dimension_prop(node, "y"),
+        w: optional_dimension_prop(node, "w"),
+        h: optional_dimension_prop(node, "h"),
+        style: optional_string_prop(node, "style").map(str::to_owned),
+        fill: optional_property_value(node, "fill"),
         opacity: optional_f64_prop(node, "opacity"),
         visible: optional_bool_prop(node, "visible"),
         locked: optional_bool_prop(node, "locked"),

@@ -237,6 +237,87 @@ fn compile_node(
             commands.push(SceneCommand::FillRect { x, y, w, h, color });
         }
 
+        Node::Ellipse(ellipse) => {
+            // Skip invisible ellipses.
+            if ellipse.visible == Some(false) {
+                return;
+            }
+
+            // Resolve geometry — all four are required; skip if any is absent
+            // or uses an unsupported unit.
+            let (Some(x_dim), Some(y_dim), Some(w_dim), Some(h_dim)) =
+                (&ellipse.x, &ellipse.y, &ellipse.w, &ellipse.h)
+            else {
+                diagnostics.push(Diagnostic::advisory(
+                    "scene.missing_geometry",
+                    format!(
+                        "ellipse '{}' is missing one or more geometry properties (x, y, w, h); \
+                         skipped",
+                        ellipse.id
+                    ),
+                    ellipse.source_span,
+                    Some(ellipse.id.clone()),
+                ));
+                return;
+            };
+
+            let Some(x) = dim_to_px(x_dim.value, &x_dim.unit) else {
+                diagnostics.push(unsupported_unit_diag(
+                    "ellipse",
+                    &ellipse.id,
+                    "x",
+                    ellipse.source_span,
+                ));
+                return;
+            };
+            let Some(y) = dim_to_px(y_dim.value, &y_dim.unit) else {
+                diagnostics.push(unsupported_unit_diag(
+                    "ellipse",
+                    &ellipse.id,
+                    "y",
+                    ellipse.source_span,
+                ));
+                return;
+            };
+            let Some(w) = dim_to_px(w_dim.value, &w_dim.unit) else {
+                diagnostics.push(unsupported_unit_diag(
+                    "ellipse",
+                    &ellipse.id,
+                    "w",
+                    ellipse.source_span,
+                ));
+                return;
+            };
+            let Some(h) = dim_to_px(h_dim.value, &h_dim.unit) else {
+                diagnostics.push(unsupported_unit_diag(
+                    "ellipse",
+                    &ellipse.id,
+                    "h",
+                    ellipse.source_span,
+                ));
+                return;
+            };
+
+            // Resolve fill color.
+            let Some(fill_prop) = &ellipse.fill else {
+                // No fill → nothing to draw for a fill-only primitive.
+                return;
+            };
+            let Some(mut color) =
+                resolve_property_color(fill_prop, resolved, diagnostics, &ellipse.id)
+            else {
+                return;
+            };
+
+            // Apply opacity.
+            if let Some(opacity) = ellipse.opacity {
+                let o = opacity.clamp(0.0, 1.0);
+                color.a = (color.a as f64 * o).round() as u8;
+            }
+
+            commands.push(SceneCommand::FillEllipse { x, y, w, h, color });
+        }
+
         Node::Text(text) => {
             // Skip invisible text nodes.
             if text.visible == Some(false) {
@@ -1012,5 +1093,99 @@ mod tests {
             "no DrawGlyphRun expected when font is unresolvable; got: {:?}",
             glyph_cmds
         );
+    }
+
+    // ── Ellipse: token fill compiles to FillEllipse ───────────────────────
+
+    #[test]
+    fn single_ellipse_token_fill_compiles_correctly() {
+        let src = r##"zenith version=1 {
+  project id="proj.e1" name="E1"
+  tokens format="zenith-token-v1" {
+    token id="color.fill" type="color" value="#f8fafc"
+  }
+  styles {}
+  document id="doc.e1" title="E1" {
+    page id="page.e1" w=(px)640 h=(px)360 {
+      ellipse id="ellipse.e1" x=(px)0 y=(px)0 w=(px)640 h=(px)360 fill=(token)"color.fill"
+    }
+  }
+}
+"##;
+        let doc = parse(src);
+        let result = compile(&doc, &default_provider());
+
+        assert!(
+            result.diagnostics.is_empty(),
+            "unexpected diagnostics: {:?}",
+            result.diagnostics
+        );
+
+        let cmds = &result.scene.commands;
+        // PushClip, FillEllipse, PopClip
+        assert_eq!(cmds.len(), 3, "expected 3 commands, got: {:?}", cmds);
+
+        assert!(
+            matches!(cmds[0], SceneCommand::PushClip { x, y, w, h } if x == 0.0 && y == 0.0 && w == 640.0 && h == 360.0),
+            "first command must be PushClip covering the page"
+        );
+
+        match &cmds[1] {
+            SceneCommand::FillEllipse { x, y, w, h, color } => {
+                assert_eq!(*x, 0.0);
+                assert_eq!(*y, 0.0);
+                assert_eq!(*w, 640.0);
+                assert_eq!(*h, 360.0);
+                // #f8fafc → r=0xf8=248, g=0xfa=250, b=0xfc=252, a=255
+                assert_eq!(color.r, 0xf8);
+                assert_eq!(color.g, 0xfa);
+                assert_eq!(color.b, 0xfc);
+                assert_eq!(color.a, 255);
+            }
+            other => panic!("expected FillEllipse, got {other:?}"),
+        }
+
+        assert!(
+            matches!(cmds[2], SceneCommand::PopClip),
+            "last command must be PopClip"
+        );
+    }
+
+    // ── Ellipse: visible=false not emitted ────────────────────────────────
+
+    #[test]
+    fn invisible_ellipse_not_emitted() {
+        let src = r##"zenith version=1 {
+  project id="proj.e2" name="E2"
+  tokens format="zenith-token-v1" {
+    token id="color.fill" type="color" value="#abcdef"
+  }
+  styles {}
+  document id="doc.e2" title="E2" {
+    page id="page.e2" w=(px)100 h=(px)100 {
+      ellipse id="ellipse.hidden" x=(px)0 y=(px)0 w=(px)100 h=(px)100 fill=(token)"color.fill" visible=#false
+    }
+  }
+}
+"##;
+        let doc = parse(src);
+        let result = compile(&doc, &default_provider());
+
+        assert!(
+            result.diagnostics.is_empty(),
+            "unexpected diagnostics: {:?}",
+            result.diagnostics
+        );
+
+        let cmds = &result.scene.commands;
+        // Only PushClip + PopClip; no FillEllipse.
+        assert_eq!(
+            cmds.len(),
+            2,
+            "expected PushClip + PopClip only; got: {:?}",
+            cmds
+        );
+        assert!(matches!(cmds[0], SceneCommand::PushClip { .. }));
+        assert!(matches!(cmds[1], SceneCommand::PopClip));
     }
 }

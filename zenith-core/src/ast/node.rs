@@ -75,6 +75,28 @@ pub struct RectNode {
     pub unknown_props: BTreeMap<String, UnknownProperty>,
 }
 
+/// An `ellipse` node (fill-only; bounded by x/y/w/h bounding box).
+#[derive(Debug, Clone, PartialEq)]
+pub struct EllipseNode {
+    pub id: String,
+    pub name: Option<String>,
+    pub role: Option<String>,
+    pub x: Option<Dimension>,
+    pub y: Option<Dimension>,
+    pub w: Option<Dimension>,
+    pub h: Option<Dimension>,
+    pub style: Option<String>,
+    pub fill: Option<PropertyValue>,
+    pub opacity: Option<f64>,
+    pub visible: Option<bool>,
+    pub locked: Option<bool>,
+    pub rotate: Option<Dimension>,
+    /// Source declaration span, when available.
+    pub source_span: Option<Span>,
+    /// Unknown properties preserved for forward-compat.
+    pub unknown_props: BTreeMap<String, UnknownProperty>,
+}
+
 /// A `text` node.
 #[derive(Debug, Clone, PartialEq)]
 pub struct TextNode {
@@ -121,6 +143,7 @@ pub struct UnknownNode {
 #[derive(Debug, Clone, PartialEq)]
 pub enum Node {
     Rect(RectNode),
+    Ellipse(EllipseNode),
     Text(TextNode),
     Unknown(UnknownNode),
 }

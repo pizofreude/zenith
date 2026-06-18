@@ -233,6 +233,54 @@ impl RasterBackend for TinySkiaBackend {
                     pixmap.fill_rect(rect, &paint, Transform::identity(), None);
                 }
 
+                SceneCommand::FillEllipse { x, y, w, h, color } => {
+                    let fill_rect = (*x, *y, x + w, y + h);
+                    let effective_clip = *clip_stack.last().unwrap_or(&page_clip);
+
+                    // Intersect the bounding box with the current effective clip.
+                    let (ix, iy, ix2, iy2) = match intersect_rects(fill_rect, effective_clip) {
+                        Some(r) => r,
+                        None => continue, // nothing to draw
+                    };
+
+                    let iw = ix2 - ix;
+                    let ih = iy2 - iy;
+
+                    if iw <= 0.0
+                        || ih <= 0.0
+                        || !ix.is_finite()
+                        || !iy.is_finite()
+                        || !iw.is_finite()
+                        || !ih.is_finite()
+                    {
+                        continue;
+                    }
+
+                    let rect = match Rect::from_xywh(ix as f32, iy as f32, iw as f32, ih as f32) {
+                        Some(r) => r,
+                        None => continue,
+                    };
+
+                    // Ellipse is a curved fill — AA-on like glyph outlines
+                    // (deterministic same-machine), unlike axis-aligned rects.
+                    let mut paint = Paint::default();
+                    paint.set_color_rgba8(color.r, color.g, color.b, color.a);
+                    paint.anti_alias = true;
+
+                    let path = match PathBuilder::from_oval(rect) {
+                        Some(p) => p,
+                        None => continue, // degenerate rect: skip
+                    };
+
+                    pixmap.fill_path(
+                        &path,
+                        &paint,
+                        FillRule::Winding,
+                        Transform::identity(),
+                        None,
+                    );
+                }
+
                 SceneCommand::DrawGlyphRun {
                     x,
                     y,
@@ -311,7 +359,8 @@ impl RasterBackend for TinySkiaBackend {
                     }
                 }
 
-                // All other variants are not emitted yet; skip them deterministically.
+                // PopClip when the stack is already at the page clip (depth 0),
+                // and any future variants not yet handled: skip deterministically.
                 _ => {}
             }
         }

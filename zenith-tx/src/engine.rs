@@ -216,6 +216,7 @@ fn find_node_mut<'doc>(doc: &'doc mut Document, id: &str) -> FindResult<'doc> {
         let found = page.children.iter().any(|node| match node {
             Node::Text(t) => t.id == id,
             Node::Rect(r) => r.id == id,
+            Node::Ellipse(e) => e.id == id,
             Node::Unknown(_) => false,
         });
         if found { Some(pi) } else { None }
@@ -252,8 +253,8 @@ fn find_in_children_mut<'a>(children: &'a mut [Node], id: &str) -> Option<FindRe
         .find_map(|(i, node)| match node {
             Node::Text(t) if t.id == id => Some(Hit::Text(i)),
             Node::Rect(r) if r.id == id => Some(Hit::WrongType("rect")),
-            // All other variants (Rect without matching id, Text without
-            // matching id, Unknown) carry no matching id — skip.
+            Node::Ellipse(e) if e.id == id => Some(Hit::WrongType("ellipse")),
+            // All other variants without a matching id, and Unknown: skip.
             _ => None,
         });
 
@@ -304,6 +305,7 @@ fn find_sibling_index(doc: &Document, id: &str) -> SiblingResult {
 fn node_id_of(node: &Node) -> Option<&str> {
     match node {
         Node::Rect(r) => Some(&r.id),
+        Node::Ellipse(e) => Some(&e.id),
         Node::Text(t) => Some(&t.id),
         Node::Unknown(_) => None,
     }
@@ -369,6 +371,20 @@ mod tests {
   document id="doc1" title="T" {
     page id="pg1" w=(px)400 h=(px)300 {
       rect id="box1" x=(px)0 y=(px)0 w=(px)100 h=(px)100
+      text id="lbl" x=(px)10 y=(px)10 w=(px)200 h=(px)40 {
+        span "Hi"
+      }
+    }
+  }
+}"##;
+
+    const ELLIPSE_DOC: &str = r##"zenith version=1 {
+  project id="proj" name="Test"
+  tokens format="zenith-token-v1" { }
+  styles { }
+  document id="doc1" title="T" {
+    page id="pg1" w=(px)400 h=(px)300 {
+      ellipse id="dot" x=(px)0 y=(px)0 w=(px)100 h=(px)100
       text id="lbl" x=(px)10 y=(px)10 w=(px)200 h=(px)40 {
         span "Hi"
       }
@@ -506,6 +522,30 @@ mod tests {
                 .iter()
                 .any(|d| d.code == "tx.wrong_node_type"),
             "expected tx.wrong_node_type diagnostic"
+        );
+        assert_eq!(result.source_after, result.source_before);
+    }
+
+    // ── 5b. SetTextAlign on an ellipse → wrong_node_type, Rejected ───────────
+
+    #[test]
+    fn set_text_align_on_ellipse_wrong_node_type() {
+        let doc = parse(ELLIPSE_DOC);
+        let tx = Transaction {
+            ops: vec![Op::SetTextAlign {
+                node: "dot".to_owned(),
+                align: "center".to_owned(),
+            }],
+        };
+        let result = run_transaction(&doc, &tx).expect("run_transaction should not error");
+
+        assert_eq!(result.status, TxStatus::Rejected);
+        assert!(
+            result
+                .diagnostics
+                .iter()
+                .any(|d| d.code == "tx.wrong_node_type" && d.message.contains("ellipse")),
+            "expected tx.wrong_node_type diagnostic naming the ellipse kind"
         );
         assert_eq!(result.source_after, result.source_before);
     }

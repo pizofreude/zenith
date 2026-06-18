@@ -219,6 +219,41 @@ fn walk_node(
             }
         }
 
+        Node::Ellipse(e) => {
+            register_id(&e.id, seen_ids, diagnostics);
+
+            // Required geometry: x, y, w, h must all be present.
+            check_optional_dim(&e.id, "x", e.x.as_ref(), e.source_span, diagnostics);
+            check_optional_dim(&e.id, "y", e.y.as_ref(), e.source_span, diagnostics);
+            check_optional_dim(&e.id, "w", e.w.as_ref(), e.source_span, diagnostics);
+            check_optional_dim(&e.id, "h", e.h.as_ref(), e.source_span, diagnostics);
+
+            // Visual properties (fill-only; no stroke/radius for ellipse).
+            check_visual_prop(
+                &e.id,
+                "fill",
+                e.fill.as_ref(),
+                VisualExpect::Color,
+                referenced_token_ids,
+                resolved_tokens,
+                diagnostics,
+            );
+
+            // Unknown properties.
+            for prop_name in e.unknown_props.keys() {
+                diagnostics.push(Diagnostic::warning(
+                    "node.unknown_property",
+                    format!(
+                        "ellipse '{}': unknown property '{}' (version-relative; \
+                         may be valid in a later schema version)",
+                        e.id, prop_name
+                    ),
+                    e.source_span,
+                    Some(e.id.clone()),
+                ));
+            }
+        }
+
         Node::Text(t) => {
             register_id(&t.id, seen_ids, diagnostics);
 
@@ -475,7 +510,7 @@ mod tests {
 
     use super::*;
     use crate::ast::document::{Document, DocumentBody, Page};
-    use crate::ast::node::{Node, RectNode, TextNode, UnknownNode};
+    use crate::ast::node::{EllipseNode, Node, RectNode, TextNode, UnknownNode};
     use crate::ast::style::StyleBlock;
     use crate::ast::token::{Token, TokenBlock, TokenLiteral, TokenType, TokenValue};
     use crate::ast::value::{Dimension, PropertyValue, Unit};
@@ -538,6 +573,26 @@ mod tests {
             stroke: None,
             stroke_width: None,
             stroke_alignment: None,
+            opacity: None,
+            visible: None,
+            locked: None,
+            rotate: None,
+            source_span: None,
+            unknown_props: BTreeMap::new(),
+        })
+    }
+
+    fn minimal_ellipse(id: &str, fill: Option<PropertyValue>) -> Node {
+        Node::Ellipse(EllipseNode {
+            id: id.to_owned(),
+            name: None,
+            role: None,
+            x: Some(px(0.0)),
+            y: Some(px(0.0)),
+            w: Some(px(100.0)),
+            h: Some(px(100.0)),
+            style: None,
+            fill,
             opacity: None,
             visible: None,
             locked: None,
@@ -1012,5 +1067,87 @@ mod tests {
             "expected no diagnostics, got: {:?}",
             codes(&report)
         );
+    }
+
+    // ── Ellipse: clean doc produces no errors ─────────────────────────────
+
+    #[test]
+    fn ellipse_clean_doc_no_errors() {
+        let doc = doc_with(
+            vec![color_token("color.fill")],
+            vec![minimal_page(
+                "page.one",
+                vec![minimal_ellipse(
+                    "ellipse.one",
+                    Some(token_ref("color.fill")),
+                )],
+            )],
+        );
+        let report = validate(&doc);
+        assert!(
+            report.diagnostics.is_empty(),
+            "expected no diagnostics for clean ellipse doc, got: {:?}",
+            codes(&report)
+        );
+        assert!(!report.has_errors());
+    }
+
+    // ── Ellipse: missing geometry → node.missing_geometry ─────────────────
+
+    #[test]
+    fn ellipse_missing_w_produces_node_missing_geometry() {
+        let doc = doc_with(
+            vec![],
+            vec![minimal_page(
+                "page.one",
+                vec![Node::Ellipse(EllipseNode {
+                    id: "ellipse.no-w".to_owned(),
+                    name: None,
+                    role: None,
+                    x: Some(px(0.0)),
+                    y: Some(px(0.0)),
+                    w: None, // missing
+                    h: Some(px(100.0)),
+                    style: None,
+                    fill: None,
+                    opacity: None,
+                    visible: None,
+                    locked: None,
+                    rotate: None,
+                    source_span: None,
+                    unknown_props: BTreeMap::new(),
+                })],
+            )],
+        );
+        let report = validate(&doc);
+        assert!(
+            has_code(&report, "node.missing_geometry"),
+            "codes: {:?}",
+            codes(&report)
+        );
+        assert!(report.has_errors());
+    }
+
+    // ── Ellipse: raw literal fill → token.raw_visual_literal ──────────────
+
+    #[test]
+    fn ellipse_fill_raw_literal_produces_raw_visual_literal() {
+        let doc = doc_with(
+            vec![],
+            vec![minimal_page(
+                "page.one",
+                vec![minimal_ellipse(
+                    "ellipse.one",
+                    Some(PropertyValue::Literal("#ff0000".to_owned())),
+                )],
+            )],
+        );
+        let report = validate(&doc);
+        assert!(
+            has_code(&report, "token.raw_visual_literal"),
+            "codes: {:?}",
+            codes(&report)
+        );
+        assert!(report.has_errors());
     }
 }
