@@ -2,7 +2,8 @@
 //! `kdl` 6.x crate.
 
 use crate::ast::Document;
-use crate::error::{ParseError, ParseErrorCode};
+use crate::error::{FormatError, ParseError, ParseErrorCode};
+use crate::format::format_document;
 use crate::parse::transform;
 
 use super::KdlSource;
@@ -49,6 +50,10 @@ impl KdlSource for KdlAdapter {
 
         // Step 3: transform the KDL tree into the Zenith AST.
         transform::transform(&kdl_doc)
+    }
+
+    fn format(&self, doc: &Document) -> Result<Vec<u8>, FormatError> {
+        format_document(doc)
     }
 }
 

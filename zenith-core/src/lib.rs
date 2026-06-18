@@ -8,6 +8,7 @@
 pub mod ast;
 pub mod diagnostics;
 pub mod error;
+pub mod format;
 pub mod parse;
 pub mod tokens;
 pub mod validate;
@@ -19,7 +20,7 @@ pub use ast::{
     UnknownNode, UnknownProperty,
 };
 pub use diagnostics::{Diagnostic, Severity};
-pub use error::{ParseError, ParseErrorCode};
+pub use error::{FormatError, ParseError, ParseErrorCode};
 pub use parse::{KdlAdapter, KdlSource};
 pub use tokens::{ResolvedToken, ResolvedValue, TokenResolution, resolve_tokens};
 pub use validate::{ValidationReport, validate};

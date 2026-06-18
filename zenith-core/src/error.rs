@@ -55,3 +55,31 @@ impl std::fmt::Display for ParseError {
 }
 
 impl std::error::Error for ParseError {}
+
+/// An error emitted by the format layer.
+///
+/// In practice, formatting the minimal v0 node set never fails — return `Err`
+/// only for genuinely un-serializable states (unreachable in valid input, but
+/// the fallible signature is the contract from doc 16).
+#[derive(Debug, Clone, PartialEq)]
+pub struct FormatError {
+    /// Human-readable description of why formatting failed.
+    pub message: String,
+}
+
+impl FormatError {
+    /// Construct a `FormatError` with the given message.
+    pub fn new(message: impl Into<String>) -> Self {
+        Self {
+            message: message.into(),
+        }
+    }
+}
+
+impl std::fmt::Display for FormatError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.message)
+    }
+}
+
+impl std::error::Error for FormatError {}
