@@ -1,0 +1,75 @@
+//! Serialisable DTO types for JSON output.
+//!
+//! These types are defined in the CLI crate — we do NOT add serde to
+//! zenith-core.  Each type maps from zenith-core/zenith-scene types to a
+//! schema-versioned JSON shape.
+
+use serde::Serialize;
+
+/// JSON representation of a [`zenith_core::Diagnostic`].
+#[derive(Debug, Serialize)]
+pub struct DiagnosticJson {
+    pub code: String,
+    pub severity: String,
+    pub message: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub subject_id: Option<String>,
+}
+
+impl From<&zenith_core::Diagnostic> for DiagnosticJson {
+    fn from(d: &zenith_core::Diagnostic) -> Self {
+        Self {
+            code: d.code.clone(),
+            severity: severity_str(&d.severity).to_owned(),
+            message: d.message.clone(),
+            subject_id: d.subject_id.clone(),
+        }
+    }
+}
+
+fn severity_str(s: &zenith_core::Severity) -> &'static str {
+    match s {
+        zenith_core::Severity::Error => "error",
+        zenith_core::Severity::Warning => "warning",
+        zenith_core::Severity::Advisory => "advisory",
+    }
+}
+
+/// Top-level JSON envelope for `validate`.
+#[derive(Debug, Serialize)]
+pub struct ValidateOutput {
+    pub schema: &'static str,
+    pub valid: bool,
+    pub diagnostics: Vec<DiagnosticJson>,
+}
+
+/// Top-level JSON envelope for `fmt`.
+#[derive(Debug, Serialize)]
+pub struct FmtOutput {
+    pub schema: &'static str,
+    pub changed: bool,
+    pub hash: String,
+}
+
+/// A single token entry for `tokens` output.
+#[derive(Debug, Serialize)]
+pub struct TokenEntry {
+    pub id: String,
+    pub token_type: String,
+    pub resolved_value: String,
+}
+
+/// Top-level JSON envelope for `tokens`.
+#[derive(Debug, Serialize)]
+pub struct TokensOutput {
+    pub schema: &'static str,
+    pub tokens: Vec<TokenEntry>,
+    pub diagnostics: Vec<DiagnosticJson>,
+}
+
+/// Top-level JSON envelope for `render`.
+#[derive(Debug, Serialize)]
+pub struct RenderOutput {
+    pub schema: &'static str,
+    pub diagnostics: Vec<DiagnosticJson>,
+}
