@@ -7,6 +7,7 @@ publish.workspace = true
 
 [dependencies]
 zenith-core = { path = "../zenith-core" }
+rustybuzz = "0.20"
 
 [lints]
 workspace = true

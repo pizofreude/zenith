@@ -1,7 +1,15 @@
-//! Text layout and frame geometry for Zenith.
+//! Text-shaping layer for Zenith.
 //!
-//! Owns the text-layout adapter trait (Parley is the first engine behind it),
-//! text measurement and shaping into positioned glyph runs, frame and group
-//! bbox resolution, and the layout result type consumed by scene compilation.
-//! Downstream crates never see engine-specific types; they receive only
-//! Zenith's own glyph-run records.
+//! Shapes a text run into positioned glyphs using `rustybuzz` + `ttf-parser`
+//! (the same proven stack as the sibling `oxipdf` project). All third-party
+//! types are confined to `rustybuzz_engine`; downstream crates see only
+//! Zenith-owned records.
+
+pub mod engine;
+pub mod error;
+pub mod rustybuzz_engine;
+
+// Curated flat re-exports for the public surface.
+pub use engine::{PositionedGlyph, ShapeRequest, TextLayoutEngine, ZenithGlyphRun};
+pub use error::LayoutError;
+pub use rustybuzz_engine::RustybuzzEngine;

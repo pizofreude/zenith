@@ -1,0 +1,79 @@
+//! Zenith-owned text-layout types and the `TextLayoutEngine` trait.
+//!
+//! No third-party shaping or font types appear here. All shaping engines
+//! implement `TextLayoutEngine` and hide their dependencies behind it.
+
+use zenith_core::{FontProvider, FontStyle};
+
+use crate::error::LayoutError;
+
+/// A request to shape a run of text into positioned glyphs.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ShapeRequest<'a> {
+    /// The text to shape.
+    pub text: &'a str,
+    /// Priority-ordered font family preferences.
+    pub families: &'a [String],
+    /// Font weight (e.g. 400 = regular, 700 = bold).
+    pub weight: u16,
+    /// Font style variant.
+    pub style: FontStyle,
+    /// Requested font size in pixels.
+    pub font_size: f32,
+}
+
+/// One positioned glyph, baseline-relative, measured from the run origin in pixels.
+///
+/// Positive x is rightward; positive y is downward (0 = on the baseline).
+#[derive(Debug, Clone, PartialEq)]
+pub struct PositionedGlyph {
+    /// Glyph identifier within the resolved font face.
+    pub glyph_id: u16,
+    /// Horizontal offset from the run origin, in pixels.
+    pub x: f32,
+    /// Vertical offset from the baseline, in pixels (positive = below baseline).
+    pub y: f32,
+}
+
+/// A shaped run of text in a single resolved font.
+///
+/// All values are in pixels. No third-party types appear in any field.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ZenithGlyphRun {
+    /// Stable id of the resolved font face (matches `FontData::id`).
+    ///
+    /// The renderer re-resolves font bytes via `FontProvider::by_id`.
+    pub font_id: String,
+    /// Font size at which the run was shaped, in pixels.
+    pub font_size: f32,
+    /// Ascent in pixels, positive above the baseline.
+    ///
+    /// Baseline placement: `box_top + ascent`.
+    pub ascent: f32,
+    /// Descent magnitude in pixels (positive value; baseline to bottom of descenders).
+    pub descent: f32,
+    /// Recommended line height in pixels: `ascent + descent + line_gap`.
+    pub line_height: f32,
+    /// Total pen advance across the run in pixels.
+    pub advance_width: f32,
+    /// Positioned glyphs, baseline-relative, in run order.
+    pub glyphs: Vec<PositionedGlyph>,
+}
+
+/// Trait implemented by every shaping engine.
+///
+/// Engines are free to resolve fonts, call native shapers, and accumulate any
+/// internal state, but they must not expose third-party types through this trait.
+pub trait TextLayoutEngine {
+    /// Shape `req.text` into a `ZenithGlyphRun` using fonts from `provider`.
+    ///
+    /// # Errors
+    ///
+    /// Returns `LayoutError` if no font can be resolved, if the font bytes are
+    /// malformed, if `units_per_em` is zero, or if any other shaping step fails.
+    fn shape(
+        &self,
+        req: &ShapeRequest<'_>,
+        provider: &dyn FontProvider,
+    ) -> Result<ZenithGlyphRun, LayoutError>;
+}
