@@ -325,4 +325,77 @@ pub enum Op {
         /// The id to assign to the newly created clone.
         new_id: String,
     },
+    /// Wrap a set of sibling nodes inside a new group node.
+    ///
+    /// All `node_ids` must be **direct siblings under the same parent**
+    /// (a page, group, or frame). If any id is not found, or if the ids
+    /// do not all share one common parent, the op is rejected with
+    /// `tx.invalid_parent`.
+    ///
+    /// The new group is inserted at the position of the **earliest** (lowest
+    /// index) member, preserving z-order. The grouped nodes are transferred
+    /// into the new group in their original relative order.
+    ///
+    /// Post-validation catches a `group_id` that collides with an existing
+    /// node id via the `id.duplicate` diagnostic.
+    ///
+    /// **v0 note:** the group is created with `x`/`y` = `None` (no translation
+    /// offset). Children keep their authored coordinates; any visual shift must
+    /// be handled by the caller by adjusting child geometry separately.
+    ///
+    /// JSON example:
+    /// ```json
+    /// {"op":"group","node_ids":["rect1","rect2"],"group_id":"grp-new"}
+    /// ```
+    Group {
+        /// Ids of the nodes to group. Must be ≥ 1 and share a common parent.
+        node_ids: Vec<String>,
+        /// The id to assign to the newly created group node.
+        group_id: String,
+    },
+    /// Dissolve a group node, moving its children up to the group's parent.
+    ///
+    /// The group is replaced in-place by its children (spliced at the group's
+    /// original index), preserving source order.
+    ///
+    /// Rejects with `tx.unknown_node` if `group_id` is not found.
+    /// Rejects with `tx.unsupported_property` ("not a group") if the node is
+    /// not a `group` variant.
+    ///
+    /// **v0 limitation:** the group's own `x`/`y` translation is NOT applied
+    /// to children on ungroup (children keep their authored coordinates). If the
+    /// group had a non-zero `x`/`y` offset, the rendered positions of children
+    /// may shift after ungroup. An advisory is emitted in that case.
+    ///
+    /// JSON example:
+    /// ```json
+    /// {"op":"ungroup","group_id":"grp1"}
+    /// ```
+    Ungroup {
+        /// The id of the group node to dissolve.
+        group_id: String,
+    },
+    /// Move a node to a different container (page, group, or frame).
+    ///
+    /// Rejects with `tx.unknown_node` if `node` is not found.
+    /// Rejects with `tx.invalid_parent` if `new_parent` is not a container
+    /// (page, group, or frame), or if `new_parent` is `node` itself or a
+    /// descendant of `node` (cycle detection).
+    ///
+    /// `position` controls where in the new parent's children the node is
+    /// inserted; defaults to [`Position::Last`] (top of z-order).
+    ///
+    /// JSON example:
+    /// ```json
+    /// {"op":"reparent","node":"rect1","new_parent":"grp1","position":{"at":"last"}}
+    /// ```
+    Reparent {
+        /// The stable id of the node to move.
+        node: String,
+        /// The id of the container to move the node into.
+        new_parent: String,
+        /// Where to insert the node in the new parent. Defaults to `last`.
+        #[serde(default)]
+        position: Position,
+    },
 }

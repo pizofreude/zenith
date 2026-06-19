@@ -3,9 +3,11 @@
 //! This module is pure: it performs no file I/O and does not mutate the input
 //! document (it works on a clone). Dry-run vs. apply is the caller's concern.
 
+use std::collections::BTreeMap;
+
 use zenith_core::{
-    Diagnostic, Dimension, Document, KdlAdapter, KdlSource, Node, Point, PropertyValue, Severity,
-    TextSpan, Unit, validate,
+    Diagnostic, Dimension, Document, GroupNode, KdlAdapter, KdlSource, Node, Point, PropertyValue,
+    Severity, TextSpan, Unit, validate,
 };
 
 use crate::op::{Op, OpPoint, OpSpan, Position, Transaction};
@@ -178,6 +180,19 @@ fn apply_op(
             new_id,
         } => {
             apply_duplicate_node(node_id, new_id, doc, diagnostics, affected);
+        }
+        Op::Group { node_ids, group_id } => {
+            apply_group(node_ids, group_id, doc, diagnostics, affected);
+        }
+        Op::Ungroup { group_id } => {
+            apply_ungroup(group_id, doc, diagnostics, affected);
+        }
+        Op::Reparent {
+            node: node_id,
+            new_parent,
+            position,
+        } => {
+            apply_reparent(node_id, new_parent, position, doc, diagnostics, affected);
         }
     }
 }
@@ -1040,44 +1055,9 @@ fn apply_add_node(
     };
 
     // 3. Resolve the insertion index against the current children.
-    let idx = match position {
-        Position::Last => children.len(),
-        Position::First => 0,
-        Position::Index { index } => (*index).min(children.len()),
-        Position::Before { id } => {
-            match children
-                .iter()
-                .position(|n| node_id_of(n) == Some(id.as_str()))
-            {
-                Some(i) => i,
-                None => {
-                    diagnostics.push(Diagnostic::error(
-                        "tx.unknown_node",
-                        format!("sibling {:?} not found in parent {:?}", id, parent),
-                        None,
-                        Some(id.to_owned()),
-                    ));
-                    return;
-                }
-            }
-        }
-        Position::After { id } => {
-            match children
-                .iter()
-                .position(|n| node_id_of(n) == Some(id.as_str()))
-            {
-                Some(i) => i + 1,
-                None => {
-                    diagnostics.push(Diagnostic::error(
-                        "tx.unknown_node",
-                        format!("sibling {:?} not found in parent {:?}", id, parent),
-                        None,
-                        Some(id.to_owned()),
-                    ));
-                    return;
-                }
-            }
-        }
+    let idx = match resolve_position(position, children, parent, diagnostics) {
+        Some(i) => i,
+        None => return, // resolve_position already pushed a diagnostic
     };
 
     // 4. Capture the new node's id (if any) before moving it in, then insert.
@@ -1242,25 +1222,7 @@ fn apply_duplicate_node(
         let Some(page) = doc.body.pages.get(pi) else {
             return; // unreachable: pi came from the enumerate scan above.
         };
-        // find_in_children_any_mut logic, but shared (we only need the variant).
-        fn find_shared<'a>(children: &'a [Node], id: &str) -> Option<&'a Node> {
-            for node in children {
-                if node_id_of(node) == Some(id) {
-                    return Some(node);
-                }
-                let hit = match node {
-                    Node::Frame(f) => find_shared(&f.children, id),
-                    Node::Group(g) => find_shared(&g.children, id),
-                    _ => None,
-                };
-                if hit.is_some() {
-                    return hit;
-                }
-            }
-            None
-        }
-
-        if let Some(src) = find_shared(&page.children, node_id)
+        if let Some(src) = find_node_shared(&page.children, node_id)
             && node_is_container(src)
         {
             let kind = node_kind_str(src);
@@ -1466,6 +1428,515 @@ fn node_id_of(node: &Node) -> Option<&str> {
         Node::Polyline(p) => Some(&p.id),
         Node::Unknown(_) => None,
     }
+}
+
+// ── Group ─────────────────────────────────────────────────────────────────────
+
+/// Resolve the index of a `Position` within `children`, emitting a diagnostic
+/// and returning `None` if a `Before`/`After` sibling id cannot be found.
+///
+/// Extracted so both `apply_add_node` and `apply_reparent` share identical
+/// resolution logic without duplication.
+fn resolve_position(
+    position: &Position,
+    children: &[Node],
+    parent_id: &str,
+    diagnostics: &mut Vec<Diagnostic>,
+) -> Option<usize> {
+    match position {
+        Position::Last => Some(children.len()),
+        Position::First => Some(0),
+        Position::Index { index } => Some((*index).min(children.len())),
+        Position::Before { id } => {
+            match children
+                .iter()
+                .position(|n| node_id_of(n) == Some(id.as_str()))
+            {
+                Some(i) => Some(i),
+                None => {
+                    diagnostics.push(Diagnostic::error(
+                        "tx.unknown_node",
+                        format!("sibling {:?} not found in parent {:?}", id, parent_id),
+                        None,
+                        Some(id.to_owned()),
+                    ));
+                    None
+                }
+            }
+        }
+        Position::After { id } => {
+            match children
+                .iter()
+                .position(|n| node_id_of(n) == Some(id.as_str()))
+            {
+                Some(i) => Some(i + 1),
+                None => {
+                    diagnostics.push(Diagnostic::error(
+                        "tx.unknown_node",
+                        format!("sibling {:?} not found in parent {:?}", id, parent_id),
+                        None,
+                        Some(id.to_owned()),
+                    ));
+                    None
+                }
+            }
+        }
+    }
+}
+
+/// Find which page directly contains (at the top level of `page.children`) ALL
+/// of the ids in `node_ids`. Returns `(page_index, sorted_indices)` where
+/// `sorted_indices` is the list of positions within `page.children` in
+/// ascending order, or `None` if the ids are not all siblings on one page.
+///
+/// We walk each page's *direct* children only — a flat O(pages × ids) scan.
+/// Nesting is handled by a second pass that descends into containers.
+fn find_common_parent_children_mut<'doc>(
+    doc: &'doc mut Document,
+    node_ids: &[String],
+) -> Option<&'doc mut Vec<Node>> {
+    // Phase 1 (shared scan): find which page + container has ALL ids as direct
+    // children.  We search each page's full subtree of containers.
+    struct Hit {
+        page_index: usize,
+        /// If `None` the parent is the page itself; otherwise it's the container id.
+        container_id: Option<String>,
+    }
+
+    let hit: Option<Hit> = 'outer: {
+        for (pi, page) in doc.body.pages.iter().enumerate() {
+            // Check if all are direct children of this page.
+            if node_ids.iter().all(|id| {
+                page.children
+                    .iter()
+                    .any(|n| node_id_of(n) == Some(id.as_str()))
+            }) {
+                break 'outer Some(Hit {
+                    page_index: pi,
+                    container_id: None,
+                });
+            }
+            // Walk containers within this page.
+            if let Some(cid) = find_container_with_all_children(&page.children, node_ids) {
+                break 'outer Some(Hit {
+                    page_index: pi,
+                    container_id: Some(cid),
+                });
+            }
+        }
+        None
+    };
+
+    let Hit {
+        page_index,
+        container_id,
+    } = hit?;
+
+    // Phase 2 (exclusive borrow): return a mutable ref to the right vec.
+    match container_id {
+        None => doc.body.pages.get_mut(page_index).map(|p| &mut p.children),
+        Some(cid) => find_container_children_mut(doc, &cid),
+    }
+}
+
+/// Walk `children` recursively and return the id of the first container whose
+/// *direct* children include all ids in `node_ids`. Returns `None` if no such
+/// container exists in this subtree.
+fn find_container_with_all_children(children: &[Node], node_ids: &[String]) -> Option<String> {
+    for node in children {
+        let (container_id, grandchildren) = match node {
+            Node::Frame(f) => (f.id.as_str(), f.children.as_slice()),
+            Node::Group(g) => (g.id.as_str(), g.children.as_slice()),
+            _ => continue,
+        };
+        if node_ids.iter().all(|id| {
+            grandchildren
+                .iter()
+                .any(|n| node_id_of(n) == Some(id.as_str()))
+        }) {
+            return Some(container_id.to_owned());
+        }
+        if let Some(found) = find_container_with_all_children(grandchildren, node_ids) {
+            return Some(found);
+        }
+    }
+    None
+}
+
+fn apply_group(
+    node_ids: &[String],
+    group_id: &str,
+    doc: &mut Document,
+    diagnostics: &mut Vec<Diagnostic>,
+    affected: &mut Vec<String>,
+) {
+    // Require at least one id.
+    if node_ids.is_empty() {
+        diagnostics.push(Diagnostic::error(
+            "tx.invalid_parent",
+            "group requires at least one node id".to_owned(),
+            None,
+            None,
+        ));
+        return;
+    }
+
+    // Phase 1: locate the common parent children vec (shared-then-exclusive
+    // two-phase, handled inside find_common_parent_children_mut).
+    let children = match find_common_parent_children_mut(doc, node_ids) {
+        Some(c) => c,
+        None => {
+            diagnostics.push(Diagnostic::error(
+                "tx.invalid_parent",
+                "group requires all nodes to share a parent".to_owned(),
+                None,
+                None,
+            ));
+            return;
+        }
+    };
+
+    // Phase 2: collect the indices of the named nodes within this children vec,
+    // in ascending order so we can determine insert position and remove cleanly.
+    let mut indices: Vec<usize> = node_ids
+        .iter()
+        .filter_map(|id| {
+            children
+                .iter()
+                .position(|n| node_id_of(n) == Some(id.as_str()))
+        })
+        .collect();
+
+    // All ids must resolve (filter_map would silently drop missing ones).
+    if indices.len() != node_ids.len() {
+        diagnostics.push(Diagnostic::error(
+            "tx.invalid_parent",
+            "group requires all nodes to share a parent".to_owned(),
+            None,
+            None,
+        ));
+        return;
+    }
+
+    indices.sort_unstable();
+
+    // Insert position = index of the first (lowest) member.
+    // indices is non-empty: node_ids is non-empty and all ids resolved (guarded
+    // by the length check above), so .first() will always be Some.
+    let Some(&insert_at) = indices.first() else {
+        return; // unreachable: guarded by node_ids.is_empty() check above
+    };
+
+    // Extract the nodes in their original relative order (lowest index first).
+    // indices is already sorted ascending, so this produces source-order children.
+    // All indices came from `.position()` on the same `children` slice and the
+    // slice has not been mutated since — `.get()` returns Some for all of them.
+    let group_children: Vec<Node> = indices
+        .iter()
+        .filter_map(|&i| children.get(i).cloned())
+        .collect();
+
+    // Remove from back to front to keep earlier indices stable.
+    for &i in indices.iter().rev() {
+        children.remove(i);
+    }
+
+    // Adjust insert_at: each removal of an index < insert_at shifts insert_at
+    // down by one.  Since we sorted indices ascending and insert_at == indices[0],
+    // all removed indices that were < insert_at have already been removed by the
+    // rev-order loop above.  Actually insert_at is indices[0] (the minimum), so
+    // no indices precede it — insert_at is stable after we remove >= insert_at
+    // indices. We need to count how many indices were strictly less than insert_at
+    // before the removals: since insert_at = indices[0] (minimum), zero indices
+    // are smaller. So insert_at doesn't change.
+    let insert_at = insert_at.min(children.len());
+
+    // Build the group node with all fields at defaults (None / empty).
+    // v0: x/y are None — no translation offset; authors must adjust child
+    // geometry themselves if a specific group origin is needed.
+    let group_node = Node::Group(GroupNode {
+        id: group_id.to_owned(),
+        name: None,
+        role: None,
+        x: None,
+        y: None,
+        w: None,
+        h: None,
+        opacity: None,
+        visible: None,
+        locked: None,
+        rotate: None,
+        style: None,
+        children: group_children,
+        source_span: None,
+        unknown_props: BTreeMap::new(),
+    });
+
+    children.insert(insert_at, group_node);
+    record_affected(group_id, affected);
+    // Post-validation catches group_id collision (id.duplicate).
+}
+
+// ── Ungroup ───────────────────────────────────────────────────────────────────
+
+fn apply_ungroup(
+    group_id: &str,
+    doc: &mut Document,
+    diagnostics: &mut Vec<Diagnostic>,
+    affected: &mut Vec<String>,
+) {
+    // Phase 1 (shared scan): verify node exists and is a group; also capture
+    // whether it has a non-zero x/y (for the advisory) and its page index.
+    struct GroupInfo {
+        page_index: usize,
+        has_nonzero_offset: bool,
+    }
+
+    let info: Option<Result<GroupInfo, &'static str>> = {
+        let mut result = None;
+        'outer: for (pi, page) in doc.body.pages.iter().enumerate() {
+            if let Some(node) = find_node_shared(&page.children, group_id) {
+                let info = match node {
+                    Node::Group(g) => {
+                        let has_offset = g.x.as_ref().map(|d| d.value != 0.0).unwrap_or(false)
+                            || g.y.as_ref().map(|d| d.value != 0.0).unwrap_or(false);
+                        Ok(GroupInfo {
+                            page_index: pi,
+                            has_nonzero_offset: has_offset,
+                        })
+                    }
+                    _ => Err("not a group"),
+                };
+                result = Some(info);
+                break 'outer;
+            }
+        }
+        result
+    };
+
+    let info = match info {
+        None => {
+            diagnostics.push(Diagnostic::error(
+                "tx.unknown_node",
+                format!("node {:?} not found in document", group_id),
+                None,
+                Some(group_id.to_owned()),
+            ));
+            return;
+        }
+        Some(Err(reason)) => {
+            diagnostics.push(Diagnostic::error(
+                "tx.unsupported_property",
+                format!("ungroup: {:?} is {}", group_id, reason),
+                None,
+                Some(group_id.to_owned()),
+            ));
+            return;
+        }
+        Some(Ok(info)) => info,
+    };
+
+    // Advisory: v0 limitation — group x/y offset is not propagated to children.
+    if info.has_nonzero_offset {
+        diagnostics.push(Diagnostic::advisory(
+            "tx.noop",
+            format!(
+                "ungroup: group {:?} has a non-zero x/y offset; v0 does not \
+                 apply the offset to children on ungroup — child positions may \
+                 shift visually",
+                group_id
+            ),
+            None,
+            Some(group_id.to_owned()),
+        ));
+    }
+
+    // Phase 2 (exclusive borrow): splice the group's children in-place.
+    let Some(page) = doc.body.pages.get_mut(info.page_index) else {
+        return; // unreachable: page_index came from the shared scan above.
+    };
+
+    // Find and remove the group node from the page's subtree, then splice.
+    splice_ungroup(&mut page.children, group_id);
+
+    record_affected(group_id, affected);
+}
+
+/// Walk `children` to find the group with `group_id`, remove it, and insert
+/// its children at the same index. Returns `true` if the group was found and
+/// spliced, `false` otherwise (to continue recursion).
+fn splice_ungroup(children: &mut Vec<Node>, group_id: &str) -> bool {
+    // Check direct children first.
+    if let Some(i) = children
+        .iter()
+        .position(|n| node_id_of(n) == Some(group_id))
+    {
+        // We confirmed it's a group in the shared-scan phase; use .get() for
+        // checked access — the match arm handles the unreachable-but-safe case.
+        let group_children = match children.get(i) {
+            Some(Node::Group(g)) => g.children.clone(),
+            _ => return false, // unreachable under normal flow
+        };
+        children.remove(i);
+        // Insert the group's children at the same position, in order.
+        for (offset, child) in group_children.into_iter().enumerate() {
+            children.insert(i + offset, child);
+        }
+        return true;
+    }
+    // Descend into nested containers.
+    for child in children.iter_mut() {
+        let grandchildren = match child {
+            Node::Frame(f) => &mut f.children,
+            Node::Group(g) => &mut g.children,
+            _ => continue,
+        };
+        if splice_ungroup(grandchildren, group_id) {
+            return true;
+        }
+    }
+    false
+}
+
+/// Shared-borrow tree walk: find a node with `id` anywhere in `children`.
+fn find_node_shared<'a>(children: &'a [Node], id: &str) -> Option<&'a Node> {
+    for node in children {
+        if node_id_of(node) == Some(id) {
+            return Some(node);
+        }
+        let grandchildren = match node {
+            Node::Frame(f) => f.children.as_slice(),
+            Node::Group(g) => g.children.as_slice(),
+            _ => continue,
+        };
+        if let Some(found) = find_node_shared(grandchildren, id) {
+            return Some(found);
+        }
+    }
+    None
+}
+
+// ── Reparent ──────────────────────────────────────────────────────────────────
+
+fn apply_reparent(
+    node_id: &str,
+    new_parent: &str,
+    position: &Position,
+    doc: &mut Document,
+    diagnostics: &mut Vec<Diagnostic>,
+    affected: &mut Vec<String>,
+) {
+    // Phase 1 (shared scan): verify the node exists and capture the subtree so
+    // we can run the cycle check without a mutable borrow.
+    let node_page_index = doc.body.pages.iter().enumerate().find_map(|(pi, page)| {
+        if page.children.iter().any(|n| subtree_contains(n, node_id)) {
+            Some(pi)
+        } else {
+            None
+        }
+    });
+
+    let pi = match node_page_index {
+        Some(pi) => pi,
+        None => {
+            diagnostics.push(Diagnostic::error(
+                "tx.unknown_node",
+                format!("node {:?} not found in document", node_id),
+                None,
+                Some(node_id.to_owned()),
+            ));
+            return;
+        }
+    };
+
+    // Cycle check (shared borrow): new_parent must not be node itself or a
+    // descendant of node.  We locate the node in the shared slice and run
+    // subtree_contains on it.
+    {
+        let page = match doc.body.pages.get(pi) {
+            Some(p) => p,
+            None => return, // unreachable
+        };
+        if let Some(node_ref) = find_node_shared(&page.children, node_id)
+            && subtree_contains(node_ref, new_parent)
+        {
+            diagnostics.push(Diagnostic::error(
+                "tx.invalid_parent",
+                format!(
+                    "cannot reparent {:?} into {:?}: new_parent is within \
+                     the node's own subtree",
+                    node_id, new_parent
+                ),
+                None,
+                Some(new_parent.to_owned()),
+            ));
+            return;
+        }
+        // Shared borrow of `page` ends here.
+    }
+
+    // Phase 2 (exclusive borrows): remove then re-insert.
+    // Step 2a — remove the node from its current parent.
+    let node = {
+        // We need a mutable borrow of the page to remove; we know the page index.
+        let page = match doc.body.pages.get_mut(pi) {
+            Some(p) => p,
+            None => return, // unreachable
+        };
+        match remove_node_by_id(&mut page.children, node_id) {
+            Some(n) => n,
+            None => {
+                // Unexpected: the shared scan found it but remove didn't.
+                diagnostics.push(Diagnostic::error(
+                    "tx.unknown_node",
+                    format!("node {:?} disappeared during reparent", node_id),
+                    None,
+                    Some(node_id.to_owned()),
+                ));
+                return;
+            }
+        }
+    };
+    // The mutable borrow of `doc.body.pages[pi]` ends here.
+
+    // Step 2b — locate the new parent's children vec.
+    // `find_container_children_mut` handles page ids AND nested container ids.
+    let new_children = match find_container_children_mut(doc, new_parent) {
+        Some(c) => c,
+        None => {
+            // new_parent is not a container — roll back by re-inserting the node
+            // at the end of its original page (best-effort; the transaction will
+            // be rejected by the error diagnostic anyway).
+            if let Some(page) = doc.body.pages.get_mut(pi) {
+                page.children.push(node);
+            }
+            diagnostics.push(Diagnostic::error(
+                "tx.invalid_parent",
+                format!(
+                    "no container with id {:?} (new_parent must be a page, group, or frame)",
+                    new_parent
+                ),
+                None,
+                Some(new_parent.to_owned()),
+            ));
+            return;
+        }
+    };
+
+    // Step 2c — resolve the insertion index and insert.
+    let idx = match resolve_position(position, new_children, new_parent, diagnostics) {
+        Some(i) => i,
+        None => {
+            // resolve_position already pushed a diagnostic; roll back.
+            if let Some(page) = doc.body.pages.get_mut(pi) {
+                page.children.push(node);
+            }
+            return;
+        }
+    };
+
+    new_children.insert(idx, node);
+    record_affected(node_id, affected);
 }
 
 // ── Utility ───────────────────────────────────────────────────────────────────
@@ -3801,6 +4272,388 @@ mod tests {
                     node: "orig".to_owned(),
                     new_id: "orig-copy".to_owned(),
                 }],
+            }
+        );
+    }
+
+    // ── Group / Ungroup / Reparent test documents ─────────────────────────────
+
+    /// Two sibling rects on a page; used for group/reparent tests.
+    const TWO_SIBLING_RECTS: &str = r##"zenith version=1 {
+  project id="proj" name="Test"
+  tokens format="zenith-token-v1" { }
+  styles { }
+  document id="doc1" title="T" {
+    page id="pg1" w=(px)400 h=(px)300 {
+      rect id="r1" x=(px)0 y=(px)0 w=(px)100 h=(px)100
+      rect id="r2" x=(px)0 y=(px)0 w=(px)100 h=(px)100
+    }
+  }
+}"##;
+
+    /// A page with a group that already exists (for ungroup / reparent tests).
+    const PAGE_WITH_GROUP: &str = r##"zenith version=1 {
+  project id="proj" name="Test"
+  tokens format="zenith-token-v1" { }
+  styles { }
+  document id="doc1" title="T" {
+    page id="pg1" w=(px)400 h=(px)300 {
+      group id="grp1" {
+        rect id="r1" x=(px)0 y=(px)0 w=(px)100 h=(px)100
+        rect id="r2" x=(px)0 y=(px)0 w=(px)100 h=(px)100
+      }
+      rect id="r3" x=(px)0 y=(px)0 w=(px)50 h=(px)50
+    }
+  }
+}"##;
+
+    /// A page with a group that has a non-zero x/y offset (advisory test).
+    const PAGE_WITH_OFFSET_GROUP: &str = r##"zenith version=1 {
+  project id="proj" name="Test"
+  tokens format="zenith-token-v1" { }
+  styles { }
+  document id="doc1" title="T" {
+    page id="pg1" w=(px)400 h=(px)300 {
+      group id="grp1" x=(px)50 y=(px)20 {
+        rect id="r1" x=(px)0 y=(px)0 w=(px)100 h=(px)100
+      }
+    }
+  }
+}"##;
+
+    /// A page with a group nested inside another group (cycle check + reparent).
+    const NESTED_GROUPS: &str = r##"zenith version=1 {
+  project id="proj" name="Test"
+  tokens format="zenith-token-v1" { }
+  styles { }
+  document id="doc1" title="T" {
+    page id="pg1" w=(px)400 h=(px)300 {
+      group id="outer" {
+        group id="inner" {
+          rect id="r1" x=(px)0 y=(px)0 w=(px)50 h=(px)50
+        }
+      }
+    }
+  }
+}"##;
+
+    // ── Group tests ───────────────────────────────────────────────────────────
+
+    /// Group two sibling rects → parent now has one group containing both,
+    /// inserted at the position of the first (r1's original index = 0).
+    #[test]
+    fn group_two_sibling_rects() {
+        let doc = parse(TWO_SIBLING_RECTS);
+        let tx = Transaction {
+            ops: vec![Op::Group {
+                node_ids: vec!["r1".to_owned(), "r2".to_owned()],
+                group_id: "grp-new".to_owned(),
+            }],
+        };
+        let result = run_transaction(&doc, &tx).expect("run_transaction must not error");
+
+        assert_eq!(
+            result.status,
+            TxStatus::Accepted,
+            "diagnostics: {:?}",
+            result.diagnostics
+        );
+        assert!(
+            result.affected_node_ids.contains(&"grp-new".to_owned()),
+            "grp-new must be in affected_node_ids"
+        );
+        // The page should now contain exactly one top-level node: the group.
+        assert!(
+            result.source_after.contains("id=\"grp-new\""),
+            "source_after must contain the new group id"
+        );
+        // r1 and r2 are inside the group, not at the page level.
+        // Both ids should still appear in the source (as group children).
+        assert!(
+            result.source_after.contains("id=\"r1\""),
+            "r1 must appear inside the group"
+        );
+        assert!(
+            result.source_after.contains("id=\"r2\""),
+            "r2 must appear inside the group"
+        );
+        // r1 must appear before r2 in source_after (relative order preserved).
+        let pos_r1 = result
+            .source_after
+            .find("id=\"r1\"")
+            .expect("r1 in source_after");
+        let pos_r2 = result
+            .source_after
+            .find("id=\"r2\"")
+            .expect("r2 in source_after");
+        assert!(pos_r1 < pos_r2, "r1 must precede r2 inside the group");
+        // The group must appear before both rects in source_after (group wraps them).
+        let pos_grp = result
+            .source_after
+            .find("id=\"grp-new\"")
+            .expect("grp-new in source_after");
+        assert!(pos_grp < pos_r1, "group node must open before its children");
+    }
+
+    /// Attempting to group nodes that do not share a parent → tx.invalid_parent.
+    #[test]
+    fn group_non_siblings_rejected() {
+        let doc = parse(PAGE_WITH_GROUP);
+        // r1 is inside grp1, r3 is a top-level sibling of grp1 → different parents.
+        let tx = Transaction {
+            ops: vec![Op::Group {
+                node_ids: vec!["r1".to_owned(), "r3".to_owned()],
+                group_id: "grp-bad".to_owned(),
+            }],
+        };
+        let result = run_transaction(&doc, &tx).expect("run_transaction must not error");
+
+        assert_eq!(result.status, TxStatus::Rejected);
+        assert!(
+            result
+                .diagnostics
+                .iter()
+                .any(|d| d.code == "tx.invalid_parent"),
+            "expected tx.invalid_parent; got: {:?}",
+            result.diagnostics
+        );
+        assert_eq!(result.source_after, result.source_before);
+    }
+
+    // ── Ungroup tests ─────────────────────────────────────────────────────────
+
+    /// Ungroup a group → its children move up to the parent in order, group gone.
+    #[test]
+    fn ungroup_splices_children_in_place() {
+        let doc = parse(PAGE_WITH_GROUP);
+        let tx = Transaction {
+            ops: vec![Op::Ungroup {
+                group_id: "grp1".to_owned(),
+            }],
+        };
+        let result = run_transaction(&doc, &tx).expect("run_transaction must not error");
+
+        // AcceptedWithWarnings is fine; exact status depends on post-validate.
+        assert_ne!(
+            result.status,
+            TxStatus::Rejected,
+            "ungroup must not be rejected; diagnostics: {:?}",
+            result.diagnostics
+        );
+        // The group id should no longer appear in source_after.
+        assert!(
+            !result.source_after.contains("id=\"grp1\""),
+            "group grp1 must be gone from source_after;\n{}",
+            result.source_after
+        );
+        // r1 and r2 must still be present (now at page level).
+        assert!(
+            result.source_after.contains("id=\"r1\""),
+            "r1 must appear in source_after"
+        );
+        assert!(
+            result.source_after.contains("id=\"r2\""),
+            "r2 must appear in source_after"
+        );
+        // r1 must appear before r2 (order preserved).
+        let pos_r1 = result
+            .source_after
+            .find("id=\"r1\"")
+            .expect("r1 in source_after");
+        let pos_r2 = result
+            .source_after
+            .find("id=\"r2\"")
+            .expect("r2 in source_after");
+        assert!(pos_r1 < pos_r2, "r1 must precede r2 after ungroup");
+        // r3 must still be present.
+        assert!(
+            result.source_after.contains("id=\"r3\""),
+            "r3 must remain in source_after"
+        );
+    }
+
+    /// Ungrouping a node that is not a group → tx.unsupported_property.
+    #[test]
+    fn ungroup_non_group_rejected() {
+        let doc = parse(PAGE_WITH_GROUP);
+        let tx = Transaction {
+            ops: vec![Op::Ungroup {
+                group_id: "r1".to_owned(), // r1 is a rect, not a group
+            }],
+        };
+        let result = run_transaction(&doc, &tx).expect("run_transaction must not error");
+
+        assert_eq!(result.status, TxStatus::Rejected);
+        assert!(
+            result
+                .diagnostics
+                .iter()
+                .any(|d| d.code == "tx.unsupported_property"),
+            "expected tx.unsupported_property; got: {:?}",
+            result.diagnostics
+        );
+        assert_eq!(result.source_after, result.source_before);
+    }
+
+    /// Ungrouping a group with non-zero x/y emits an advisory but still applies.
+    #[test]
+    fn ungroup_with_offset_emits_advisory() {
+        let doc = parse(PAGE_WITH_OFFSET_GROUP);
+        let tx = Transaction {
+            ops: vec![Op::Ungroup {
+                group_id: "grp1".to_owned(),
+            }],
+        };
+        let result = run_transaction(&doc, &tx).expect("run_transaction must not error");
+
+        // Must not be rejected.
+        assert_ne!(
+            result.status,
+            TxStatus::Rejected,
+            "ungroup with offset must not be rejected; diagnostics: {:?}",
+            result.diagnostics
+        );
+        // Advisory (tx.noop) must be present.
+        assert!(
+            result.diagnostics.iter().any(|d| d.code == "tx.noop"),
+            "expected tx.noop advisory for offset group; got: {:?}",
+            result.diagnostics
+        );
+        // Group must be gone; r1 must remain.
+        assert!(
+            !result.source_after.contains("id=\"grp1\""),
+            "group must be dissolved"
+        );
+        assert!(
+            result.source_after.contains("id=\"r1\""),
+            "r1 must survive ungroup"
+        );
+    }
+
+    // ── Reparent tests ────────────────────────────────────────────────────────
+
+    /// Move a top-level rect into an existing group.
+    #[test]
+    fn reparent_rect_into_group() {
+        let doc = parse(PAGE_WITH_GROUP);
+        // r3 is a top-level rect; move it into grp1.
+        let tx = Transaction {
+            ops: vec![Op::Reparent {
+                node: "r3".to_owned(),
+                new_parent: "grp1".to_owned(),
+                position: Position::Last,
+            }],
+        };
+        let result = run_transaction(&doc, &tx).expect("run_transaction must not error");
+
+        assert_eq!(
+            result.status,
+            TxStatus::Accepted,
+            "diagnostics: {:?}",
+            result.diagnostics
+        );
+        assert!(
+            result.affected_node_ids.contains(&"r3".to_owned()),
+            "r3 must be in affected_node_ids"
+        );
+        // r3 must still be present somewhere in the output.
+        assert!(
+            result.source_after.contains("id=\"r3\""),
+            "r3 must appear in source_after"
+        );
+        // grp1 must contain r3 (grp1 opens before r3 in the serialised form).
+        let pos_grp = result
+            .source_after
+            .find("id=\"grp1\"")
+            .expect("grp1 in source_after");
+        let pos_r3 = result
+            .source_after
+            .find("id=\"r3\"")
+            .expect("r3 in source_after");
+        assert!(
+            pos_grp < pos_r3,
+            "r3 must appear after grp1 opens (inside it)"
+        );
+    }
+
+    /// Reparent into a non-container (a rect) → tx.invalid_parent.
+    #[test]
+    fn reparent_into_non_container_rejected() {
+        let doc = parse(PAGE_WITH_GROUP);
+        let tx = Transaction {
+            ops: vec![Op::Reparent {
+                node: "r3".to_owned(),
+                new_parent: "r1".to_owned(), // r1 is a rect, not a container
+                position: Position::Last,
+            }],
+        };
+        let result = run_transaction(&doc, &tx).expect("run_transaction must not error");
+
+        assert_eq!(result.status, TxStatus::Rejected);
+        assert!(
+            result
+                .diagnostics
+                .iter()
+                .any(|d| d.code == "tx.invalid_parent"),
+            "expected tx.invalid_parent; got: {:?}",
+            result.diagnostics
+        );
+        assert_eq!(result.source_after, result.source_before);
+    }
+
+    /// Reparent a group into its own child group → cycle → tx.invalid_parent.
+    #[test]
+    fn reparent_into_own_subtree_rejected() {
+        let doc = parse(NESTED_GROUPS);
+        // Try to move `outer` into `inner` (inner is a descendant of outer).
+        let tx = Transaction {
+            ops: vec![Op::Reparent {
+                node: "outer".to_owned(),
+                new_parent: "inner".to_owned(),
+                position: Position::Last,
+            }],
+        };
+        let result = run_transaction(&doc, &tx).expect("run_transaction must not error");
+
+        assert_eq!(result.status, TxStatus::Rejected);
+        assert!(
+            result
+                .diagnostics
+                .iter()
+                .any(|d| d.code == "tx.invalid_parent"),
+            "expected tx.invalid_parent (cycle); got: {:?}",
+            result.diagnostics
+        );
+        assert_eq!(result.source_after, result.source_before);
+    }
+
+    // ── Serde round-trip: group / ungroup / reparent ──────────────────────────
+
+    #[test]
+    fn from_json_group_ungroup_reparent_round_trip() {
+        let json = r#"{"ops":[
+            {"op":"group","node_ids":["r1","r2"],"group_id":"grp-new"},
+            {"op":"ungroup","group_id":"grp1"},
+            {"op":"reparent","node":"r3","new_parent":"grp1","position":{"at":"first"}}
+        ]}"#;
+        let tx = Transaction::from_json(json).expect("parse JSON");
+        assert_eq!(
+            tx,
+            Transaction {
+                ops: vec![
+                    Op::Group {
+                        node_ids: vec!["r1".to_owned(), "r2".to_owned()],
+                        group_id: "grp-new".to_owned(),
+                    },
+                    Op::Ungroup {
+                        group_id: "grp1".to_owned(),
+                    },
+                    Op::Reparent {
+                        node: "r3".to_owned(),
+                        new_parent: "grp1".to_owned(),
+                        position: Position::First,
+                    },
+                ],
             }
         );
     }
