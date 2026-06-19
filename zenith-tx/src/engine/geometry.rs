@@ -1,7 +1,7 @@
 //! Geometry op application: `set_geometry` and `align_nodes`, plus the bbox
 //! geometry accessors they share.
 
-use zenith_core::{Diagnostic, Dimension, Document, Node, dim_to_px};
+use zenith_core::{Diagnostic, Dimension, Document, Node, Unit, dim_to_px};
 
 use super::{
     find_node_any_mut, find_node_shared, node_kind_str, px, record_affected, subtree_contains,
@@ -9,6 +9,24 @@ use super::{
 
 /// Valid alignment directions for `Op::AlignNodes`.
 const VALID_ALIGN_DIRS: &[&str] = &["left", "hcenter", "right", "top", "vcenter", "bottom"];
+
+/// Parse an explicit dimension string of the canonical `"(unit)value"` form
+/// (e.g. `"(px)120"`, `"(pt)90"`) into a px magnitude.
+///
+/// Reuses the canonical [`Unit::from_annotation`] + [`dim_to_px`] pair so the
+/// arithmetic matches the rest of the engine. Returns `None` if the string is
+/// not parenthesized-unit-prefixed, the numeric tail is not a finite number, or
+/// the unit does not resolve to px (e.g. `pct`, `deg`).
+fn parse_px_dimension(s: &str) -> Option<f64> {
+    let rest = s.strip_prefix('(')?;
+    let (unit_str, value_str) = rest.split_once(')')?;
+    let unit = Unit::from_annotation(unit_str);
+    let value: f64 = value_str.trim().parse().ok()?;
+    if !value.is_finite() {
+        return None;
+    }
+    dim_to_px(value, &unit)
+}
 
 /// Mutable references to a node's four bbox geometry slots `(x, y, w, h)`.
 type GeometryMut<'a> = (
@@ -155,9 +173,33 @@ pub(super) fn apply_align_nodes(
         return;
     }
 
-    // `anchor` is "page", "selection", or a node id (align relative to that
-    // node's bbox). A node-id anchor is resolved when the reference rectangle is
-    // computed below; an unknown id is rejected there.
+    // `anchor` is "page", "selection", an explicit dimension like "(px)120",
+    // or a node id (align relative to that node's bbox). The dimension and
+    // node-id forms are resolved when the reference rectangle is computed below;
+    // an unparseable dimension or unknown id is rejected there.
+    //
+    // An explicit-dimension anchor names a single absolute coordinate on the
+    // active axis. We detect it eagerly (a leading '(') so a node whose id
+    // happened to start with '(' cannot shadow it.
+    let dimension_anchor: Option<f64> = if anchor.starts_with('(') {
+        match parse_px_dimension(anchor) {
+            Some(v) => Some(v),
+            None => {
+                diagnostics.push(Diagnostic::error(
+                    "tx.invalid_value",
+                    format!(
+                        "align_nodes: anchor {:?} is not a resolvable dimension (expected e.g. \"(px)120\")",
+                        anchor
+                    ),
+                    None,
+                    None,
+                ));
+                return;
+            }
+        }
+    } else {
+        None
+    };
 
     // ── Phase 1: shared scan — gather bbox and check existence ────────────────
     //
@@ -237,7 +279,13 @@ pub(super) fn apply_align_nodes(
 
     // ── Compute the reference rectangle ───────────────────────────────────────
 
-    let (ref_left, ref_right, ref_top, ref_bottom) = if anchor == "page" {
+    let (ref_left, ref_right, ref_top, ref_bottom) = if let Some(coord) = dimension_anchor {
+        // Explicit-dimension anchor: `coord` is the absolute target coordinate
+        // on the active axis. Collapse the reference rectangle to that single
+        // coordinate on every edge. Only the active axis (selected by `align`)
+        // is ever read, so the inactive-axis edges are harmless.
+        (coord, coord, coord, coord)
+    } else if anchor == "page" {
         // Find the page that contains the first alignable node.
         let first_id = &alignable[0].id;
         let page_opt = doc
@@ -369,6 +417,152 @@ pub(super) fn apply_align_nodes(
                         *ny = Some(px(v));
                     }
                     record_affected(&bbox.id, affected);
+                }
+            }
+        }
+    }
+}
+
+// ── DistributeNodes ─────────────────────────────────────────────────────────────
+
+/// Valid axes for `Op::DistributeNodes`.
+const VALID_DISTRIBUTE_AXES: &[&str] = &["horizontal", "vertical"];
+
+/// A node's captured bbox during distribution, reduced to the active axis.
+struct AxisBox {
+    id: String,
+    /// Leading-edge coordinate on the active axis (`x` for horizontal, `y` for vertical).
+    pos: f64,
+    /// Extent on the active axis (`w` for horizontal, `h` for vertical).
+    size: f64,
+}
+
+pub(super) fn apply_distribute_nodes(
+    node_ids: &[String],
+    axis: &str,
+    doc: &mut Document,
+    diagnostics: &mut Vec<Diagnostic>,
+    affected: &mut Vec<String>,
+) {
+    // Validate axis value before touching the tree.
+    if !VALID_DISTRIBUTE_AXES.contains(&axis) {
+        diagnostics.push(Diagnostic::error(
+            "tx.unsupported_property",
+            format!("distribute_nodes: unknown axis {:?}", axis),
+            None,
+            None,
+        ));
+        return;
+    }
+    let horizontal = axis == "horizontal";
+
+    // ── Phase 1: shared scan — gather active-axis geometry and check existence ──
+    //
+    // Mirrors apply_align_nodes' phase 1: a missing node is a hard error, a node
+    // found without resolvable geometry is skipped with a warning, and the rest
+    // are still distributed.
+    let mut boxes: Vec<AxisBox> = Vec::new();
+
+    for node_id in node_ids {
+        let found: Option<Option<(f64, f64, f64, f64)>> = 'page_scan: {
+            for page in doc.body.pages.iter() {
+                if let Some(node) = find_node_shared(&page.children, node_id) {
+                    break 'page_scan Some(read_geometry_px(node));
+                }
+            }
+            None
+        };
+
+        match found {
+            None => {
+                diagnostics.push(Diagnostic::error(
+                    "tx.unknown_node",
+                    format!("distribute_nodes: node {:?} not found in document", node_id),
+                    None,
+                    Some(node_id.clone()),
+                ));
+            }
+            Some(None) => {
+                diagnostics.push(Diagnostic::warning(
+                    "tx.unsupported_property",
+                    format!(
+                        "distribute_nodes: node {:?} has no resolvable x/y/w/h geometry; skipped",
+                        node_id
+                    ),
+                    None,
+                    Some(node_id.clone()),
+                ));
+            }
+            Some(Some((x, y, w, h))) => {
+                let (pos, size) = if horizontal { (x, w) } else { (y, h) };
+                boxes.push(AxisBox {
+                    id: node_id.clone(),
+                    pos,
+                    size,
+                });
+            }
+        }
+    }
+
+    // Distribute-spacing needs ≥ 3 nodes (two fixed endpoints + ≥ 1 interior).
+    // Fewer is a no-op, mirroring align_nodes' degenerate-input convention.
+    if boxes.len() < 3 {
+        diagnostics.push(Diagnostic::advisory(
+            "tx.noop",
+            format!(
+                "distribute_nodes: needs at least 3 alignable nodes but found {}; document is unchanged",
+                boxes.len()
+            ),
+            None,
+            None,
+        ));
+        return;
+    }
+
+    // Order by current leading-edge position on the active axis. Ties keep their
+    // relative input order (stable sort) for determinism.
+    boxes.sort_by(|a, b| a.pos.total_cmp(&b.pos));
+
+    // Endpoints are fixed. Span = last trailing edge − first leading edge.
+    // Equal gap = (span − Σ sizes) / (n − 1).
+    let (Some(first), Some(last)) = (boxes.first(), boxes.last()) else {
+        // Unreachable: len ≥ 3 was checked above.
+        return;
+    };
+    let span = (last.pos + last.size) - first.pos;
+    let total_size: f64 = boxes.iter().map(|b| b.size).sum();
+    let gap = (span - total_size) / ((boxes.len() - 1) as f64);
+
+    // Walk left-to-right, placing each interior node after the previous one plus
+    // the equal gap. Endpoints keep their positions. Collect new positions first,
+    // then apply with an exclusive borrow per node (mirrors align's phase 2).
+    let mut new_positions: Vec<(String, f64)> = Vec::with_capacity(boxes.len());
+    let mut cursor = first.pos;
+    for (i, b) in boxes.iter().enumerate() {
+        let new_pos = if i == 0 { first.pos } else { cursor + gap };
+        new_positions.push((b.id.clone(), new_pos));
+        cursor = new_pos + b.size;
+    }
+
+    // ── Phase 2: exclusive borrow — write the new active-axis position ──────────
+    for (id, new_pos) in &new_positions {
+        match find_node_any_mut(doc, id) {
+            None => {
+                diagnostics.push(Diagnostic::error(
+                    "tx.unknown_node",
+                    format!("distribute_nodes: node {:?} disappeared between phases", id),
+                    None,
+                    Some(id.clone()),
+                ));
+            }
+            Some(node) => {
+                if let Some((nx, ny, _, _)) = node_geometry_mut(node) {
+                    if horizontal {
+                        *nx = Some(px(*new_pos));
+                    } else {
+                        *ny = Some(px(*new_pos));
+                    }
+                    record_affected(id, affected);
                 }
             }
         }

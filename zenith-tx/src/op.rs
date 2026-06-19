@@ -457,6 +457,11 @@ pub enum Op {
     /// `anchor` controls the reference rectangle:
     /// - `"selection"` (default): the union bounding box of all alignable nodes.
     /// - `"page"`: the page that contains the nodes (0,0 to page w/h).
+    /// - a node id: the bbox of that node.
+    /// - an explicit dimension like `"(px)120"`: align the chosen edge of every
+    ///   listed node to that absolute page coordinate. For the horizontal edges
+    ///   (`left`, `hcenter`, `right`) the value is an X coordinate; for the
+    ///   vertical edges (`top`, `vcenter`, `bottom`) it is a Y coordinate.
     ///
     /// Only nodes supported by `set_geometry` (`rect`, `ellipse`, `frame`,
     /// `image`) with resolvable `x/y/w/h` in px/pt are alignable. Any node
@@ -465,11 +470,13 @@ pub enum Op {
     ///
     /// An unknown `align` value is rejected with `tx.unsupported_property`.
     /// An unknown `anchor` value is rejected with `tx.unsupported_property`.
+    /// A `"(px)…"` anchor whose dimension cannot be parsed is rejected with
+    /// `tx.invalid_value`.
     /// Fewer than one alignable node emits `tx.noop`.
     ///
     /// JSON example:
     /// ```json
-    /// {"op":"align_nodes","node_ids":["r1","r2","r3"],"align":"left"}
+    /// {"op":"align_nodes","node_ids":["a","b","caption"],"align":"left","anchor":"(px)120"}
     /// ```
     AlignNodes {
         /// Ids of the nodes to align.
@@ -477,10 +484,56 @@ pub enum Op {
         /// Which edge or centre to align to: `left`, `hcenter`, `right`,
         /// `top`, `vcenter`, or `bottom`.
         align: String,
-        /// Reference rectangle: `"selection"` (union bbox) or `"page"`.
-        /// Defaults to `"selection"`.
+        /// Reference rectangle: `"selection"` (union bbox), `"page"`, a node id,
+        /// or an explicit dimension like `"(px)120"`. Defaults to `"selection"`.
         #[serde(default = "default_anchor")]
         anchor: String,
+    },
+    /// Set the `overflow` property of a `text` or `code` node.
+    ///
+    /// Valid values: `"fit"`, `"clip"`, `"visible"`. Any other value is rejected
+    /// with `tx.invalid_value`.
+    ///
+    /// Supported nodes: `text`, `code`.
+    /// Unsupported: all other variants — yields `tx.wrong_node_type`.
+    /// A missing node yields `tx.unknown_node`.
+    ///
+    /// JSON example:
+    /// ```json
+    /// {"op":"set_text_overflow","node_id":"body","overflow":"visible"}
+    /// ```
+    SetTextOverflow {
+        /// The stable node `id` to target.
+        node_id: String,
+        /// The new overflow value: `fit`, `clip`, or `visible`.
+        overflow: String,
+    },
+    /// Evenly distribute a set of nodes along one axis so the gaps between
+    /// consecutive nodes are equal, keeping the first and last node's outer
+    /// edges fixed (standard "distribute spacing" semantics).
+    ///
+    /// The nodes are ordered by their current position on the chosen axis
+    /// before distributing. Requires ≥ 3 alignable nodes; fewer than three
+    /// emits `tx.noop` (consistent with `align_nodes`' degenerate-input
+    /// convention) and leaves the document unchanged.
+    ///
+    /// Only nodes supported by `set_geometry` (`rect`, `ellipse`, `frame`,
+    /// `image`, `text`, `code`, `group`) with resolvable `x/y/w/h` are
+    /// distributable. A listed node that is missing yields `tx.unknown_node`;
+    /// a node found but lacking resolvable geometry yields a
+    /// `tx.unsupported_property` warning and is skipped.
+    ///
+    /// An unknown `axis` value is rejected with `tx.unsupported_property`.
+    ///
+    /// JSON example:
+    /// ```json
+    /// {"op":"distribute_nodes","node_ids":["p1","p2","p3"],"axis":"horizontal"}
+    /// ```
+    DistributeNodes {
+        /// Ids of the nodes to distribute.
+        node_ids: Vec<String>,
+        /// Axis to distribute along: `"horizontal"` or `"vertical"`.
+        axis: String,
     },
 }
 

@@ -85,6 +85,29 @@ fn node_opacity_mut(node: &mut Node) -> Option<&mut Option<f64>> {
     }
 }
 
+// ── Valid overflow values ─────────────────────────────────────────────────────
+
+const VALID_OVERFLOWS: &[&str] = &["fit", "clip", "visible"];
+
+/// Return a mutable reference to the `overflow` field of a node, or `None` for
+/// variants that do not carry an `overflow` property. Only `Text` and `Code`
+/// have one.
+fn node_overflow_mut(node: &mut Node) -> Option<&mut Option<String>> {
+    match node {
+        Node::Text(n) => Some(&mut n.overflow),
+        Node::Code(n) => Some(&mut n.overflow),
+        Node::Rect(_)
+        | Node::Ellipse(_)
+        | Node::Line(_)
+        | Node::Frame(_)
+        | Node::Group(_)
+        | Node::Image(_)
+        | Node::Polygon(_)
+        | Node::Polyline(_)
+        | Node::Unknown(_) => None,
+    }
+}
+
 // ── SetTextAlign ──────────────────────────────────────────────────────────────
 
 pub(super) fn apply_set_text_align(
@@ -134,6 +157,64 @@ pub(super) fn apply_set_text_align(
                 None,
                 Some(node_id.to_owned()),
             ));
+        }
+    }
+}
+
+// ── SetTextOverflow ───────────────────────────────────────────────────────────
+
+pub(super) fn apply_set_text_overflow(
+    node_id: &str,
+    overflow: &str,
+    doc: &mut Document,
+    diagnostics: &mut Vec<Diagnostic>,
+    affected: &mut Vec<String>,
+) {
+    // Validate overflow value before touching the tree.
+    if !VALID_OVERFLOWS.contains(&overflow) {
+        diagnostics.push(Diagnostic::error(
+            "tx.invalid_value",
+            format!(
+                "invalid overflow value {:?}; must be one of: {}",
+                overflow,
+                VALID_OVERFLOWS.join(", ")
+            ),
+            None,
+            Some(node_id.to_owned()),
+        ));
+        return;
+    }
+
+    match find_node_any_mut(doc, node_id) {
+        None => {
+            diagnostics.push(Diagnostic::error(
+                "tx.unknown_node",
+                format!("node {:?} not found in document", node_id),
+                None,
+                Some(node_id.to_owned()),
+            ));
+        }
+        Some(node) => {
+            // node_kind_str returns &'static str, so there is no live borrow of
+            // `node` after this binding — the mutable borrow below is fine.
+            let kind = node_kind_str(node);
+            match node_overflow_mut(node) {
+                Some(slot) => {
+                    *slot = Some(overflow.to_owned());
+                    record_affected(node_id, affected);
+                }
+                None => {
+                    diagnostics.push(Diagnostic::error(
+                        "tx.wrong_node_type",
+                        format!(
+                            "set_text_overflow requires a text or code node but {:?} is a {}",
+                            node_id, kind
+                        ),
+                        None,
+                        Some(node_id.to_owned()),
+                    ));
+                }
+            }
         }
     }
 }

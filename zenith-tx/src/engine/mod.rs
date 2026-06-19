@@ -19,14 +19,14 @@ mod style;
 mod tests;
 
 use flags::{apply_set_locked, apply_set_points, apply_set_visible};
-use geometry::{apply_align_nodes, apply_set_geometry};
+use geometry::{apply_align_nodes, apply_distribute_nodes, apply_set_geometry};
 use structure::{
     ReorderKind, apply_add_node, apply_duplicate_node, apply_duplicate_page, apply_group,
     apply_remove_node, apply_reorder, apply_reparent, apply_ungroup,
 };
 use style::{
     apply_replace_text, apply_set_fill, apply_set_opacity, apply_set_stroke,
-    apply_set_stroke_width, apply_set_text_align,
+    apply_set_stroke_width, apply_set_text_align, apply_set_text_overflow,
 };
 
 // ── Public entry point ────────────────────────────────────────────────────────
@@ -249,6 +249,12 @@ fn apply_op(
         } => {
             apply_align_nodes(node_ids, align, anchor, doc, diagnostics, affected);
         }
+        Op::SetTextOverflow { node_id, overflow } => {
+            apply_set_text_overflow(node_id, overflow, doc, diagnostics, affected);
+        }
+        Op::DistributeNodes { node_ids, axis } => {
+            apply_distribute_nodes(node_ids, axis, doc, diagnostics, affected);
+        }
     }
 }
 
@@ -279,8 +285,11 @@ fn op_lock_targets(op: &Op) -> Vec<&str> {
         | Op::MoveBackward { node }
         | Op::MoveToFront { node }
         | Op::MoveToBack { node }
-        | Op::Reparent { node, .. } => vec![node.as_str()],
-        Op::AlignNodes { node_ids, .. } => node_ids.iter().map(String::as_str).collect(),
+        | Op::Reparent { node, .. }
+        | Op::SetTextOverflow { node_id: node, .. } => vec![node.as_str()],
+        Op::AlignNodes { node_ids, .. } | Op::DistributeNodes { node_ids, .. } => {
+            node_ids.iter().map(String::as_str).collect()
+        }
         Op::SetLocked { .. }
         | Op::SetVisible { .. }
         | Op::AddNode { .. }
