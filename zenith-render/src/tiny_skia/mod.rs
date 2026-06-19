@@ -462,6 +462,47 @@ impl RasterBackend for TinySkiaBackend {
                         let origin_x = *x as f32 + glyph.dx;
                         let baseline_y = *y as f32 + glyph.dy;
 
+                        // ── 6a. Color-bitmap path (CBDT/sbix emoji) ───────────
+                        // If the font supplies an embedded PNG raster image for
+                        // this glyph, blit it instead of an outline. Outline
+                        // (monochrome) fonts never return Some here, so this
+                        // branch is inert for them → byte-identical output.
+                        if let Some(img) = face.glyph_raster_image(
+                            ttf_parser::GlyphId(glyph.glyph_id),
+                            *font_size as u16,
+                        ) && img.format == ttf_parser::RasterImageFormat::PNG
+                            && img.pixels_per_em > 0
+                            && let Ok(decoded) = Pixmap::decode_png(img.data)
+                        {
+                            // Strike ppem → target ppem scale.
+                            let s = *font_size / f32::from(img.pixels_per_em);
+                            // ttf-parser's `img.y` is the offset of the image's
+                            // BOTTOM from the baseline (positive up); the image
+                            // top in baseline space is therefore:
+                            //   baseline_y - (img.y + img.height) * s
+                            let draw_x = origin_x + f32::from(img.x) * s;
+                            let draw_y =
+                                baseline_y - (f32::from(img.y) + f32::from(img.height)) * s;
+                            // Compose the rotation stack on top of the per-glyph
+                            // scale+translate. Identity case → emoji_ts == fit,
+                            // matching the DrawImage arm's pattern.
+                            let emoji_fit = Transform::from_row(s, 0.0, 0.0, s, draw_x, draw_y);
+                            let emoji_ts = current_ts.pre_concat(emoji_fit);
+                            let emoji_paint = PixmapPaint {
+                                quality: FilterQuality::Bilinear,
+                                ..Default::default()
+                            };
+                            target.draw_pixmap(
+                                0,
+                                0,
+                                decoded.as_ref(),
+                                &emoji_paint,
+                                emoji_ts,
+                                mask.as_ref(),
+                            );
+                            continue;
+                        }
+
                         // Build path via outline pen.
                         let mut pen = GlyphOutlinePen::new(origin_x, baseline_y, scale);
 
