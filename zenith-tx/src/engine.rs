@@ -112,6 +112,18 @@ fn apply_op(
         } => {
             apply_set_fill(node_id, fill, doc, diagnostics, affected);
         }
+        Op::SetStroke {
+            node: node_id,
+            stroke,
+        } => {
+            apply_set_stroke(node_id, stroke, doc, diagnostics, affected);
+        }
+        Op::SetStrokeWidth {
+            node: node_id,
+            stroke_width,
+        } => {
+            apply_set_stroke_width(node_id, stroke_width, doc, diagnostics, affected);
+        }
         Op::SetVisible {
             node: node_id,
             visible,
@@ -401,6 +413,42 @@ fn node_fill_mut(node: &mut Node) -> Option<&mut Option<PropertyValue>> {
     }
 }
 
+/// Return a mutable reference to the `stroke` field of a node, or `None` for
+/// variants that do not have a `stroke` property
+/// (`Ellipse`, `Text`, `Frame`, `Group`, `Image`, `Unknown`).
+fn node_stroke_mut(node: &mut Node) -> Option<&mut Option<PropertyValue>> {
+    match node {
+        Node::Rect(n) => Some(&mut n.stroke),
+        Node::Line(n) => Some(&mut n.stroke),
+        Node::Polygon(n) => Some(&mut n.stroke),
+        Node::Polyline(n) => Some(&mut n.stroke),
+        Node::Ellipse(_)
+        | Node::Text(_)
+        | Node::Frame(_)
+        | Node::Group(_)
+        | Node::Image(_)
+        | Node::Unknown(_) => None,
+    }
+}
+
+/// Return a mutable reference to the `stroke_width` field of a node, or `None`
+/// for variants that do not have a `stroke_width` property
+/// (`Ellipse`, `Text`, `Frame`, `Group`, `Image`, `Unknown`).
+fn node_stroke_width_mut(node: &mut Node) -> Option<&mut Option<PropertyValue>> {
+    match node {
+        Node::Rect(n) => Some(&mut n.stroke_width),
+        Node::Line(n) => Some(&mut n.stroke_width),
+        Node::Polygon(n) => Some(&mut n.stroke_width),
+        Node::Polyline(n) => Some(&mut n.stroke_width),
+        Node::Ellipse(_)
+        | Node::Text(_)
+        | Node::Frame(_)
+        | Node::Group(_)
+        | Node::Image(_)
+        | Node::Unknown(_) => None,
+    }
+}
+
 /// Mutable references to a node's four bbox geometry slots `(x, y, w, h)`.
 type GeometryMut<'a> = (
     &'a mut Option<Dimension>,
@@ -450,11 +498,18 @@ fn px(v: f64) -> Dimension {
     }
 }
 
-// ── SetFill ───────────────────────────────────────────────────────────────────
+// ── SetFill / SetStroke / SetStrokeWidth ──────────────────────────────────────
 
-fn apply_set_fill(
+/// Shared driver for token-valued property setters (`set_fill`, `set_stroke`,
+/// `set_stroke_width`). Finds the node, fetches the `Option<PropertyValue>`
+/// slot via `accessor`, and sets it to `TokenRef(token)`. Emits `tx.unknown_node`
+/// if the node is missing, or `tx.unsupported_property` (naming `op_label`) if the
+/// node kind lacks the property.
+fn apply_set_property_token(
     node_id: &str,
-    fill_token: &str,
+    token: &str,
+    op_label: &str,
+    accessor: fn(&mut Node) -> Option<&mut Option<PropertyValue>>,
     doc: &mut Document,
     diagnostics: &mut Vec<Diagnostic>,
     affected: &mut Vec<String>,
@@ -472,15 +527,15 @@ fn apply_set_fill(
             // node_kind_str returns &'static str, so there is no live borrow
             // of `node` after this let binding — the mutable borrow below is fine.
             let kind = node_kind_str(node);
-            match node_fill_mut(node) {
+            match accessor(node) {
                 Some(slot) => {
-                    *slot = Some(PropertyValue::TokenRef(fill_token.to_owned()));
+                    *slot = Some(PropertyValue::TokenRef(token.to_owned()));
                     record_affected(node_id, affected);
                 }
                 None => {
                     diagnostics.push(Diagnostic::error(
                         "tx.unsupported_property",
-                        format!("set_fill is not supported on a {} node", kind),
+                        format!("{} is not supported on a {} node", op_label, kind),
                         None,
                         Some(node_id.to_owned()),
                     ));
@@ -488,6 +543,60 @@ fn apply_set_fill(
             }
         }
     }
+}
+
+fn apply_set_fill(
+    node_id: &str,
+    fill_token: &str,
+    doc: &mut Document,
+    diagnostics: &mut Vec<Diagnostic>,
+    affected: &mut Vec<String>,
+) {
+    apply_set_property_token(
+        node_id,
+        fill_token,
+        "set_fill",
+        node_fill_mut,
+        doc,
+        diagnostics,
+        affected,
+    );
+}
+
+fn apply_set_stroke(
+    node_id: &str,
+    stroke_token: &str,
+    doc: &mut Document,
+    diagnostics: &mut Vec<Diagnostic>,
+    affected: &mut Vec<String>,
+) {
+    apply_set_property_token(
+        node_id,
+        stroke_token,
+        "set_stroke",
+        node_stroke_mut,
+        doc,
+        diagnostics,
+        affected,
+    );
+}
+
+fn apply_set_stroke_width(
+    node_id: &str,
+    stroke_width_token: &str,
+    doc: &mut Document,
+    diagnostics: &mut Vec<Diagnostic>,
+    affected: &mut Vec<String>,
+) {
+    apply_set_property_token(
+        node_id,
+        stroke_width_token,
+        "set_stroke_width",
+        node_stroke_width_mut,
+        doc,
+        diagnostics,
+        affected,
+    );
 }
 
 // ── SetVisible / SetLocked ────────────────────────────────────────────────────
@@ -1565,6 +1674,172 @@ mod tests {
         assert_eq!(result.source_after, result.source_before);
     }
 
+    // ── SetStroke / SetStrokeWidth tests ──────────────────────────────────────
+
+    /// Rect, line, polygon carrying valid color + dimension tokens.
+    const STROKE_DOC: &str = r##"zenith version=1 {
+  project id="proj" name="Test"
+  tokens format="zenith-token-v1" {
+    token id="color.rule" type="color" value="#334155"
+    token id="size.stroke" type="dimension" value=(px)2
+  }
+  styles { }
+  document id="doc1" title="T" {
+    page id="pg1" w=(px)400 h=(px)300 {
+      rect id="r1" x=(px)0 y=(px)0 w=(px)100 h=(px)100 stroke=(token)"color.rule" stroke-width=(token)"size.stroke"
+      line id="ln1" x1=(px)0 y1=(px)0 x2=(px)100 y2=(px)100 stroke=(token)"color.rule"
+      ellipse id="dot" x=(px)0 y=(px)0 w=(px)100 h=(px)100 fill=(token)"color.rule"
+      text id="lbl" x=(px)10 y=(px)10 w=(px)200 h=(px)40 {
+        span "Hi"
+      }
+      polygon id="poly1" stroke=(token)"color.rule" stroke-width=(token)"size.stroke" {
+        point x=(px)10 y=(px)10
+        point x=(px)90 y=(px)10
+        point x=(px)50 y=(px)90
+      }
+    }
+  }
+}"##;
+
+    #[test]
+    fn set_stroke_recolors_rect() {
+        let doc = parse(STROKE_DOC);
+        let tx = Transaction {
+            ops: vec![Op::SetStroke {
+                node: "r1".to_owned(),
+                stroke: "color.rule".to_owned(),
+            }],
+        };
+        let result = run_transaction(&doc, &tx).expect("run_transaction should not error");
+
+        assert_eq!(result.status, TxStatus::Accepted);
+        assert_eq!(result.affected_node_ids, vec!["r1".to_owned()]);
+        assert!(
+            result.source_after.contains("stroke=(token)\"color.rule\""),
+            "source_after must reference color.rule as stroke; got:\n{}",
+            result.source_after
+        );
+    }
+
+    #[test]
+    fn set_stroke_unknown_token_rejected() {
+        // color.nope is not declared → post-validate emits token.unknown_reference.
+        let doc = parse(STROKE_DOC);
+        let tx = Transaction {
+            ops: vec![Op::SetStroke {
+                node: "r1".to_owned(),
+                stroke: "color.nope".to_owned(),
+            }],
+        };
+        let result = run_transaction(&doc, &tx).expect("run_transaction should not error");
+
+        assert_eq!(result.status, TxStatus::Rejected);
+        assert!(
+            result
+                .diagnostics
+                .iter()
+                .any(|d| d.code == "token.unknown_reference"),
+            "expected token.unknown_reference diagnostic; got: {:?}",
+            result.diagnostics
+        );
+        assert_eq!(result.source_after, result.source_before);
+    }
+
+    #[test]
+    fn set_stroke_unsupported_on_ellipse() {
+        let doc = parse(STROKE_DOC);
+        let tx = Transaction {
+            ops: vec![Op::SetStroke {
+                node: "dot".to_owned(),
+                stroke: "color.rule".to_owned(),
+            }],
+        };
+        let result = run_transaction(&doc, &tx).expect("run_transaction should not error");
+
+        assert_eq!(result.status, TxStatus::Rejected);
+        assert!(
+            result
+                .diagnostics
+                .iter()
+                .any(|d| d.code == "tx.unsupported_property"
+                    && d.message
+                        .contains("set_stroke is not supported on a ellipse node")),
+            "expected tx.unsupported_property naming ellipse; got: {:?}",
+            result.diagnostics
+        );
+        assert_eq!(result.source_after, result.source_before);
+    }
+
+    #[test]
+    fn set_stroke_unknown_node_rejected() {
+        let doc = parse(STROKE_DOC);
+        let tx = Transaction {
+            ops: vec![Op::SetStroke {
+                node: "nope".to_owned(),
+                stroke: "color.rule".to_owned(),
+            }],
+        };
+        let result = run_transaction(&doc, &tx).expect("run_transaction should not error");
+
+        assert_eq!(result.status, TxStatus::Rejected);
+        assert!(
+            result
+                .diagnostics
+                .iter()
+                .any(|d| d.code == "tx.unknown_node"),
+            "expected tx.unknown_node diagnostic; got: {:?}",
+            result.diagnostics
+        );
+        assert_eq!(result.source_after, result.source_before);
+    }
+
+    #[test]
+    fn set_stroke_width_on_polygon() {
+        let doc = parse(STROKE_DOC);
+        let tx = Transaction {
+            ops: vec![Op::SetStrokeWidth {
+                node: "poly1".to_owned(),
+                stroke_width: "size.stroke".to_owned(),
+            }],
+        };
+        let result = run_transaction(&doc, &tx).expect("run_transaction should not error");
+
+        assert_eq!(result.status, TxStatus::Accepted);
+        assert_eq!(result.affected_node_ids, vec!["poly1".to_owned()]);
+        assert!(
+            result
+                .source_after
+                .contains("stroke-width=(token)\"size.stroke\""),
+            "source_after must reference size.stroke as stroke-width; got:\n{}",
+            result.source_after
+        );
+    }
+
+    #[test]
+    fn set_stroke_width_unsupported_on_text() {
+        let doc = parse(STROKE_DOC);
+        let tx = Transaction {
+            ops: vec![Op::SetStrokeWidth {
+                node: "lbl".to_owned(),
+                stroke_width: "size.stroke".to_owned(),
+            }],
+        };
+        let result = run_transaction(&doc, &tx).expect("run_transaction should not error");
+
+        assert_eq!(result.status, TxStatus::Rejected);
+        assert!(
+            result
+                .diagnostics
+                .iter()
+                .any(|d| d.code == "tx.unsupported_property"
+                    && d.message
+                        .contains("set_stroke_width is not supported on a text node")),
+            "expected tx.unsupported_property naming text; got: {:?}",
+            result.diagnostics
+        );
+        assert_eq!(result.source_after, result.source_before);
+    }
+
     // ── SetVisible tests ──────────────────────────────────────────────────────
 
     #[test]
@@ -1670,7 +1945,11 @@ mod tests {
         let json = r#"{"ops":[
             {"op":"set_fill","node":"r","fill":"c"},
             {"op":"set_visible","node":"r","visible":false},
-            {"op":"set_locked","node":"r","locked":true}
+            {"op":"set_locked","node":"r","locked":true},
+            {"op":"set_stroke","node":"r","stroke":"s"},
+            {"op":"set_stroke_width","node":"r","stroke_width":"sw"},
+            {"op":"add_node","parent":"pg1","position":{"at":"after","id":"r"},"source":"rect id=\"r2\""},
+            {"op":"remove_node","node":"r"}
         ]}"#;
         let tx = Transaction::from_json(json).expect("parse JSON");
         assert_eq!(
@@ -1689,7 +1968,40 @@ mod tests {
                         node: "r".to_owned(),
                         locked: true,
                     },
+                    Op::SetStroke {
+                        node: "r".to_owned(),
+                        stroke: "s".to_owned(),
+                    },
+                    Op::SetStrokeWidth {
+                        node: "r".to_owned(),
+                        stroke_width: "sw".to_owned(),
+                    },
+                    Op::AddNode {
+                        parent: "pg1".to_owned(),
+                        position: Position::After { id: "r".to_owned() },
+                        source: "rect id=\"r2\"".to_owned(),
+                    },
+                    Op::RemoveNode {
+                        node: "r".to_owned(),
+                    },
                 ],
+            }
+        );
+    }
+
+    #[test]
+    fn from_json_add_node_position_defaults_to_last() {
+        // `position` omitted → serde default → Position::Last.
+        let json = r#"{"ops":[{"op":"add_node","parent":"pg1","source":"rect id=\"r2\""}]}"#;
+        let tx = Transaction::from_json(json).expect("parse JSON");
+        assert_eq!(
+            tx,
+            Transaction {
+                ops: vec![Op::AddNode {
+                    parent: "pg1".to_owned(),
+                    position: Position::Last,
+                    source: "rect id=\"r2\"".to_owned(),
+                }],
             }
         );
     }

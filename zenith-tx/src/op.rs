@@ -5,6 +5,8 @@
 //! {"ops":[
 //!   {"op":"set_text_align","node":"label","align":"center"},
 //!   {"op":"set_fill","node":"box","fill":"color.accent"},
+//!   {"op":"set_stroke","node":"box","stroke":"color.rule"},
+//!   {"op":"set_stroke_width","node":"box","stroke_width":"size.stroke"},
 //!   {"op":"set_visible","node":"box","visible":false},
 //!   {"op":"set_locked","node":"box","locked":true},
 //!   {"op":"set_geometry","node":"r","x":10,"w":200},
@@ -117,6 +119,37 @@ pub enum Op {
         node: String,
         /// Token id to set as the fill (e.g. `"color.brand"`).
         fill: String,
+    },
+    /// Set the `stroke` (outline color) property on a node that supports stroke.
+    ///
+    /// The `stroke` value is a token id (e.g. `"color.rule"`); the engine wraps it
+    /// as `PropertyValue::TokenRef(stroke)`. Post-validation rejects unknown token
+    /// ids automatically.
+    ///
+    /// Supported nodes: `rect`, `line`, `polygon`, `polyline`.
+    /// Unsupported: `ellipse` (fill-only), `text`, `frame`, `group`, `image` —
+    /// yields `tx.unsupported_property`.
+    SetStroke {
+        /// The stable node `id` to target.
+        node: String,
+        /// Token id to set as the stroke color (e.g. `"color.rule"`).
+        stroke: String,
+    },
+    /// Set the `stroke-width` property on a node that supports stroke.
+    ///
+    /// The value is a **dimension token id** (e.g. `"size.stroke"`), stored as
+    /// `PropertyValue::TokenRef`. A token (not a raw number) is required because
+    /// v0 stroke-width only resolves through dimension tokens at compile time;
+    /// post-validation rejects unknown token ids automatically.
+    ///
+    /// Supported nodes: `rect`, `line`, `polygon`, `polyline`.
+    /// Unsupported: `ellipse`, `text`, `frame`, `group`, `image` — yields
+    /// `tx.unsupported_property`.
+    SetStrokeWidth {
+        /// The stable node `id` to target.
+        node: String,
+        /// Dimension token id to set as the stroke width (e.g. `"size.stroke"`).
+        stroke_width: String,
     },
     /// Show or hide a node by setting its `visible` property.
     ///
