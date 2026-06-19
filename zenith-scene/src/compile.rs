@@ -11,10 +11,10 @@
 use std::collections::BTreeMap;
 
 use zenith_core::{
-    Diagnostic, Document, FontProvider, FontStyle, FrameNode, GroupNode, ImageNode, Node,
-    ObjectPosition, Point, PolygonNode, PolylineNode, PropertyValue, ResolvedToken, ResolvedValue,
-    Span, Style, TokenKind, builtin_color, dim_to_px, is_supported, resolve_tokens, scan,
-    token_id_for_kind,
+    Diagnostic, Dimension, Document, FontProvider, FontStyle, FrameNode, GroupNode, ImageNode,
+    Node, ObjectPosition, Point, PolygonNode, PolylineNode, PropertyValue, ResolvedToken,
+    ResolvedValue, Span, Style, TokenKind, builtin_color, dim_to_px, is_supported, resolve_tokens,
+    scan, token_id_for_kind,
 };
 use zenith_layout::{RustybuzzEngine, ShapeRequest, TextLayoutEngine, ZenithGlyphRun};
 
@@ -253,6 +253,14 @@ fn run_to_scene_glyphs(run: &ZenithGlyphRun) -> Vec<SceneGlyph> {
         .collect()
 }
 
+// ── Rotation helper ───────────────────────────────────────────────────────────
+
+/// If `rotate` is a non-zero angle, returns the degrees to rotate the node's
+/// commands around its center; else None. (deg unit; value read directly.)
+fn rotation_degrees(rotate: Option<&Dimension>) -> Option<f64> {
+    rotate.map(|d| d.value).filter(|a| *a != 0.0)
+}
+
 // ── Node dispatch ─────────────────────────────────────────────────────────────
 
 /// The `role` of any node, if set. Used to exclude non-printing nodes
@@ -367,6 +375,19 @@ fn compile_node(
                 .or_else(|| style_prop(&rect.style, style_map, "radius").cloned());
             let radius = resolve_property_dimension_px(&radius_prop, resolved, 0.0);
 
+            // Rotation bracket (outermost). PushTransform is only emitted when
+            // rotate is non-zero; unrotated rects are byte-identical to before.
+            let rot = rotation_degrees(rect.rotate.as_ref());
+            if let Some(angle) = rot {
+                let cx = x + w / 2.0;
+                let cy = y + h / 2.0;
+                commands.push(SceneCommand::PushTransform {
+                    angle_deg: angle,
+                    cx,
+                    cy,
+                });
+            }
+
             // FILL (emitted first, under the stroke) — node-local prop overrides
             // style cascade.
             let fill_prop = rect
@@ -464,6 +485,10 @@ fn compile_node(
                     }
                 }
             }
+
+            if rot.is_some() {
+                commands.push(SceneCommand::PopTransform);
+            }
         }
 
         Node::Ellipse(ellipse) => {
@@ -534,6 +559,18 @@ fn compile_node(
             // Apply node opacity then cascade ctx.opacity on top.
             let node_opacity = ellipse.opacity.unwrap_or(1.0).clamp(0.0, 1.0);
 
+            // Rotation bracket (outermost). PushTransform only when rotate ≠ 0.
+            let rot = rotation_degrees(ellipse.rotate.as_ref());
+            if let Some(angle) = rot {
+                let cx = x + w / 2.0;
+                let cy = y + h / 2.0;
+                commands.push(SceneCommand::PushTransform {
+                    angle_deg: angle,
+                    cx,
+                    cy,
+                });
+            }
+
             // FILL (emitted first, under the stroke) — node-local prop overrides
             // style cascade.
             let fill_prop = ellipse
@@ -576,6 +613,10 @@ fn compile_node(
 
             // If neither fill nor stroke is present, the ellipse draws nothing —
             // no diagnostic needed (an invisible ellipse is valid in v0).
+
+            if rot.is_some() {
+                commands.push(SceneCommand::PopTransform);
+            }
         }
 
         Node::Text(text) => {
@@ -788,6 +829,8 @@ fn compile_node(
             // Resolve the node's box width to pixels (same dim_to_px path as x/y).
             // If w is absent or uses an unsupported unit, alignment is a no-op.
             let box_w_opt: Option<f64> = text.w.as_ref().and_then(|d| dim_to_px(d.value, &d.unit));
+            // Resolve the node's box height for rotation center (optional).
+            let box_h_opt: Option<f64> = text.h.as_ref().and_then(|d| dim_to_px(d.value, &d.unit));
 
             let align = text.align.as_deref().unwrap_or("start");
             let deco_thickness = (font_size as f64 / 14.0).max(1.0);
@@ -801,6 +844,21 @@ fn compile_node(
                 Some(box_w) => total_advance > box_w,
                 None => false,
             };
+
+            // Rotation bracket: only when both w and h are present (safe pivot).
+            // Unrotated text (or text with no box) emits no PushTransform → byte-identical.
+            let rot = rotation_degrees(text.rotate.as_ref());
+            let text_rot = rot
+                .zip(box_w_opt)
+                .zip(box_h_opt)
+                .map(|((a, bw), bh)| (a, text_x + bw / 2.0, text_y + bh / 2.0));
+            if let Some((angle, cx, cy)) = text_rot {
+                commands.push(SceneCommand::PushTransform {
+                    angle_deg: angle,
+                    cx,
+                    cy,
+                });
+            }
 
             if !needs_wrap {
                 // ── FAST PATH (fits / no box): single-line two-pass emit ──────
@@ -1060,6 +1118,10 @@ fn compile_node(
                         });
                     }
                 }
+            }
+
+            if text_rot.is_some() {
+                commands.push(SceneCommand::PopTransform);
             }
         }
 
@@ -1333,6 +1395,22 @@ fn compile_node(
             let tab_width = code.tab_width.unwrap_or(4) as usize;
             let expanded = code.content.replace('\t', &" ".repeat(tab_width));
 
+            // Rotation bracket (outermost — wraps the clip). Only when both w and h
+            // are present (needed for a safe pivot center). Unrotated code nodes
+            // emit no PushTransform → byte-identical to before.
+            let rot = rotation_degrees(code.rotate.as_ref());
+            let code_rot = rot
+                .zip(code_w)
+                .zip(code_h)
+                .map(|((a, cw), ch)| (a, code_x + cw / 2.0, code_y + ch / 2.0));
+            if let Some((angle, cx, cy)) = code_rot {
+                commands.push(SceneCommand::PushTransform {
+                    angle_deg: angle,
+                    cx,
+                    cy,
+                });
+            }
+
             // Overflow clip: clipping is the default; only `overflow="visible"`
             // disables it. The clip is applied only when enabled AND both w and
             // h resolved (the clip rectangle is fully determined). Resolve the
@@ -1520,6 +1598,10 @@ fn compile_node(
             if clip_box.is_some() {
                 commands.push(SceneCommand::PopClip);
             }
+
+            if code_rot.is_some() {
+                commands.push(SceneCommand::PopTransform);
+            }
         }
 
         Node::Unknown(unknown) => {
@@ -1620,7 +1702,7 @@ fn compile_frame(
 
     // Frame clips only — it does NOT translate children (dx/dy unchanged).
     // Opacity cascades into all descendant alphas exactly as group does.
-    // DEFERRED: frame rotate (universal rotate deferral — not applied here).
+    // DEFERRED: frame rotate (leaf nodes implement rotate; frame/group rotate remains deferred).
     let child_ctx = RenderCtx {
         opacity: ctx.opacity * frame.opacity.unwrap_or(1.0).clamp(0.0, 1.0),
         dx: ctx.dx, // clip-only: no translation
@@ -1682,8 +1764,7 @@ fn compile_group(
     let child_dx = ctx.dx + group_x_px;
     let child_dy = ctx.dy + group_y_px;
 
-    // DEFERRED: group rotate — consistent with the universal rotate deferral
-    // (no node applies rotate yet).
+    // DEFERRED: group rotate — leaf nodes now implement rotate; group rotate remains deferred.
 
     // Emit children in source order; the group itself produces no command.
     let child_ctx = RenderCtx {
@@ -1796,6 +1877,19 @@ fn compile_image(
     let pos_x = object_pos_to_f64(&image.object_position_x);
     let pos_y = object_pos_to_f64(&image.object_position_y);
 
+    // Rotation bracket (outermost — wraps the box-clip). Unrotated images
+    // emit no PushTransform → byte-identical to before.
+    let rot = rotation_degrees(image.rotate.as_ref());
+    if let Some(angle) = rot {
+        let cx = x + w / 2.0;
+        let cy = y + h / 2.0;
+        commands.push(SceneCommand::PushTransform {
+            angle_deg: angle,
+            cx,
+            cy,
+        });
+    }
+
     // Box-clip (G-22): push the box, draw the image, pop. The image is always
     // clipped to its declared box ∩ enclosing clips.
     commands.push(SceneCommand::PushClip { x, y, w, h });
@@ -1811,6 +1905,10 @@ fn compile_image(
         opacity,
     });
     commands.push(SceneCommand::PopClip);
+
+    if rot.is_some() {
+        commands.push(SceneCommand::PopTransform);
+    }
 }
 
 /// Resolve an ordered point list into a flat `[x0, y0, x1, y1, …]` pixel-
@@ -1904,6 +2002,18 @@ fn compile_polygon(
     let node_opacity = poly.opacity.unwrap_or(1.0).clamp(0.0, 1.0);
     let even_odd = poly.fill_rule.as_deref() == Some("evenodd");
 
+    // Rotation bracket: compute centroid-bbox center from the flat point vec.
+    // PushTransform only when rotate is non-zero; unrotated polys are unchanged.
+    let rot = rotation_degrees(poly.rotate.as_ref());
+    if let Some(angle) = rot {
+        let (cx, cy) = flat_points_centroid_center(&flat_points);
+        commands.push(SceneCommand::PushTransform {
+            angle_deg: angle,
+            cx,
+            cy,
+        });
+    }
+
     // FILL (drawn first, stroke on top) — node-local overrides style cascade.
     let fill_prop = poly
         .fill
@@ -1941,6 +2051,10 @@ fn compile_polygon(
             stroke_width,
             closed: true,
         });
+    }
+
+    if rot.is_some() {
+        commands.push(SceneCommand::PopTransform);
     }
 }
 
@@ -1983,6 +2097,18 @@ fn compile_polyline(
     let node_opacity = poly.opacity.unwrap_or(1.0).clamp(0.0, 1.0);
     let even_odd = poly.fill_rule.as_deref() == Some("evenodd");
 
+    // Rotation bracket: compute centroid-bbox center from the flat point vec.
+    // PushTransform only when rotate is non-zero; unrotated polylines are unchanged.
+    let rot = rotation_degrees(poly.rotate.as_ref());
+    if let Some(angle) = rot {
+        let (cx, cy) = flat_points_centroid_center(&flat_points);
+        commands.push(SceneCommand::PushTransform {
+            angle_deg: angle,
+            cx,
+            cy,
+        });
+    }
+
     // FILL (drawn first; FillPolygon renderer closes the path) — style cascade.
     let fill_prop = poly
         .fill
@@ -2021,6 +2147,45 @@ fn compile_polyline(
             closed: false,
         });
     }
+
+    if rot.is_some() {
+        commands.push(SceneCommand::PopTransform);
+    }
+}
+
+/// Compute the center of the bounding box of a flat `[x0, y0, x1, y1, …]` point list.
+///
+/// Used to determine the rotation pivot for polygon/polyline nodes. The slice
+/// must be non-empty and even-length (guaranteed by the callers). If the slice
+/// is somehow empty, returns `(0.0, 0.0)` as a safe degenerate fallback
+/// (the no-panic contract requires this instead of indexing).
+fn flat_points_centroid_center(flat: &[f64]) -> (f64, f64) {
+    let mut min_x = f64::INFINITY;
+    let mut max_x = f64::NEG_INFINITY;
+    let mut min_y = f64::INFINITY;
+    let mut max_y = f64::NEG_INFINITY;
+    let mut i = 0;
+    while i + 1 < flat.len() {
+        let px = flat[i];
+        let py = flat[i + 1];
+        if px < min_x {
+            min_x = px;
+        }
+        if px > max_x {
+            max_x = px;
+        }
+        if py < min_y {
+            min_y = py;
+        }
+        if py > max_y {
+            max_y = py;
+        }
+        i += 2;
+    }
+    if min_x.is_infinite() {
+        return (0.0, 0.0);
+    }
+    ((min_x + max_x) / 2.0, (min_y + max_y) / 2.0)
 }
 
 /// Resolve an object-position anchor to `0.0..=100.0`.
@@ -5933,6 +6098,259 @@ mod tests {
             !glyph_runs[0].contains("700"),
             "regular code font_id must not encode weight 700; got {:?}",
             glyph_runs[0]
+        );
+    }
+
+    // ── Leaf-node rotation: PushTransform bracket ─────────────────────────
+
+    /// A rect with `rotate=(deg)45` must emit
+    /// PushTransform{angle_deg:45, cx:x+w/2, cy:y+h/2} before any draw
+    /// command and PopTransform after, outermost.
+    #[test]
+    fn rect_with_rotate_emits_push_pop_transform() {
+        let src = r##"zenith version=1 {
+  project id="proj.rot1" name="Rot1"
+  tokens format="zenith-token-v1" {
+    token id="color.fill" type="color" value="#ff0000"
+  }
+  styles {}
+  document id="doc.rot1" title="Rot1" {
+    page id="page.rot1" w=(px)200 h=(px)200 {
+      rect id="rect.rot" x=(px)20 y=(px)40 w=(px)100 h=(px)60 fill=(token)"color.fill" rotate=(deg)45
+    }
+  }
+}
+"##;
+        let doc = parse(src);
+        let result = compile(&doc, &default_provider());
+
+        assert!(
+            result.diagnostics.is_empty(),
+            "unexpected diagnostics: {:?}",
+            result.diagnostics
+        );
+
+        let cmds = &result.scene.commands;
+        // Expected: PushClip(page) PushTransform FillRect PopTransform PopClip
+        assert_eq!(cmds.len(), 5, "expected 5 commands; got: {:?}", cmds);
+
+        // cmds[0] = page PushClip
+        assert!(matches!(cmds[0], SceneCommand::PushClip { .. }));
+
+        // cmds[1] = PushTransform with correct angle and center
+        match &cmds[1] {
+            SceneCommand::PushTransform { angle_deg, cx, cy } => {
+                assert_eq!(*angle_deg, 45.0, "angle must be 45");
+                // x=20, w=100 → cx=70
+                assert_eq!(*cx, 70.0, "cx must be x+w/2 = 20+50 = 70");
+                // y=40, h=60 → cy=70
+                assert_eq!(*cy, 70.0, "cy must be y+h/2 = 40+30 = 70");
+            }
+            other => panic!("expected PushTransform, got {other:?}"),
+        }
+
+        // cmds[2] = FillRect (the draw command)
+        assert!(
+            matches!(cmds[2], SceneCommand::FillRect { .. }),
+            "expected FillRect at index 2, got {:?}",
+            cmds[2]
+        );
+
+        // cmds[3] = PopTransform
+        assert!(
+            matches!(cmds[3], SceneCommand::PopTransform),
+            "expected PopTransform at index 3, got {:?}",
+            cmds[3]
+        );
+
+        // cmds[4] = page PopClip
+        assert!(matches!(cmds[4], SceneCommand::PopClip));
+    }
+
+    /// A rect WITHOUT `rotate` must emit NO PushTransform — output is
+    /// byte-identical to the pre-rotation implementation.
+    #[test]
+    fn rect_without_rotate_emits_no_transform() {
+        let src = r##"zenith version=1 {
+  project id="proj.rot2" name="Rot2"
+  tokens format="zenith-token-v1" {
+    token id="color.fill" type="color" value="#00ff00"
+  }
+  styles {}
+  document id="doc.rot2" title="Rot2" {
+    page id="page.rot2" w=(px)200 h=(px)200 {
+      rect id="rect.norot" x=(px)10 y=(px)10 w=(px)80 h=(px)80 fill=(token)"color.fill"
+    }
+  }
+}
+"##;
+        let doc = parse(src);
+        let result = compile(&doc, &default_provider());
+
+        assert!(
+            result.diagnostics.is_empty(),
+            "unexpected diagnostics: {:?}",
+            result.diagnostics
+        );
+
+        let cmds = &result.scene.commands;
+        // PushClip FillRect PopClip — no transform commands at all.
+        assert_eq!(
+            cmds.len(),
+            3,
+            "expected 3 commands (no transform); got: {:?}",
+            cmds
+        );
+
+        let has_transform = cmds.iter().any(|c| {
+            matches!(
+                c,
+                SceneCommand::PushTransform { .. } | SceneCommand::PopTransform
+            )
+        });
+        assert!(
+            !has_transform,
+            "no transform commands expected for unrotated rect"
+        );
+    }
+
+    /// A rect with `rotate=(deg)0` must also emit NO PushTransform —
+    /// zero-angle rotation is a no-op.
+    #[test]
+    fn rect_with_rotate_zero_emits_no_transform() {
+        let src = r##"zenith version=1 {
+  project id="proj.rot3" name="Rot3"
+  tokens format="zenith-token-v1" {
+    token id="color.fill" type="color" value="#0000ff"
+  }
+  styles {}
+  document id="doc.rot3" title="Rot3" {
+    page id="page.rot3" w=(px)200 h=(px)200 {
+      rect id="rect.zerorot" x=(px)10 y=(px)10 w=(px)80 h=(px)80 fill=(token)"color.fill" rotate=(deg)0
+    }
+  }
+}
+"##;
+        let doc = parse(src);
+        let result = compile(&doc, &default_provider());
+
+        let cmds = &result.scene.commands;
+        let has_transform = cmds.iter().any(|c| {
+            matches!(
+                c,
+                SceneCommand::PushTransform { .. } | SceneCommand::PopTransform
+            )
+        });
+        assert!(
+            !has_transform,
+            "rotate=(deg)0 must emit no transform commands; got: {:?}",
+            cmds
+        );
+    }
+
+    /// An ellipse with `rotate=(deg)90` must emit PushTransform with the
+    /// correct center (x+w/2, y+h/2) before FillEllipse and PopTransform after.
+    #[test]
+    fn ellipse_with_rotate_emits_correct_transform() {
+        let src = r##"zenith version=1 {
+  project id="proj.rot4" name="Rot4"
+  tokens format="zenith-token-v1" {
+    token id="color.fill" type="color" value="#ffaa00"
+  }
+  styles {}
+  document id="doc.rot4" title="Rot4" {
+    page id="page.rot4" w=(px)400 h=(px)300 {
+      ellipse id="ell.rot" x=(px)50 y=(px)100 w=(px)200 h=(px)80 fill=(token)"color.fill" rotate=(deg)90
+    }
+  }
+}
+"##;
+        let doc = parse(src);
+        let result = compile(&doc, &default_provider());
+
+        assert!(
+            result.diagnostics.is_empty(),
+            "unexpected diagnostics: {:?}",
+            result.diagnostics
+        );
+
+        let cmds = &result.scene.commands;
+        // PushClip PushTransform FillEllipse PopTransform PopClip
+        assert_eq!(cmds.len(), 5, "expected 5 commands; got: {:?}", cmds);
+
+        match &cmds[1] {
+            SceneCommand::PushTransform { angle_deg, cx, cy } => {
+                assert_eq!(*angle_deg, 90.0);
+                // x=50, w=200 → cx=150
+                assert_eq!(*cx, 150.0, "cx=x+w/2=50+100=150");
+                // y=100, h=80 → cy=140
+                assert_eq!(*cy, 140.0, "cy=y+h/2=100+40=140");
+            }
+            other => panic!("expected PushTransform, got {other:?}"),
+        }
+
+        assert!(
+            matches!(cmds[2], SceneCommand::FillEllipse { .. }),
+            "expected FillEllipse at index 2"
+        );
+        assert!(
+            matches!(cmds[3], SceneCommand::PopTransform),
+            "expected PopTransform at index 3"
+        );
+    }
+
+    /// A polygon with `rotate=(deg)30` must emit PushTransform whose center
+    /// is the centroid-bbox midpoint of the (translated) points.
+    #[test]
+    fn polygon_with_rotate_emits_centroid_transform() {
+        // Triangle at (10,20) (110,20) (60,70) → bbox center = (60, 45).
+        let src = r##"zenith version=1 {
+  project id="proj.rot5" name="Rot5"
+  tokens format="zenith-token-v1" {
+    token id="color.fill" type="color" value="#aabbcc"
+  }
+  styles {}
+  document id="doc.rot5" title="Rot5" {
+    page id="page.rot5" w=(px)200 h=(px)200 {
+      polygon id="poly.rot" fill=(token)"color.fill" rotate=(deg)30 {
+        point x=(px)10 y=(px)20
+        point x=(px)110 y=(px)20
+        point x=(px)60 y=(px)70
+      }
+    }
+  }
+}
+"##;
+        let doc = parse(src);
+        let result = compile(&doc, &default_provider());
+
+        assert!(
+            result.diagnostics.is_empty(),
+            "unexpected diagnostics: {:?}",
+            result.diagnostics
+        );
+
+        let cmds = &result.scene.commands;
+        // PushClip PushTransform FillPolygon PopTransform PopClip
+        assert_eq!(cmds.len(), 5, "expected 5 commands; got: {:?}", cmds);
+
+        match &cmds[1] {
+            SceneCommand::PushTransform { angle_deg, cx, cy } => {
+                assert_eq!(*angle_deg, 30.0);
+                // x range: [10, 110] → cx = 60; y range: [20, 70] → cy = 45
+                assert_eq!(*cx, 60.0, "centroid cx must be (10+110)/2=60");
+                assert_eq!(*cy, 45.0, "centroid cy must be (20+70)/2=45");
+            }
+            other => panic!("expected PushTransform, got {other:?}"),
+        }
+
+        assert!(
+            matches!(cmds[2], SceneCommand::FillPolygon { .. }),
+            "expected FillPolygon at index 2"
+        );
+        assert!(
+            matches!(cmds[3], SceneCommand::PopTransform),
+            "expected PopTransform at index 3"
         );
     }
 }
