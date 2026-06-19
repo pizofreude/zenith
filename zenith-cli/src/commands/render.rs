@@ -130,6 +130,42 @@ pub fn to_png_with_dir(
     })
 }
 
+/// Parse `src`, validate it, and render EVERY page to PNG, returning one
+/// [`PngArtifact`] per page in document order (page 1 first).
+///
+/// Image asset bytes are sourced once from `project_dir` (shared across all
+/// pages). Returns `Err` on parse failure (exit 2), validation errors (exit 1),
+/// an empty document (exit 2), or a render failure (exit 2).
+pub fn to_png_all_pages(
+    src: &str,
+    project_dir: Option<&Path>,
+) -> Result<Vec<PngArtifact>, RenderCmdErr> {
+    let fonts = default_provider();
+    let doc = parse_validate(src)?;
+    let page_count = doc.body.pages.len();
+    if page_count == 0 {
+        return Err(RenderCmdErr::new(
+            "document has no pages to render".to_owned(),
+            2,
+        ));
+    }
+    let assets = match project_dir {
+        Some(dir) => build_asset_provider(&doc, dir),
+        None => BytesAssetProvider::new(),
+    };
+    let mut artifacts = Vec::with_capacity(page_count);
+    for page_index in 0..page_count {
+        let compile_result = compile_page(&doc, &fonts, page_index);
+        let png = render_png(&compile_result.scene, &fonts, &assets)
+            .map_err(|e| RenderCmdErr::new(format!("render error on page {page_index}: {e}"), 2))?;
+        artifacts.push(PngArtifact {
+            png,
+            diagnostics: compile_result.diagnostics,
+        });
+    }
+    Ok(artifacts)
+}
+
 /// Build a [`BytesAssetProvider`] from a parsed document and the project
 /// directory (the `.zen` file's parent).
 ///
@@ -380,5 +416,40 @@ mod tests {
     fn to_png_page_zero_is_err_exit_2() {
         let err = to_png(TWO_PAGE_DOC, 0).expect_err("page 0 is invalid (1-based)");
         assert_eq!(err.exit_code, 2, "page 0 must exit with code 2");
+    }
+
+    #[test]
+    fn to_png_all_pages_returns_one_artifact_per_page() {
+        let artifacts =
+            to_png_all_pages(TWO_PAGE_DOC, None).expect("all-pages render must succeed");
+        assert_eq!(
+            artifacts.len(),
+            2,
+            "a two-page doc must yield two artifacts"
+        );
+        for (i, a) in artifacts.iter().enumerate() {
+            assert!(
+                a.png.starts_with(&[0x89, 0x50, 0x4E, 0x47]),
+                "page {} must be a valid PNG",
+                i + 1
+            );
+        }
+        // The two pages have different backgrounds → different bytes.
+        assert_ne!(
+            artifacts[0].png, artifacts[1].png,
+            "distinct pages must render to distinct PNGs"
+        );
+    }
+
+    #[test]
+    fn to_png_all_pages_empty_doc_is_err() {
+        let empty = r##"zenith version=1 {
+  tokens format="zenith-token-v1" {}
+  styles {}
+  document id="doc.e" title="E" {}
+}
+"##;
+        let err = to_png_all_pages(empty, None).expect_err("a doc with no pages must error");
+        assert_eq!(err.exit_code, 2);
     }
 }

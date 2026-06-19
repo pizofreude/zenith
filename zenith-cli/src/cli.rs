@@ -103,6 +103,10 @@ pub struct RenderArgs {
     #[arg(long, value_name = "N", default_value_t = 1)]
     pub page: usize,
 
+    /// Render every page to `<DIR>/page-<N>.png` (1-based) instead of a single page.
+    #[arg(long, value_name = "DIR")]
+    pub all_pages: Option<PathBuf>,
+
     /// Emit machine-readable JSON (diagnostics + output path) to stdout.
     #[arg(long)]
     pub json: bool,

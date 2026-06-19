@@ -95,9 +95,11 @@ pub fn run() -> ExitCode {
         }
 
         Command::Render(args) => {
-            // Require at least one of --scene / --png.
-            if args.scene.is_none() && args.png.is_none() {
-                eprintln!("error: at least one of --scene <OUT> or --png <OUT> is required");
+            // Require at least one output flag.
+            if args.scene.is_none() && args.png.is_none() && args.all_pages.is_none() {
+                eprintln!(
+                    "error: at least one of --scene <OUT>, --png <OUT>, or --all-pages <DIR> is required"
+                );
                 return ExitCode::from(2);
             }
 
@@ -154,6 +156,43 @@ pub fn run() -> ExitCode {
                         } else {
                             println!("PNG written to '{}'", png_out.display());
                             print_diagnostics_stderr(&artifact.diagnostics);
+                        }
+                    }
+                    Err(e) => {
+                        eprintln!("{}", e.message);
+                        return ExitCode::from(e.exit_code);
+                    }
+                }
+            }
+
+            // --all-pages ─────────────────────────────────────────────────────
+            if let Some(dir) = &args.all_pages {
+                if let Err(e) = std::fs::create_dir_all(dir) {
+                    eprintln!("error creating directory '{}': {}", dir.display(), e);
+                    return ExitCode::from(2);
+                }
+                match commands::render::to_png_all_pages(&src, args.path.parent()) {
+                    Ok(artifacts) => {
+                        let mut all_diagnostics = Vec::new();
+                        for (i, artifact) in artifacts.iter().enumerate() {
+                            let page_path = dir.join(format!("page-{}.png", i + 1));
+                            if let Err(e) = write_bytes(&page_path, &artifact.png) {
+                                eprintln!("error writing PNG to '{}': {}", page_path.display(), e);
+                                return ExitCode::from(2);
+                            }
+                            all_diagnostics.extend(artifact.diagnostics.iter());
+                        }
+                        if args.json {
+                            let out = RenderOutput {
+                                schema: "zenith-render-v1",
+                                diagnostics: all_diagnostics.iter().map(|d| (*d).into()).collect(),
+                            };
+                            println!("{}", serialize_pretty(&out));
+                        } else {
+                            println!("{} page(s) written to '{}'", artifacts.len(), dir.display());
+                            for d in all_diagnostics {
+                                eprintln!("{}", commands::format_diagnostic_line(d));
+                            }
                         }
                     }
                     Err(e) => {
