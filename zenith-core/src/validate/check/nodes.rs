@@ -566,6 +566,17 @@ pub(super) fn walk_node(
             }
 
             // Visual properties.
+            // clip-radius is a dimension token (mirror rect `radius`); only
+            // meaningful for clip="rounded" but type-checked whenever present.
+            check_visual_prop(
+                &img.id,
+                "clip-radius",
+                img.clip_radius.as_ref(),
+                VisualExpect::Dimension,
+                referenced_token_ids,
+                resolved_tokens,
+                diagnostics,
+            );
             check_visual_prop(
                 &img.id,
                 "shadow",

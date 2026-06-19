@@ -9,7 +9,8 @@ use std::sync::Arc;
 use zenith_core::{AssetKind, BytesAssetProvider, FontStyle, default_provider};
 use zenith_layout::{RustybuzzEngine, ShapeRequest, TextLayoutEngine};
 use zenith_scene::{
-    Color, FitMode, GradientPaint, GradientStop, Scene, SceneCommand, SceneGlyph, ShadowSpec,
+    Color, FitMode, GradientPaint, GradientStop, ImageClip, Scene, SceneCommand, SceneGlyph,
+    ShadowSpec,
 };
 
 use crate::backend::RasterBackend;
@@ -395,6 +396,7 @@ fn swatch_scene() -> Scene {
         pos_x: 50.0,
         pos_y: 50.0,
         opacity: 1.0,
+        clip_shape: None,
     });
     scene.commands.push(SceneCommand::PopClip);
     scene.commands.push(SceneCommand::PopClip);
@@ -431,6 +433,77 @@ fn draw_image_stretch_renders() {
     assert!(
         any_ink,
         "DrawImage stretch must rasterize at least one non-transparent pixel"
+    );
+}
+
+// ── image clip="ellipse": clip takes effect + determinism ─────────────
+
+/// Build a scene that draws the swatch stretched to fill the whole page,
+/// clipped to the inscribed ellipse (circle, since the box is square).
+fn swatch_ellipse_scene() -> Scene {
+    let mut scene = Scene::new(40.0, 40.0);
+    scene.commands.push(SceneCommand::PushClip {
+        x: 0.0,
+        y: 0.0,
+        w: 40.0,
+        h: 40.0,
+    });
+    // Box-clip the compiler always emits before DrawImage.
+    scene.commands.push(SceneCommand::PushClip {
+        x: 0.0,
+        y: 0.0,
+        w: 40.0,
+        h: 40.0,
+    });
+    scene.commands.push(SceneCommand::DrawImage {
+        x: 0.0,
+        y: 0.0,
+        w: 40.0,
+        h: 40.0,
+        asset_id: "asset.swatch".to_string(),
+        fit: FitMode::Stretch,
+        pos_x: 50.0,
+        pos_y: 50.0,
+        opacity: 1.0,
+        clip_shape: Some(ImageClip::Ellipse),
+    });
+    scene.commands.push(SceneCommand::PopClip);
+    scene.commands.push(SceneCommand::PopClip);
+    scene
+}
+
+#[test]
+fn draw_image_ellipse_clip_takes_effect() {
+    let backend = TinySkiaBackend;
+    let fonts = default_provider();
+    let assets = swatch_provider();
+    let scene = swatch_ellipse_scene();
+
+    let img1 = backend
+        .rasterize(&scene, &fonts, &assets)
+        .expect("rasterize 1");
+    let img2 = backend
+        .rasterize(&scene, &fonts, &assets)
+        .expect("rasterize 2");
+
+    // (i) determinism: byte-identical across two rasterizes.
+    assert_eq!(
+        img1.rgba, img2.rgba,
+        "two rasterizes of the ellipse-clipped scene must be byte-identical"
+    );
+
+    // (ii) the center pixel (inside the inscribed ellipse) is painted, while a
+    // corner pixel (outside the ellipse) is fully transparent — proving the
+    // ellipse clip mask took effect (a plain box-clip would paint the corner).
+    let (_, _, _, center_a) = pixel(&img1.rgba, img1.width, 20, 20);
+    let (_, _, _, corner_a) = pixel(&img1.rgba, img1.width, 0, 0);
+    assert!(
+        center_a > 0,
+        "center pixel must be painted inside the ellipse clip"
+    );
+    assert_eq!(
+        corner_a, 0,
+        "corner pixel must be clipped out by the ellipse mask"
     );
 }
 
@@ -618,6 +691,7 @@ fn draw_image_missing_asset_is_skipped() {
         pos_x: 50.0,
         pos_y: 50.0,
         opacity: 1.0,
+        clip_shape: None,
     });
     scene.commands.push(SceneCommand::PopClip);
 
@@ -1030,6 +1104,7 @@ fn draw_image_svg_asset_renders_red_pixels() {
         pos_x: 50.0,
         pos_y: 50.0,
         opacity: 1.0,
+        clip_shape: None,
     });
     scene.commands.push(SceneCommand::PopClip);
 
@@ -1081,6 +1156,7 @@ fn draw_image_svg_text_renders_red_pixels() {
         pos_x: 50.0,
         pos_y: 50.0,
         opacity: 1.0,
+        clip_shape: None,
     });
     scene.commands.push(SceneCommand::PopClip);
 

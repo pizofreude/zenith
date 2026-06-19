@@ -239,6 +239,68 @@ fn test_syntax_theme_parse_format_round_trip() {
     );
 }
 
+/// **Image clip round-trip**: `clip="rounded"` + `clip-radius=(token)"..."`
+/// must parse onto the `ImageNode`, be re-emitted by the formatter, and survive
+/// a format → re-parse round-trip.
+#[test]
+fn test_image_clip_parse_format_round_trip() {
+    let src = r##"zenith version=1 {
+  project id="proj.iclip" name="IClip"
+  assets {
+    asset id="asset.pfp" kind="image" src="assets/pfp.png"
+  }
+  tokens format="zenith-token-v1" {
+    token id="size.radius.avatar" type="dimension" value=(px)24
+  }
+  styles {
+  }
+  document id="doc.iclip" title="IClip" {
+    page id="page.iclip" w=(px)400 h=(px)300 {
+      image id="av" asset="asset.pfp" x=(px)0 y=(px)0 w=(px)100 h=(px)100 fit="cover" clip="rounded" clip-radius=(token)"size.radius.avatar"
+    }
+  }
+}
+"##;
+    let adapter = KdlAdapter;
+    let doc = adapter.parse(src.as_bytes()).expect("parse must succeed");
+    let image_node = match &doc.body.pages[0].children[0] {
+        Node::Image(i) => i,
+        other => panic!("expected Image node, got {other:?}"),
+    };
+    assert_eq!(image_node.clip.as_deref(), Some("rounded"));
+    use crate::ast::value::PropertyValue;
+    assert_eq!(
+        image_node.clip_radius,
+        Some(PropertyValue::TokenRef("size.radius.avatar".to_owned())),
+        "clip-radius must parse as a token ref"
+    );
+
+    let formatted = format_document(&doc).expect("format must succeed");
+    let formatted_str = String::from_utf8(formatted).expect("formatted must be utf8");
+    assert!(
+        formatted_str.contains("clip=\"rounded\""),
+        "formatter must emit clip=\"rounded\"; got:\n{formatted_str}"
+    );
+    assert!(
+        formatted_str.contains("clip-radius=(token)\"size.radius.avatar\""),
+        "formatter must emit clip-radius token; got:\n{formatted_str}"
+    );
+
+    let doc2 = adapter
+        .parse(formatted_str.as_bytes())
+        .expect("re-parse after format");
+    let image2 = match &doc2.body.pages[0].children[0] {
+        Node::Image(i) => i,
+        other => panic!("expected Image node on re-parse, got {other:?}"),
+    };
+    assert_eq!(image2.clip.as_deref(), Some("rounded"));
+    assert_eq!(
+        image2.clip_radius,
+        Some(PropertyValue::TokenRef("size.radius.avatar".to_owned())),
+        "clip-radius must survive a format → re-parse round-trip"
+    );
+}
+
 /// **Number formatting**: integral `f64` emits without decimal point.
 #[test]
 fn test_number_formatting_integral() {

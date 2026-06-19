@@ -88,6 +88,29 @@ pub enum FitMode {
     None,
 }
 
+// ── Image clip shape ──────────────────────────────────────────────────────────
+
+/// A non-rectangular clip shape applied to a [`SceneCommand::DrawImage`].
+///
+/// `None` on the `DrawImage` (no `clip_shape`) means the default rectangular
+/// box-clip (the raster is clipped to its declared `[x, y, w, h]` box). A
+/// `Some` value constrains the blit to a shape INSCRIBED in that box:
+///
+/// - `Ellipse` — the ellipse inscribed in the box (a circle when the box is
+///   square): the circular-avatar case.
+/// - `RoundedRect { radius }` — a rounded rectangle with uniform corner radius.
+///
+/// Tagged in JSON via `#[serde(tag = "shape")]` for a self-describing form,
+/// consistent with the `op`-tagged [`SceneCommand`].
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(tag = "shape")]
+pub enum ImageClip {
+    /// Clip to the ellipse inscribed in the image's `[x, y, w, h]` box.
+    Ellipse,
+    /// Clip to a rounded rectangle with uniform corner `radius` (pixels).
+    RoundedRect { radius: f64 },
+}
+
 // ── Scene commands ────────────────────────────────────────────────────────────
 
 /// A single display-list command in the scene.
@@ -227,6 +250,10 @@ pub enum SceneCommand {
         pos_y: f64,
         /// Effective opacity (node opacity × cascaded ctx opacity), `0.0..=1.0`.
         opacity: f64,
+        /// Optional non-rectangular clip shape inscribed in the box. `None` =
+        /// the default rectangular box-clip (existing behavior, unchanged).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        clip_shape: Option<ImageClip>,
     },
     /// Draw a pre-resolved SVG asset.
     DrawSvgAsset {

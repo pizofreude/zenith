@@ -37,5 +37,6 @@ pub mod ir;
 // Curated flat re-exports.
 pub use compile::{CompileResult, compile, compile_page};
 pub use ir::{
-    Color, FitMode, GradientPaint, GradientStop, Scene, SceneCommand, SceneGlyph, ShadowSpec,
+    Color, FitMode, GradientPaint, GradientStop, ImageClip, Scene, SceneCommand, SceneGlyph,
+    ShadowSpec,
 };

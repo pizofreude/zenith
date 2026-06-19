@@ -4,11 +4,11 @@ use std::collections::BTreeMap;
 
 use zenith_core::{Diagnostic, ImageNode, ObjectPosition, ResolvedToken, dim_to_px};
 
-use crate::ir::{FitMode, SceneCommand};
+use crate::ir::{FitMode, ImageClip, SceneCommand};
 
 use super::RenderCtx;
 use super::paint::resolve_property_shadow;
-use super::util::{rotation_degrees, unsupported_unit_diag};
+use super::util::{resolve_property_dimension_px, rotation_degrees, unsupported_unit_diag};
 
 /// Compile an `image` leaf node.
 ///
@@ -102,6 +102,19 @@ pub(super) fn compile_image(
     let pos_x = object_pos_to_f64(&image.object_position_x);
     let pos_y = object_pos_to_f64(&image.object_position_y);
 
+    // Resolve the clip-to-shape mode. `"ellipse"`/`"circle"` → the inscribed
+    // ellipse; `"rounded"` → a rounded rect using `clip-radius` (resolved to px
+    // exactly like rect `radius`, default 0.0). `"rect"`/absent/unknown → None,
+    // i.e. the default rectangular box-clip (byte-identical to before).
+    let clip_shape = match image.clip.as_deref() {
+        Some("ellipse") | Some("circle") => Some(ImageClip::Ellipse),
+        Some("rounded") => {
+            let radius = resolve_property_dimension_px(&image.clip_radius, resolved, 0.0);
+            Some(ImageClip::RoundedRect { radius })
+        }
+        _ => None,
+    };
+
     // Rotation bracket (outermost — wraps the box-clip). Unrotated images
     // emit no PushTransform → byte-identical to before.
     let rot = rotation_degrees(image.rotate.as_ref());
@@ -142,6 +155,7 @@ pub(super) fn compile_image(
         pos_x,
         pos_y,
         opacity,
+        clip_shape,
     });
     commands.push(SceneCommand::PopClip);
 

@@ -184,6 +184,8 @@ fn write_image(i: &ImageNode, out: &mut String, depth: usize) {
     write_opt_dimension(out, "w", &i.w);
     write_opt_dimension(out, "h", &i.h);
     write_opt_str(out, "fit", &i.fit);
+    write_opt_str(out, "clip", &i.clip);
+    write_opt_property_value(out, "clip-radius", &i.clip_radius);
     write_opt_object_position(out, "object-position-x", &i.object_position_x);
     write_opt_object_position(out, "object-position-y", &i.object_position_y);
     write_opt_property_value(out, "shadow", &i.shadow);

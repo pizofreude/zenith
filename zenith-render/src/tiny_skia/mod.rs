@@ -14,10 +14,10 @@ use resvg::usvg;
 use resvg::usvg::TreeParsing;
 use resvg::usvg::TreeTextToPath;
 use tiny_skia::{
-    FillRule, FilterQuality, Paint, PathBuilder, Pixmap, PixmapPaint, Rect, Stroke, Transform,
+    FillRule, FilterQuality, Mask, Paint, PathBuilder, Pixmap, PixmapPaint, Rect, Stroke, Transform,
 };
 use zenith_core::{AssetKind, AssetProvider, FontProvider};
-use zenith_scene::{FitMode, Scene, SceneCommand, ShadowSpec};
+use zenith_scene::{FitMode, ImageClip, Scene, SceneCommand, ShadowSpec};
 
 use crate::backend::{RasterBackend, RasterImage};
 use crate::error::RenderError;
@@ -500,6 +500,7 @@ impl RasterBackend for TinySkiaBackend {
                     pos_x,
                     pos_y,
                     opacity,
+                    clip_shape,
                 } => {
                     // ── a. Resolve bytes; only raster images are drawn ────────
                     let Some(asset) = assets.by_id(asset_id) else {
@@ -614,6 +615,51 @@ impl RasterBackend for TinySkiaBackend {
                             Some(m) => m,
                         };
 
+                    // ── d2. Clip-to-shape (ellipse / rounded rect) ────────────
+                    // When the image carries a non-rectangular clip shape, build
+                    // a path Mask from the shape INSCRIBED in the device box and
+                    // use it in place of the box mask. The shape is a subset of
+                    // the box (G-22), so the shape mask alone enforces both the
+                    // box clip and the shape clip. AA-on path fill is
+                    // deterministic same-machine, consistent with FillEllipse.
+                    // `current_ts` is applied so a rotated image clips to the
+                    // rotated shape (identity case → unchanged geometry).
+                    // None / unset clip_shape leaves `mask` untouched → the
+                    // non-clipped path is byte-identical to before.
+                    let shape_mask: Option<Mask> = match clip_shape {
+                        None => None,
+                        Some(shape) => {
+                            let Some(rect) =
+                                Rect::from_xywh(*x as f32, *y as f32, *w as f32, *h as f32)
+                            else {
+                                continue; // degenerate box: nothing to draw
+                            };
+                            let path = match shape {
+                                ImageClip::Ellipse => PathBuilder::from_oval(rect),
+                                ImageClip::RoundedRect { radius } => build_rounded_rect_path(
+                                    *x as f32,
+                                    *y as f32,
+                                    *w as f32,
+                                    *h as f32,
+                                    *radius as f32,
+                                ),
+                            };
+                            let Some(path) = path else {
+                                continue; // degenerate path: nothing to draw
+                            };
+                            let Some(mut m) = Mask::new(width, height) else {
+                                continue;
+                            };
+                            m.fill_path(&path, FillRule::Winding, true, current_ts);
+                            Some(m)
+                        }
+                    };
+                    // Prefer the shape mask when present; else the box mask.
+                    let mask: Option<&Mask> = match &shape_mask {
+                        Some(m) => Some(m),
+                        None => mask.as_ref(),
+                    };
+
                     // ── e. Paint: opacity + bilinear filtering ────────────────
                     let paint = PixmapPaint {
                         opacity: (*opacity as f32).clamp(0.0, 1.0),
@@ -631,7 +677,7 @@ impl RasterBackend for TinySkiaBackend {
 
                     // ── g. Composite. Box-clip (G-22) is enforced by the Mask;
                     // deterministic same-machine (pure-software bilinear). ─────
-                    target.draw_pixmap(0, 0, src.as_ref(), &paint, transform, mask.as_ref());
+                    target.draw_pixmap(0, 0, src.as_ref(), &paint, transform, mask);
                 }
 
                 SceneCommand::FillPolygon {

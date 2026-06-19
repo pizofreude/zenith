@@ -5,7 +5,7 @@
 //! module's `use` block is trimmed to what production code references.
 
 use super::{CompileResult, compile, compile_page};
-use crate::ir::{Color, FitMode, SceneCommand};
+use crate::ir::{Color, FitMode, ImageClip, SceneCommand};
 use zenith_core::{Document, KdlAdapter, KdlSource, default_provider};
 
 // ── Helper to parse a .zen source string ──────────────────────────────
@@ -1440,6 +1440,7 @@ page id="page.i1" w=(px)320 h=(px)200 {
             pos_x,
             pos_y,
             opacity,
+            clip_shape,
         } => {
             assert_eq!(*x, 40.0);
             assert_eq!(*y, 40.0);
@@ -1450,6 +1451,7 @@ page id="page.i1" w=(px)320 h=(px)200 {
             assert_eq!(*pos_x, 50.0, "default object-position-x must be 50");
             assert_eq!(*pos_y, 50.0, "default object-position-y must be 50");
             assert_eq!(*opacity, 1.0);
+            assert_eq!(*clip_shape, None, "default image has no clip shape");
         }
         other => panic!("expected DrawImage, got {other:?}"),
     }
@@ -1527,6 +1529,115 @@ page id="page.i3" w=(px)320 h=(px)200 {
             .any(|c| matches!(c, SceneCommand::DrawImage { .. })),
         "no DrawImage expected for invisible image"
     );
+}
+
+// ── image clip="ellipse" → DrawImage.clip_shape = Some(Ellipse) ───────
+
+#[test]
+fn image_clip_ellipse_sets_clip_shape() {
+    let src = r##"zenith version=1 {
+  project id="proj.ic1" name="IC1"
+  assets {
+asset id="asset.pfp" kind="image" src="assets/pfp.png"
+  }
+  tokens format="zenith-token-v1" {}
+  styles {}
+  document id="doc.ic1" title="IC1" {
+page id="page.ic1" w=(px)320 h=(px)200 {
+  image id="img.ic1" asset="asset.pfp" x=(px)0 y=(px)0 w=(px)100 h=(px)100 fit="cover" clip="ellipse"
+}
+  }
+}
+"##;
+    let doc = parse(src);
+    let result = compile(&doc, &default_provider());
+
+    let clip = result
+        .scene
+        .commands
+        .iter()
+        .find_map(|c| match c {
+            SceneCommand::DrawImage { clip_shape, .. } => Some(clip_shape.clone()),
+            _ => None,
+        })
+        .expect("must emit a DrawImage");
+    assert_eq!(
+        clip,
+        Some(ImageClip::Ellipse),
+        "clip=\"ellipse\" must set clip_shape to Ellipse"
+    );
+}
+
+// ── image clip="rounded" clip-radius=(token) → RoundedRect{radius} ────
+
+#[test]
+fn image_clip_rounded_resolves_radius() {
+    let src = r##"zenith version=1 {
+  project id="proj.ic2" name="IC2"
+  assets {
+asset id="asset.av" kind="image" src="assets/av.png"
+  }
+  tokens format="zenith-token-v1" {
+token id="size.radius.avatar" type="dimension" value=(px)24
+  }
+  styles {}
+  document id="doc.ic2" title="IC2" {
+page id="page.ic2" w=(px)320 h=(px)200 {
+  image id="img.ic2" asset="asset.av" x=(px)0 y=(px)0 w=(px)100 h=(px)100 fit="cover" clip="rounded" clip-radius=(token)"size.radius.avatar"
+}
+  }
+}
+"##;
+    let doc = parse(src);
+    let result = compile(&doc, &default_provider());
+
+    let clip = result
+        .scene
+        .commands
+        .iter()
+        .find_map(|c| match c {
+            SceneCommand::DrawImage { clip_shape, .. } => Some(clip_shape.clone()),
+            _ => None,
+        })
+        .expect("must emit a DrawImage");
+    assert_eq!(
+        clip,
+        Some(ImageClip::RoundedRect { radius: 24.0 }),
+        "clip=\"rounded\" must resolve clip-radius token to px"
+    );
+}
+
+// ── image with no clip → DrawImage.clip_shape = None ──────────────────
+
+#[test]
+fn image_no_clip_has_none_clip_shape() {
+    let src = r##"zenith version=1 {
+  project id="proj.ic3" name="IC3"
+  assets {
+asset id="asset.bg" kind="image" src="assets/bg.png"
+  }
+  tokens format="zenith-token-v1" {}
+  styles {}
+  document id="doc.ic3" title="IC3" {
+page id="page.ic3" w=(px)320 h=(px)200 {
+  image id="img.ic3" asset="asset.bg" x=(px)0 y=(px)0 w=(px)100 h=(px)100 fit="cover"
+}
+  }
+}
+"##;
+    let doc = parse(src);
+    let result = compile(&doc, &default_provider());
+
+    let clip = result
+        .scene
+        .commands
+        .iter()
+        .find_map(|c| match c {
+            SceneCommand::DrawImage { clip_shape, .. } => Some(clip_shape.clone()),
+            _ => None,
+        })
+        .expect("must emit a DrawImage");
+    assert_eq!(clip, None, "image without clip must have clip_shape None");
 }
 
 // ── image opacity cascades under a group opacity ──────────────────────

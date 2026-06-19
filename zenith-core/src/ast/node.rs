@@ -83,6 +83,13 @@ pub struct ImageNode {
     /// Fit mode string (`contain`/`cover`/`stretch`/`none`); validated, not
     /// enum-typed in the AST so unknown values survive for forward-compat.
     pub fit: Option<String>,
+    /// Clip-to-shape mode (`"ellipse"`/`"rounded"`/`"rect"`); absent or an
+    /// unrecognized value means the default rectangular box-clip. Validated as a
+    /// plain string so unknown values survive for forward-compat.
+    pub clip: Option<String>,
+    /// Corner radius for `clip="rounded"`, as a `(token)` dimension ref. Only
+    /// meaningful when `clip="rounded"`; absent → radius 0 (sharp corners).
+    pub clip_radius: Option<PropertyValue>,
     /// Horizontal object-position anchor (string anchor or `(pct)N`).
     pub object_position_x: Option<ObjectPosition>,
     /// Vertical object-position anchor (string anchor or `(pct)N`).
