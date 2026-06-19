@@ -7,6 +7,9 @@
 /resource/
 /resources/
 
+# Conformance scratch (sim .zen + rendered PNGs) — regenerable, promoted to tests later.
+/conformance/
+
 # Agent/editor local instructions and caches
 AGENTS.md
 CLAUDE.md
