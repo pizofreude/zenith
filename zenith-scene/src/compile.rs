@@ -280,26 +280,79 @@ fn compile_node(
             let x = x_raw + ctx.dx;
             let y = y_raw + ctx.dy;
 
-            // Resolve fill color — node-local prop overrides style cascade.
+            // Apply node opacity then cascade ctx.opacity on top.
+            let node_opacity = rect.opacity.unwrap_or(1.0).clamp(0.0, 1.0);
+
+            // Resolve corner radius (optional; 0.0 when absent). Node-local
+            // overrides style.
+            let radius_prop = rect
+                .radius
+                .clone()
+                .or_else(|| style_prop(&rect.style, style_map, "radius").cloned());
+            let radius = resolve_property_dimension_px(&radius_prop, resolved, 0.0);
+
+            // FILL (emitted first, under the stroke) — node-local prop overrides
+            // style cascade.
             let fill_prop = rect
                 .fill
                 .as_ref()
                 .or_else(|| style_prop(&rect.style, style_map, "fill"));
-            let Some(fill_prop) = fill_prop else {
-                // No fill → nothing to draw for a fill-only skeleton.
-                return;
-            };
-            let Some(mut color) =
-                resolve_property_color(fill_prop, resolved, diagnostics, &rect.id)
-            else {
-                return;
-            };
+            if let Some(fill_prop) = fill_prop
+                && let Some(mut color) =
+                    resolve_property_color(fill_prop, resolved, diagnostics, &rect.id)
+            {
+                color.a = (color.a as f64 * node_opacity * ctx.opacity).round() as u8;
+                if radius > 0.0 {
+                    commands.push(SceneCommand::FillRoundedRect {
+                        x,
+                        y,
+                        w,
+                        h,
+                        radius,
+                        color,
+                    });
+                } else {
+                    commands.push(SceneCommand::FillRect { x, y, w, h, color });
+                }
+            }
 
-            // Apply node opacity then cascade ctx.opacity on top.
-            let node_opacity = rect.opacity.unwrap_or(1.0).clamp(0.0, 1.0);
-            color.a = (color.a as f64 * node_opacity * ctx.opacity).round() as u8;
-
-            commands.push(SceneCommand::FillRect { x, y, w, h, color });
+            // STROKE (emitted on top of the fill) — node-local prop overrides
+            // style cascade.
+            let stroke_prop = rect
+                .stroke
+                .as_ref()
+                .or_else(|| style_prop(&rect.style, style_map, "stroke"));
+            if let Some(stroke_prop) = stroke_prop
+                && let Some(mut color) =
+                    resolve_property_color(stroke_prop, resolved, diagnostics, &rect.id)
+            {
+                color.a = (color.a as f64 * node_opacity * ctx.opacity).round() as u8;
+                let sw = rect
+                    .stroke_width
+                    .clone()
+                    .or_else(|| style_prop(&rect.style, style_map, "stroke-width").cloned());
+                let stroke_width = resolve_property_dimension_px(&sw, resolved, 1.0);
+                if radius > 0.0 {
+                    commands.push(SceneCommand::StrokeRoundedRect {
+                        x,
+                        y,
+                        w,
+                        h,
+                        radius,
+                        color,
+                        stroke_width,
+                    });
+                } else {
+                    commands.push(SceneCommand::StrokeRect {
+                        x,
+                        y,
+                        w,
+                        h,
+                        color,
+                        stroke_width,
+                    });
+                }
+            }
         }
 
         Node::Ellipse(ellipse) => {
@@ -3126,6 +3179,224 @@ mod tests {
                 assert!(closed, "polygon stroke must be closed");
             }
             other => panic!("expected StrokePolyline from style cascade, got {other:?}"),
+        }
+    }
+
+    // ── rect: fill only → FillRect (regression) ──────────────────────────
+
+    #[test]
+    fn rect_fill_only_emits_fill_rect() {
+        let src = r##"zenith version=1 {
+  project id="proj.rf" name="RF"
+  tokens format="zenith-token-v1" {
+    token id="color.fill" type="color" value="#112233"
+  }
+  styles {}
+  document id="doc.rf" title="RF" {
+    page id="page.rf" w=(px)100 h=(px)100 {
+      rect id="rect.rf" x=(px)10 y=(px)10 w=(px)40 h=(px)40 fill=(token)"color.fill"
+    }
+  }
+}
+"##;
+        let doc = parse(src);
+        let result = compile(&doc, &default_provider());
+        assert!(
+            result.diagnostics.is_empty(),
+            "unexpected diagnostics: {:?}",
+            result.diagnostics
+        );
+        let cmds = &result.scene.commands;
+        // PushClip, FillRect, PopClip
+        assert_eq!(cmds.len(), 3, "expected 3 commands; got: {:?}", cmds);
+        assert!(
+            matches!(cmds[1], SceneCommand::FillRect { .. }),
+            "expected a single FillRect; got {:?}",
+            cmds[1]
+        );
+    }
+
+    // ── rect: fill + stroke → FillRect then StrokeRect ───────────────────
+
+    #[test]
+    fn rect_fill_and_stroke_emits_fill_then_stroke() {
+        let src = r##"zenith version=1 {
+  project id="proj.rfs" name="RFS"
+  tokens format="zenith-token-v1" {
+    token id="color.fill" type="color" value="#112233"
+    token id="color.stroke" type="color" value="#445566"
+    token id="size.sw" type="dimension" value=(px)4
+  }
+  styles {}
+  document id="doc.rfs" title="RFS" {
+    page id="page.rfs" w=(px)100 h=(px)100 {
+      rect id="rect.rfs" x=(px)10 y=(px)10 w=(px)40 h=(px)40 fill=(token)"color.fill" stroke=(token)"color.stroke" stroke-width=(token)"size.sw"
+    }
+  }
+}
+"##;
+        let doc = parse(src);
+        let result = compile(&doc, &default_provider());
+        assert!(
+            result.diagnostics.is_empty(),
+            "unexpected diagnostics: {:?}",
+            result.diagnostics
+        );
+        let cmds = &result.scene.commands;
+        // PushClip, FillRect, StrokeRect, PopClip
+        assert_eq!(cmds.len(), 4, "expected 4 commands; got: {:?}", cmds);
+        match &cmds[1] {
+            SceneCommand::FillRect { color, .. } => assert_eq!(color.r, 0x11),
+            other => panic!("expected FillRect first, got {other:?}"),
+        }
+        match &cmds[2] {
+            SceneCommand::StrokeRect {
+                color,
+                stroke_width,
+                ..
+            } => {
+                assert_eq!(color.r, 0x44, "stroke color r must be 0x44");
+                assert!(
+                    (*stroke_width - 4.0).abs() < 0.01,
+                    "stroke-width must be 4px"
+                );
+            }
+            other => panic!("expected StrokeRect on top, got {other:?}"),
+        }
+    }
+
+    // ── rect: fill + radius → FillRoundedRect ────────────────────────────
+
+    #[test]
+    fn rect_fill_with_radius_emits_fill_rounded_rect() {
+        let src = r##"zenith version=1 {
+  project id="proj.rfr" name="RFR"
+  tokens format="zenith-token-v1" {
+    token id="color.fill" type="color" value="#112233"
+    token id="size.r" type="dimension" value=(px)8
+  }
+  styles {}
+  document id="doc.rfr" title="RFR" {
+    page id="page.rfr" w=(px)100 h=(px)100 {
+      rect id="rect.rfr" x=(px)10 y=(px)10 w=(px)40 h=(px)40 fill=(token)"color.fill" radius=(token)"size.r"
+    }
+  }
+}
+"##;
+        let doc = parse(src);
+        let result = compile(&doc, &default_provider());
+        assert!(
+            result.diagnostics.is_empty(),
+            "unexpected diagnostics: {:?}",
+            result.diagnostics
+        );
+        let cmds = &result.scene.commands;
+        // PushClip, FillRoundedRect, PopClip
+        assert_eq!(cmds.len(), 3, "expected 3 commands; got: {:?}", cmds);
+        match &cmds[1] {
+            SceneCommand::FillRoundedRect { radius, color, .. } => {
+                assert_eq!(color.r, 0x11);
+                assert!((*radius - 8.0).abs() < 0.01, "radius must be 8px");
+            }
+            other => panic!("expected FillRoundedRect, got {other:?}"),
+        }
+    }
+
+    // ── rect: fill + stroke + radius → FillRoundedRect then StrokeRoundedRect
+
+    #[test]
+    fn rect_fill_stroke_radius_emits_rounded_fill_then_rounded_stroke() {
+        let src = r##"zenith version=1 {
+  project id="proj.rfsr" name="RFSR"
+  tokens format="zenith-token-v1" {
+    token id="color.fill" type="color" value="#112233"
+    token id="color.stroke" type="color" value="#445566"
+    token id="size.sw" type="dimension" value=(px)4
+    token id="size.r" type="dimension" value=(px)8
+  }
+  styles {}
+  document id="doc.rfsr" title="RFSR" {
+    page id="page.rfsr" w=(px)100 h=(px)100 {
+      rect id="rect.rfsr" x=(px)10 y=(px)10 w=(px)40 h=(px)40 fill=(token)"color.fill" stroke=(token)"color.stroke" stroke-width=(token)"size.sw" radius=(token)"size.r"
+    }
+  }
+}
+"##;
+        let doc = parse(src);
+        let result = compile(&doc, &default_provider());
+        assert!(
+            result.diagnostics.is_empty(),
+            "unexpected diagnostics: {:?}",
+            result.diagnostics
+        );
+        let cmds = &result.scene.commands;
+        // PushClip, FillRoundedRect, StrokeRoundedRect, PopClip
+        assert_eq!(cmds.len(), 4, "expected 4 commands; got: {:?}", cmds);
+        match &cmds[1] {
+            SceneCommand::FillRoundedRect { radius, .. } => {
+                assert!((*radius - 8.0).abs() < 0.01, "fill radius must be 8px");
+            }
+            other => panic!("expected FillRoundedRect first, got {other:?}"),
+        }
+        match &cmds[2] {
+            SceneCommand::StrokeRoundedRect {
+                radius,
+                stroke_width,
+                color,
+                ..
+            } => {
+                assert_eq!(color.r, 0x44);
+                assert!((*radius - 8.0).abs() < 0.01, "stroke radius must be 8px");
+                assert!(
+                    (*stroke_width - 4.0).abs() < 0.01,
+                    "stroke-width must be 4px"
+                );
+            }
+            other => panic!("expected StrokeRoundedRect on top, got {other:?}"),
+        }
+    }
+
+    // ── rect: stroke only (no fill) → StrokeRect only ────────────────────
+
+    #[test]
+    fn rect_stroke_only_emits_stroke_rect() {
+        let src = r##"zenith version=1 {
+  project id="proj.rso" name="RSO"
+  tokens format="zenith-token-v1" {
+    token id="color.stroke" type="color" value="#445566"
+    token id="size.sw" type="dimension" value=(px)2
+  }
+  styles {}
+  document id="doc.rso" title="RSO" {
+    page id="page.rso" w=(px)100 h=(px)100 {
+      rect id="rect.rso" x=(px)10 y=(px)10 w=(px)40 h=(px)40 stroke=(token)"color.stroke" stroke-width=(token)"size.sw"
+    }
+  }
+}
+"##;
+        let doc = parse(src);
+        let result = compile(&doc, &default_provider());
+        assert!(
+            result.diagnostics.is_empty(),
+            "unexpected diagnostics: {:?}",
+            result.diagnostics
+        );
+        let cmds = &result.scene.commands;
+        // PushClip, StrokeRect, PopClip
+        assert_eq!(cmds.len(), 3, "expected 3 commands; got: {:?}", cmds);
+        match &cmds[1] {
+            SceneCommand::StrokeRect {
+                color,
+                stroke_width,
+                ..
+            } => {
+                assert_eq!(color.r, 0x44);
+                assert!(
+                    (*stroke_width - 2.0).abs() < 0.01,
+                    "stroke-width must be 2px"
+                );
+            }
+            other => panic!("expected a single StrokeRect, got {other:?}"),
         }
     }
 }

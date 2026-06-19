@@ -83,6 +83,16 @@ pub enum SceneCommand {
         radius: f64,
         color: Color,
     },
+    /// Stroke a rectangle with uniform corner radius.
+    StrokeRoundedRect {
+        x: f64,
+        y: f64,
+        w: f64,
+        h: f64,
+        radius: f64,
+        color: Color,
+        stroke_width: f64,
+    },
     /// Fill an axis-aligned ellipse.
     FillEllipse {
         x: f64,

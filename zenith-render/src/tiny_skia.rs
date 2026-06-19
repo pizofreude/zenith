@@ -126,6 +126,29 @@ fn build_poly_path(points: &[f64], closed: bool) -> Option<Path> {
     pb.finish()
 }
 
+/// Build a closed rounded-rectangle path with uniform corner radius `r`
+/// (clamped by the caller to `min(w, h) / 2`). Corners are cubic Béziers using
+/// the standard circle-approximation constant κ ≈ 0.5522848.
+fn build_rounded_rect_path(x: f32, y: f32, w: f32, h: f32, r: f32) -> Option<Path> {
+    if !w.is_finite() || !h.is_finite() || w <= 0.0 || h <= 0.0 || r < 0.0 {
+        return None;
+    }
+    let r = r.min(w / 2.0).min(h / 2.0);
+    let k = 0.552_284_8_f32 * r; // κ·r control-point offset for a 90° cubic arc
+    let mut pb = PathBuilder::new();
+    pb.move_to(x + r, y);
+    pb.line_to(x + w - r, y);
+    pb.cubic_to(x + w - r + k, y, x + w, y + r - k, x + w, y + r); // top-right
+    pb.line_to(x + w, y + h - r);
+    pb.cubic_to(x + w, y + h - r + k, x + w - r + k, y + h, x + w - r, y + h); // bottom-right
+    pb.line_to(x + r, y + h);
+    pb.cubic_to(x + r - k, y + h, x, y + h - r + k, x, y + h - r); // bottom-left
+    pb.line_to(x, y + r);
+    pb.cubic_to(x, y + r - k, x + r - k, y, x + r, y); // top-left
+    pb.close();
+    pb.finish()
+}
+
 /// Convert premultiplied RGBA8 (tiny-skia's internal storage) to straight-alpha RGBA8.
 fn premultiplied_to_straight(r: u8, g: u8, b: u8, a: u8) -> (u8, u8, u8, u8) {
     if a == 0 {
@@ -668,6 +691,188 @@ impl RasterBackend for TinySkiaBackend {
                     };
 
                     // Stroke defaults: Butt cap, Miter join, miter_limit 4 — normative v0.
+                    let stroke = Stroke {
+                        width: *stroke_width as f32,
+                        ..Default::default()
+                    };
+
+                    let mut paint = Paint::default();
+                    paint.set_color_rgba8(color.r, color.g, color.b, color.a);
+                    paint.anti_alias = true;
+
+                    pixmap.stroke_path(
+                        &path,
+                        &paint,
+                        &stroke,
+                        Transform::identity(),
+                        mask.as_ref(),
+                    );
+                }
+
+                SceneCommand::StrokeRect {
+                    x,
+                    y,
+                    w,
+                    h,
+                    color,
+                    stroke_width,
+                } => {
+                    if !x.is_finite()
+                        || !y.is_finite()
+                        || !w.is_finite()
+                        || !h.is_finite()
+                        || !stroke_width.is_finite()
+                        || *stroke_width > f64::from(f32::MAX)
+                        || *w <= 0.0
+                        || *h <= 0.0
+                    {
+                        continue;
+                    }
+
+                    let effective_clip = *clip_stack.last().unwrap_or(&page_clip);
+
+                    // Ink-bbox early-out: the stroke extends half its width beyond
+                    // the rect edge on all sides.
+                    let half_sw = stroke_width / 2.0;
+                    if intersect_rects(
+                        (x - half_sw, y - half_sw, x + w + half_sw, y + h + half_sw),
+                        effective_clip,
+                    )
+                    .is_none()
+                    {
+                        continue;
+                    }
+
+                    let Some(rect) = Rect::from_xywh(*x as f32, *y as f32, *w as f32, *h as f32)
+                    else {
+                        continue;
+                    };
+                    let path = PathBuilder::from_rect(rect);
+
+                    let mask = match clip_mask(effective_clip, width, height) {
+                        None => continue,
+                        Some(m) => m,
+                    };
+
+                    let stroke = Stroke {
+                        width: *stroke_width as f32,
+                        ..Default::default()
+                    };
+
+                    let mut paint = Paint::default();
+                    paint.set_color_rgba8(color.r, color.g, color.b, color.a);
+                    paint.anti_alias = true;
+
+                    pixmap.stroke_path(
+                        &path,
+                        &paint,
+                        &stroke,
+                        Transform::identity(),
+                        mask.as_ref(),
+                    );
+                }
+
+                SceneCommand::FillRoundedRect {
+                    x,
+                    y,
+                    w,
+                    h,
+                    radius,
+                    color,
+                } => {
+                    if !x.is_finite()
+                        || !y.is_finite()
+                        || !w.is_finite()
+                        || !h.is_finite()
+                        || !radius.is_finite()
+                        || *w <= 0.0
+                        || *h <= 0.0
+                    {
+                        continue;
+                    }
+
+                    let effective_clip = *clip_stack.last().unwrap_or(&page_clip);
+                    if intersect_rects((*x, *y, x + w, y + h), effective_clip).is_none() {
+                        continue;
+                    }
+
+                    let Some(path) = build_rounded_rect_path(
+                        *x as f32,
+                        *y as f32,
+                        *w as f32,
+                        *h as f32,
+                        *radius as f32,
+                    ) else {
+                        continue;
+                    };
+
+                    let mask = match clip_mask(effective_clip, width, height) {
+                        None => continue,
+                        Some(m) => m,
+                    };
+
+                    let mut paint = Paint::default();
+                    paint.set_color_rgba8(color.r, color.g, color.b, color.a);
+                    paint.anti_alias = true;
+
+                    pixmap.fill_path(
+                        &path,
+                        &paint,
+                        FillRule::Winding,
+                        Transform::identity(),
+                        mask.as_ref(),
+                    );
+                }
+
+                SceneCommand::StrokeRoundedRect {
+                    x,
+                    y,
+                    w,
+                    h,
+                    radius,
+                    color,
+                    stroke_width,
+                } => {
+                    if !x.is_finite()
+                        || !y.is_finite()
+                        || !w.is_finite()
+                        || !h.is_finite()
+                        || !radius.is_finite()
+                        || !stroke_width.is_finite()
+                        || *stroke_width > f64::from(f32::MAX)
+                        || *w <= 0.0
+                        || *h <= 0.0
+                    {
+                        continue;
+                    }
+
+                    let effective_clip = *clip_stack.last().unwrap_or(&page_clip);
+
+                    let half_sw = stroke_width / 2.0;
+                    if intersect_rects(
+                        (x - half_sw, y - half_sw, x + w + half_sw, y + h + half_sw),
+                        effective_clip,
+                    )
+                    .is_none()
+                    {
+                        continue;
+                    }
+
+                    let Some(path) = build_rounded_rect_path(
+                        *x as f32,
+                        *y as f32,
+                        *w as f32,
+                        *h as f32,
+                        *radius as f32,
+                    ) else {
+                        continue;
+                    };
+
+                    let mask = match clip_mask(effective_clip, width, height) {
+                        None => continue,
+                        Some(m) => m,
+                    };
+
                     let stroke = Stroke {
                         width: *stroke_width as f32,
                         ..Default::default()
@@ -1543,6 +1748,155 @@ mod tests {
         assert!(
             !any_opaque,
             "glyph ink must be fully clipped by the sub-page mask; found opaque pixels"
+        );
+    }
+
+    // ── StrokeRect: border pixels are inked ───────────────────────────────
+
+    #[test]
+    fn stroke_rect_draws_border_pixels() {
+        let mut scene = Scene::new(40.0, 40.0);
+        scene.commands.push(SceneCommand::PushClip {
+            x: 0.0,
+            y: 0.0,
+            w: 40.0,
+            h: 40.0,
+        });
+        scene.commands.push(SceneCommand::StrokeRect {
+            x: 10.0,
+            y: 10.0,
+            w: 20.0,
+            h: 20.0,
+            color: Color {
+                r: 0,
+                g: 0,
+                b: 0,
+                a: 255,
+            },
+            stroke_width: 4.0,
+        });
+        scene.commands.push(SceneCommand::PopClip);
+
+        let backend = TinySkiaBackend;
+        let provider = default_provider();
+        let img = backend
+            .rasterize(&scene, &provider, &no_assets())
+            .expect("rasterize must succeed");
+
+        // A pixel on the top border (around y=10) must be inked.
+        let (_, _, _, a_border) = pixel(&img.rgba, img.width, 20, 10);
+        assert!(a_border > 0, "top border pixel (20,10) must be inked");
+
+        // The interior center (20,20) must be EMPTY (stroke, not fill).
+        let (_, _, _, a_center) = pixel(&img.rgba, img.width, 20, 20);
+        assert_eq!(a_center, 0, "stroke-only interior (20,20) must be empty");
+    }
+
+    // ── FillRoundedRect: corner is cut, center is filled ──────────────────
+
+    #[test]
+    fn fill_rounded_rect_cuts_corner_fills_center() {
+        // A rect [0,0,40,40] with a large radius (20 → fully circular) leaves the
+        // extreme corner pixel (0,0) at background while the center is filled.
+        let mut scene = Scene::new(40.0, 40.0);
+        scene.commands.push(SceneCommand::PushClip {
+            x: 0.0,
+            y: 0.0,
+            w: 40.0,
+            h: 40.0,
+        });
+        scene.commands.push(SceneCommand::FillRoundedRect {
+            x: 0.0,
+            y: 0.0,
+            w: 40.0,
+            h: 40.0,
+            radius: 20.0,
+            color: Color {
+                r: 255,
+                g: 255,
+                b: 255,
+                a: 255,
+            },
+        });
+        scene.commands.push(SceneCommand::PopClip);
+
+        let backend = TinySkiaBackend;
+        let provider = default_provider();
+        let img = backend
+            .rasterize(&scene, &provider, &no_assets())
+            .expect("rasterize must succeed");
+
+        // Corner (0,0) is outside the rounded shape → transparent.
+        let (_, _, _, a_corner) = pixel(&img.rgba, img.width, 0, 0);
+        assert_eq!(
+            a_corner, 0,
+            "corner pixel (0,0) must be cut by the radius (transparent)"
+        );
+
+        // Center (20,20) is inside → filled.
+        let (_, _, _, a_center) = pixel(&img.rgba, img.width, 20, 20);
+        assert!(a_center > 0, "center pixel (20,20) must be filled");
+    }
+
+    // ── determinism: StrokeRect + FillRoundedRect + StrokeRoundedRect ─────
+
+    #[test]
+    fn rounded_and_stroke_rects_deterministic_png() {
+        let mut scene = Scene::new(80.0, 80.0);
+        scene.commands.push(SceneCommand::PushClip {
+            x: 0.0,
+            y: 0.0,
+            w: 80.0,
+            h: 80.0,
+        });
+        scene.commands.push(SceneCommand::StrokeRect {
+            x: 5.0,
+            y: 5.0,
+            w: 30.0,
+            h: 30.0,
+            color: Color {
+                r: 200,
+                g: 0,
+                b: 0,
+                a: 255,
+            },
+            stroke_width: 3.0,
+        });
+        scene.commands.push(SceneCommand::FillRoundedRect {
+            x: 40.0,
+            y: 5.0,
+            w: 30.0,
+            h: 30.0,
+            radius: 10.0,
+            color: Color {
+                r: 0,
+                g: 200,
+                b: 0,
+                a: 255,
+            },
+        });
+        scene.commands.push(SceneCommand::StrokeRoundedRect {
+            x: 20.0,
+            y: 40.0,
+            w: 40.0,
+            h: 30.0,
+            radius: 8.0,
+            color: Color {
+                r: 0,
+                g: 0,
+                b: 200,
+                a: 255,
+            },
+            stroke_width: 3.0,
+        });
+        scene.commands.push(SceneCommand::PopClip);
+
+        let provider = default_provider();
+        let png1 = render_png(&scene, &provider, &no_assets()).expect("first render");
+        let png2 = render_png(&scene, &provider, &no_assets()).expect("second render");
+        assert_eq!(
+            png1, png2,
+            "StrokeRect + FillRoundedRect + StrokeRoundedRect scene must render byte-identically"
         );
     }
 }
