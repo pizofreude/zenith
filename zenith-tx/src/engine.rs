@@ -4,10 +4,11 @@
 //! document (it works on a clone). Dry-run vs. apply is the caller's concern.
 
 use zenith_core::{
-    Diagnostic, Document, KdlAdapter, KdlSource, Node, PropertyValue, Severity, validate,
+    Diagnostic, Dimension, Document, KdlAdapter, KdlSource, Node, Point, PropertyValue, Severity,
+    Unit, validate,
 };
 
-use crate::op::{Op, Transaction};
+use crate::op::{Op, OpPoint, Transaction};
 use crate::result::{TxError, TxResult, TxStatus};
 
 // ── Valid align values ────────────────────────────────────────────────────────
@@ -113,6 +114,21 @@ fn apply_op(
             locked,
         } => {
             apply_set_locked(node_id, *locked, doc, diagnostics, affected);
+        }
+        Op::SetGeometry {
+            node: node_id,
+            x,
+            y,
+            w,
+            h,
+        } => {
+            apply_set_geometry(node_id, *x, *y, *w, *h, doc, diagnostics, affected);
+        }
+        Op::SetPoints {
+            node: node_id,
+            points,
+        } => {
+            apply_set_points(node_id, points, doc, diagnostics, affected);
         }
     }
 }
@@ -357,6 +373,55 @@ fn node_fill_mut(node: &mut Node) -> Option<&mut Option<PropertyValue>> {
     }
 }
 
+/// Mutable references to a node's four bbox geometry slots `(x, y, w, h)`.
+type GeometryMut<'a> = (
+    &'a mut Option<Dimension>,
+    &'a mut Option<Dimension>,
+    &'a mut Option<Dimension>,
+    &'a mut Option<Dimension>,
+);
+
+/// Return mutable references to the four bbox geometry fields `(x, y, w, h)`,
+/// or `None` for node variants excluded from `set_geometry`.
+///
+/// `Line` is excluded because it uses `x1/y1/x2/y2` endpoints, not a bbox.
+/// `Polygon` and `Polyline` are excluded because they carry no `x/y/w/h` fields.
+/// `Text` and `Group` are excluded by spec even though their structs carry `x/y/w/h`
+/// fields: those fields are advisory/layout hints, not a canonical bbox to set.
+/// `Unknown` is excluded because its schema is opaque.
+fn node_geometry_mut(node: &mut Node) -> Option<GeometryMut<'_>> {
+    match node {
+        Node::Rect(r) => Some((&mut r.x, &mut r.y, &mut r.w, &mut r.h)),
+        Node::Ellipse(e) => Some((&mut e.x, &mut e.y, &mut e.w, &mut e.h)),
+        Node::Frame(f) => Some((&mut f.x, &mut f.y, &mut f.w, &mut f.h)),
+        Node::Image(i) => Some((&mut i.x, &mut i.y, &mut i.w, &mut i.h)),
+        Node::Line(_)
+        | Node::Text(_)
+        | Node::Group(_)
+        | Node::Polygon(_)
+        | Node::Polyline(_)
+        | Node::Unknown(_) => None,
+    }
+}
+
+/// Return a mutable reference to the `points` field of a `polygon` or
+/// `polyline` node, or `None` for all other variants.
+fn node_points_mut(node: &mut Node) -> Option<&mut Vec<Point>> {
+    match node {
+        Node::Polygon(p) => Some(&mut p.points),
+        Node::Polyline(p) => Some(&mut p.points),
+        _ => None,
+    }
+}
+
+/// Construct a [`Dimension`] with the `(px)` unit from a raw `f64` value.
+fn px(v: f64) -> Dimension {
+    Dimension {
+        value: v,
+        unit: Unit::Px,
+    }
+}
+
 // ── SetFill ───────────────────────────────────────────────────────────────────
 
 fn apply_set_fill(
@@ -475,6 +540,120 @@ fn apply_set_locked(
         diagnostics,
         affected,
     );
+}
+
+// ── SetGeometry ───────────────────────────────────────────────────────────────
+
+#[allow(clippy::too_many_arguments)]
+fn apply_set_geometry(
+    node_id: &str,
+    x: Option<f64>,
+    y: Option<f64>,
+    w: Option<f64>,
+    h: Option<f64>,
+    doc: &mut Document,
+    diagnostics: &mut Vec<Diagnostic>,
+    affected: &mut Vec<String>,
+) {
+    // Early-out: if every field is None this is a no-op — emit advisory.
+    if x.is_none() && y.is_none() && w.is_none() && h.is_none() {
+        diagnostics.push(Diagnostic::advisory(
+            "tx.noop",
+            format!(
+                "set_geometry on {:?} specified no fields; document is unchanged",
+                node_id
+            ),
+            None,
+            Some(node_id.to_owned()),
+        ));
+        return;
+    }
+
+    match find_node_any_mut(doc, node_id) {
+        None => {
+            diagnostics.push(Diagnostic::error(
+                "tx.unknown_node",
+                format!("node {:?} not found in document", node_id),
+                None,
+                Some(node_id.to_owned()),
+            ));
+        }
+        Some(node) => {
+            let kind = node_kind_str(node);
+            match node_geometry_mut(node) {
+                None => {
+                    diagnostics.push(Diagnostic::error(
+                        "tx.unsupported_property",
+                        format!(
+                            "set_geometry is not supported on a {} node (no x/y/w/h)",
+                            kind
+                        ),
+                        None,
+                        Some(node_id.to_owned()),
+                    ));
+                }
+                Some((nx, ny, nw, nh)) => {
+                    if let Some(v) = x {
+                        *nx = Some(px(v));
+                    }
+                    if let Some(v) = y {
+                        *ny = Some(px(v));
+                    }
+                    if let Some(v) = w {
+                        *nw = Some(px(v));
+                    }
+                    if let Some(v) = h {
+                        *nh = Some(px(v));
+                    }
+                    record_affected(node_id, affected);
+                }
+            }
+        }
+    }
+}
+
+// ── SetPoints ─────────────────────────────────────────────────────────────────
+
+fn apply_set_points(
+    node_id: &str,
+    points: &[OpPoint],
+    doc: &mut Document,
+    diagnostics: &mut Vec<Diagnostic>,
+    affected: &mut Vec<String>,
+) {
+    match find_node_any_mut(doc, node_id) {
+        None => {
+            diagnostics.push(Diagnostic::error(
+                "tx.unknown_node",
+                format!("node {:?} not found in document", node_id),
+                None,
+                Some(node_id.to_owned()),
+            ));
+        }
+        Some(node) => {
+            let kind = node_kind_str(node);
+            match node_points_mut(node) {
+                None => {
+                    diagnostics.push(Diagnostic::error(
+                        "tx.unsupported_property",
+                        format!("set_points is not supported on a {} node", kind),
+                        None,
+                        Some(node_id.to_owned()),
+                    ));
+                }
+                Some(pts) => {
+                    *pts = points
+                        .iter()
+                        .map(|p| Point {
+                            x: Some(px(p.x)),
+                            y: Some(px(p.y)),
+                        })
+                        .collect();
+                    record_affected(node_id, affected);
+                }
+            }
+        }
+    }
 }
 
 // ── MoveForward internals ─────────────────────────────────────────────────────
@@ -1174,6 +1353,267 @@ mod tests {
                         locked: true,
                     },
                 ],
+            }
+        );
+    }
+
+    // ── SetGeometry / SetPoints test documents ────────────────────────────────
+
+    /// Rect at origin, 100×100. No tokens needed for geometry ops.
+    const RECT_GEOM_DOC: &str = r##"zenith version=1 {
+  project id="proj" name="Test"
+  tokens format="zenith-token-v1" { }
+  styles { }
+  document id="doc1" title="T" {
+    page id="pg1" w=(px)400 h=(px)300 {
+      rect id="rect" x=(px)0 y=(px)0 w=(px)100 h=(px)100
+    }
+  }
+}"##;
+
+    /// Polygon with exactly 3 points and a fill token (to keep post-validate happy).
+    const POLY_DOC: &str = r##"zenith version=1 {
+  project id="proj" name="Test"
+  tokens format="zenith-token-v1" {
+    token id="color.fill" type="color" value="#ff0000"
+  }
+  styles { }
+  document id="doc1" title="T" {
+    page id="pg1" w=(px)400 h=(px)300 {
+      polygon id="poly" fill=(token)"color.fill" {
+        point x=(px)0 y=(px)0
+        point x=(px)100 y=(px)0
+        point x=(px)50 y=(px)80
+      }
+    }
+  }
+}"##;
+
+    // ── SetGeometry tests ─────────────────────────────────────────────────────
+
+    #[test]
+    fn set_geometry_moves_rect() {
+        let doc = parse(RECT_GEOM_DOC);
+        let tx = Transaction {
+            ops: vec![Op::SetGeometry {
+                node: "rect".to_owned(),
+                x: Some(50.0),
+                y: None,
+                w: Some(200.0),
+                h: None,
+            }],
+        };
+        let result = run_transaction(&doc, &tx).expect("run_transaction should not error");
+
+        assert_eq!(result.status, TxStatus::Accepted);
+        assert_eq!(result.affected_node_ids, vec!["rect".to_owned()]);
+
+        // Changed fields appear in source_after.
+        assert!(
+            result.source_after.contains("x=(px)50"),
+            "source_after must contain x=(px)50; got:\n{}",
+            result.source_after
+        );
+        assert!(
+            result.source_after.contains("w=(px)200"),
+            "source_after must contain w=(px)200; got:\n{}",
+            result.source_after
+        );
+        // Untouched fields stay at their original values.
+        assert!(
+            result.source_after.contains("y=(px)0"),
+            "source_after must retain y=(px)0; got:\n{}",
+            result.source_after
+        );
+        assert!(
+            result.source_after.contains("h=(px)100"),
+            "source_after must retain h=(px)100; got:\n{}",
+            result.source_after
+        );
+        assert_ne!(result.source_before, result.source_after);
+    }
+
+    #[test]
+    fn set_geometry_unsupported_on_line() {
+        let doc = parse(LINE_DOC);
+        let tx = Transaction {
+            ops: vec![Op::SetGeometry {
+                node: "ln1".to_owned(),
+                x: Some(10.0),
+                y: None,
+                w: None,
+                h: None,
+            }],
+        };
+        let result = run_transaction(&doc, &tx).expect("run_transaction should not error");
+
+        assert_eq!(result.status, TxStatus::Rejected);
+        assert!(
+            result
+                .diagnostics
+                .iter()
+                .any(|d| d.code == "tx.unsupported_property" && d.message.contains("line")),
+            "expected tx.unsupported_property mentioning \"line\"; got: {:?}",
+            result.diagnostics
+        );
+        assert_eq!(result.source_after, result.source_before);
+    }
+
+    #[test]
+    fn set_geometry_no_fields_is_noop() {
+        let doc = parse(RECT_GEOM_DOC);
+        let tx = Transaction {
+            ops: vec![Op::SetGeometry {
+                node: "rect".to_owned(),
+                x: None,
+                y: None,
+                w: None,
+                h: None,
+            }],
+        };
+        let result = run_transaction(&doc, &tx).expect("run_transaction should not error");
+
+        // All-None must produce Accepted (advisory is not an error/warning) with
+        // no affected nodes and identical source.
+        assert_eq!(result.status, TxStatus::Accepted);
+        assert!(
+            result.affected_node_ids.is_empty(),
+            "affected must be empty for a noop; got: {:?}",
+            result.affected_node_ids
+        );
+        assert!(
+            result.diagnostics.iter().any(|d| d.code == "tx.noop"),
+            "expected tx.noop advisory; got: {:?}",
+            result.diagnostics
+        );
+        assert_eq!(result.source_after, result.source_before);
+    }
+
+    // ── SetPoints tests ───────────────────────────────────────────────────────
+
+    #[test]
+    fn set_points_replaces_polygon() {
+        let doc = parse(POLY_DOC);
+        // Replace the 3 original points with 3 different ones.
+        let tx = Transaction {
+            ops: vec![Op::SetPoints {
+                node: "poly".to_owned(),
+                points: vec![
+                    crate::op::OpPoint { x: 10.0, y: 20.0 },
+                    crate::op::OpPoint { x: 90.0, y: 20.0 },
+                    crate::op::OpPoint { x: 50.0, y: 70.0 },
+                ],
+            }],
+        };
+        let result = run_transaction(&doc, &tx).expect("run_transaction should not error");
+
+        assert_eq!(result.status, TxStatus::Accepted);
+        assert_eq!(result.affected_node_ids, vec!["poly".to_owned()]);
+
+        // New coordinates appear in source_after.
+        assert!(
+            result.source_after.contains("x=(px)10"),
+            "source_after must contain x=(px)10; got:\n{}",
+            result.source_after
+        );
+        assert!(
+            result.source_after.contains("y=(px)20"),
+            "source_after must contain y=(px)20; got:\n{}",
+            result.source_after
+        );
+        // Old distinctive coordinate (x=50, y=80) from original must be gone.
+        assert!(
+            !result.source_after.contains("y=(px)80"),
+            "old y=(px)80 must not appear in source_after"
+        );
+        assert_ne!(result.source_before, result.source_after);
+    }
+
+    #[test]
+    fn set_points_too_few_rejected() {
+        // Start from a valid 3-point polygon; replace with only 2 points →
+        // post-validation rejects with shape.insufficient_points.
+        let doc = parse(POLY_DOC);
+        let tx = Transaction {
+            ops: vec![Op::SetPoints {
+                node: "poly".to_owned(),
+                points: vec![
+                    crate::op::OpPoint { x: 0.0, y: 0.0 },
+                    crate::op::OpPoint { x: 100.0, y: 0.0 },
+                ],
+            }],
+        };
+        let result = run_transaction(&doc, &tx).expect("run_transaction should not error");
+
+        assert_eq!(result.status, TxStatus::Rejected);
+        assert!(
+            result
+                .diagnostics
+                .iter()
+                .any(|d| d.code == "shape.insufficient_points"),
+            "expected shape.insufficient_points diagnostic; got: {:?}",
+            result.diagnostics
+        );
+        assert_eq!(result.source_after, result.source_before);
+    }
+
+    #[test]
+    fn set_points_unsupported_on_rect() {
+        let doc = parse(RECT_GEOM_DOC);
+        let tx = Transaction {
+            ops: vec![Op::SetPoints {
+                node: "rect".to_owned(),
+                points: vec![
+                    crate::op::OpPoint { x: 0.0, y: 0.0 },
+                    crate::op::OpPoint { x: 100.0, y: 0.0 },
+                    crate::op::OpPoint { x: 50.0, y: 80.0 },
+                ],
+            }],
+        };
+        let result = run_transaction(&doc, &tx).expect("run_transaction should not error");
+
+        assert_eq!(result.status, TxStatus::Rejected);
+        assert!(
+            result
+                .diagnostics
+                .iter()
+                .any(|d| d.code == "tx.unsupported_property" && d.message.contains("rect")),
+            "expected tx.unsupported_property mentioning \"rect\"; got: {:?}",
+            result.diagnostics
+        );
+        assert_eq!(result.source_after, result.source_before);
+    }
+
+    // ── JSON round-trip: reshape ops ─────────────────────────────────────────
+
+    #[test]
+    fn from_json_reshape_ops_round_trip() {
+        use crate::op::OpPoint;
+
+        let json_geo = r#"{"ops":[{"op":"set_geometry","node":"r","x":10.0,"w":200.0}]}"#;
+        let tx_geo = Transaction::from_json(json_geo).expect("parse set_geometry JSON");
+        assert_eq!(
+            tx_geo,
+            Transaction {
+                ops: vec![Op::SetGeometry {
+                    node: "r".to_owned(),
+                    x: Some(10.0),
+                    y: None,
+                    w: Some(200.0),
+                    h: None,
+                }],
+            }
+        );
+
+        let json_pts = r#"{"ops":[{"op":"set_points","node":"p","points":[{"x":0.0,"y":0.0},{"x":1.0,"y":1.0}]}]}"#;
+        let tx_pts = Transaction::from_json(json_pts).expect("parse set_points JSON");
+        assert_eq!(
+            tx_pts,
+            Transaction {
+                ops: vec![Op::SetPoints {
+                    node: "p".to_owned(),
+                    points: vec![OpPoint { x: 0.0, y: 0.0 }, OpPoint { x: 1.0, y: 1.0 },],
+                }],
             }
         );
     }

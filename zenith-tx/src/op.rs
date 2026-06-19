@@ -6,11 +6,24 @@
 //!   {"op":"set_text_align","node":"label","align":"center"},
 //!   {"op":"set_fill","node":"box","fill":"color.accent"},
 //!   {"op":"set_visible","node":"box","visible":false},
-//!   {"op":"set_locked","node":"box","locked":true}
+//!   {"op":"set_locked","node":"box","locked":true},
+//!   {"op":"set_geometry","node":"r","x":10,"w":200},
+//!   {"op":"set_points","node":"poly","points":[{"x":0,"y":0},{"x":100,"y":0},{"x":50,"y":80}]}
 //! ]}
 //! ```
 
 use crate::TxError;
+
+/// A 2-D vertex used by [`Op::SetPoints`], expressed in pixels.
+///
+/// JSON shape: `{"x": 50.0, "y": 80.0}`
+#[derive(serde::Deserialize, Debug, Clone, PartialEq)]
+pub struct OpPoint {
+    /// X coordinate in document pixels.
+    pub x: f64,
+    /// Y coordinate in document pixels.
+    pub y: f64,
+}
 
 /// A batch of operations to apply to a document in order.
 #[derive(serde::Deserialize, Debug, Clone, PartialEq)]
@@ -81,5 +94,56 @@ pub enum Op {
         node: String,
         /// `true` locks the node; `false` unlocks it.
         locked: bool,
+    },
+    /// Move and/or resize a bbox node by updating its `x`, `y`, `w`, `h`
+    /// geometry fields. All four fields are optional — only the fields present
+    /// in the JSON payload are changed; omitted fields are left untouched.
+    ///
+    /// Values are in document pixels (`(px)` unit).
+    ///
+    /// Supported nodes: `rect`, `ellipse`, `frame`, `image`.
+    /// Unsupported: `line` (uses x1/y1/x2/y2), `polygon`, `polyline` (no bbox),
+    /// `text`, `group`, `unknown` — yields `tx.unsupported_property`.
+    ///
+    /// If all four fields are omitted, an advisory `tx.noop` is emitted and no
+    /// node is recorded as affected.
+    ///
+    /// JSON example (partial — only x and w change):
+    /// ```json
+    /// {"op":"set_geometry","node":"r","x":10,"w":200}
+    /// ```
+    SetGeometry {
+        /// The stable node `id` to target.
+        node: String,
+        /// New left edge in pixels. Omit to leave unchanged.
+        #[serde(default)]
+        x: Option<f64>,
+        /// New top edge in pixels. Omit to leave unchanged.
+        #[serde(default)]
+        y: Option<f64>,
+        /// New width in pixels. Omit to leave unchanged.
+        #[serde(default)]
+        w: Option<f64>,
+        /// New height in pixels. Omit to leave unchanged.
+        #[serde(default)]
+        h: Option<f64>,
+    },
+    /// Replace the entire vertex list of a `polygon` or `polyline` node.
+    ///
+    /// Post-validation rejects automatically if the new point count falls
+    /// below the node's minimum (`polygon` needs ≥ 3, `polyline` needs ≥ 2).
+    ///
+    /// Supported nodes: `polygon`, `polyline`.
+    /// Unsupported: all other variants — yields `tx.unsupported_property`.
+    ///
+    /// JSON example:
+    /// ```json
+    /// {"op":"set_points","node":"poly","points":[{"x":0,"y":0},{"x":100,"y":0},{"x":50,"y":80}]}
+    /// ```
+    SetPoints {
+        /// The stable node `id` to target.
+        node: String,
+        /// Replacement vertex list. Each vertex is in document pixels.
+        points: Vec<OpPoint>,
     },
 }
