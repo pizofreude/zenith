@@ -196,6 +196,10 @@ pub enum SceneCommand {
     PushLayer { opacity: f64 },
     /// Pop the most-recently pushed compositing layer.
     PopLayer,
+    /// Push an affine rotation around a pivot; composes onto the renderer's transform stack.
+    PushTransform { angle_deg: f64, cx: f64, cy: f64 },
+    /// Pop the most recent pushed transform.
+    PopTransform,
 }
 
 // ── Scene glyph ───────────────────────────────────────────────────────────────

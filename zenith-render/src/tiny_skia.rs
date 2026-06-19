@@ -267,12 +267,21 @@ impl RasterBackend for TinySkiaBackend {
         let page_clip = (0.0_f64, 0.0_f64, scene.width, scene.height);
         let mut clip_stack: Vec<(f64, f64, f64, f64)> = vec![page_clip];
 
+        // Transform stack: the top entry is the current affine transform applied
+        // to every draw. The base entry is identity, so unrotated scenes pass
+        // `Transform::identity()` to every draw call (byte-identical to before).
+        let mut transform_stack: Vec<Transform> = vec![Transform::identity()];
+
         // Lazily-built fontdb for SVG text→path conversion. Initialised at most
         // once per render, only when an SVG asset is actually drawn. Never loads
         // system fonts — only the registered faces from `fonts`.
         let mut svg_fontdb: Option<resvg::usvg::fontdb::Database> = None;
 
         for cmd in &scene.commands {
+            // Hoist once per iteration. Push/pop arms mutate the stack and
+            // never consume current_ts; draw arms read it and never mutate the
+            // stack — so hoisting is behavior-identical to reading in each arm.
+            let current_ts = *transform_stack.last().unwrap_or(&Transform::identity());
             match cmd {
                 SceneCommand::PushClip { x, y, w, h } => {
                     let new_rect = (*x, *y, x + w, y + h);
@@ -289,41 +298,78 @@ impl RasterBackend for TinySkiaBackend {
                     clip_stack.pop();
                 }
 
+                SceneCommand::PushTransform { angle_deg, cx, cy } => {
+                    let rot = Transform::from_rotate_at(*angle_deg as f32, *cx as f32, *cy as f32);
+                    transform_stack.push(current_ts.pre_concat(rot));
+                }
+
+                SceneCommand::PopTransform if transform_stack.len() > 1 => {
+                    transform_stack.pop();
+                }
+
                 SceneCommand::FillRect { x, y, w, h, color } => {
-                    let fill_rect = (*x, *y, x + w, y + h);
-                    let effective_clip = *clip_stack.last().unwrap_or(&page_clip);
+                    if current_ts.is_identity() {
+                        // ── Unrotated (identity) path — byte-identical to before ──
+                        let fill_rect = (*x, *y, x + w, y + h);
+                        let effective_clip = *clip_stack.last().unwrap_or(&page_clip);
 
-                    // Intersect the fill rect with the current effective clip.
-                    let (ix, iy, ix2, iy2) = match intersect_rects(fill_rect, effective_clip) {
-                        Some(r) => r,
-                        None => continue, // nothing to draw
-                    };
+                        // Intersect the fill rect with the current effective clip.
+                        let (ix, iy, ix2, iy2) = match intersect_rects(fill_rect, effective_clip) {
+                            Some(r) => r,
+                            None => continue, // nothing to draw
+                        };
 
-                    let iw = ix2 - ix;
-                    let ih = iy2 - iy;
+                        let iw = ix2 - ix;
+                        let ih = iy2 - iy;
 
-                    // tiny-skia requires positive, finite values for Rect::from_xywh.
-                    if iw <= 0.0
-                        || ih <= 0.0
-                        || !ix.is_finite()
-                        || !iy.is_finite()
-                        || !iw.is_finite()
-                        || !ih.is_finite()
-                    {
-                        continue;
+                        // tiny-skia requires positive, finite values for Rect::from_xywh.
+                        if iw <= 0.0
+                            || ih <= 0.0
+                            || !ix.is_finite()
+                            || !iy.is_finite()
+                            || !iw.is_finite()
+                            || !ih.is_finite()
+                        {
+                            continue;
+                        }
+
+                        let rect = match Rect::from_xywh(ix as f32, iy as f32, iw as f32, ih as f32)
+                        {
+                            Some(r) => r,
+                            None => continue,
+                        };
+
+                        let mut paint = Paint::default();
+                        paint.set_color_rgba8(color.r, color.g, color.b, color.a);
+                        paint.anti_alias = false; // deterministic: no edge AA variance
+
+                        // Drawing outside the pixmap simply touches no pixels; not an error.
+                        pixmap.fill_rect(rect, &paint, Transform::identity(), None);
+                    } else {
+                        // ── Rotated path: fill the rect as a path under the current
+                        // transform, AA-on, masked by the (axis-aligned) clip. ──
+                        let effective_clip = *clip_stack.last().unwrap_or(&page_clip);
+                        let mask = match clip_mask(effective_clip, width, height) {
+                            None => continue,
+                            Some(m) => m,
+                        };
+                        let Some(rect) =
+                            Rect::from_xywh(*x as f32, *y as f32, *w as f32, *h as f32)
+                        else {
+                            continue;
+                        };
+                        let path = PathBuilder::from_rect(rect);
+                        let mut paint = Paint::default();
+                        paint.set_color_rgba8(color.r, color.g, color.b, color.a);
+                        paint.anti_alias = true;
+                        pixmap.fill_path(
+                            &path,
+                            &paint,
+                            FillRule::Winding,
+                            current_ts,
+                            mask.as_ref(),
+                        );
                     }
-
-                    let rect = match Rect::from_xywh(ix as f32, iy as f32, iw as f32, ih as f32) {
-                        Some(r) => r,
-                        None => continue,
-                    };
-
-                    let mut paint = Paint::default();
-                    paint.set_color_rgba8(color.r, color.g, color.b, color.a);
-                    paint.anti_alias = false; // deterministic: no edge AA variance
-
-                    // Drawing outside the pixmap simply touches no pixels; not an error.
-                    pixmap.fill_rect(rect, &paint, Transform::identity(), None);
                 }
 
                 SceneCommand::FillEllipse { x, y, w, h, color } => {
@@ -368,13 +414,7 @@ impl RasterBackend for TinySkiaBackend {
                     paint.set_color_rgba8(color.r, color.g, color.b, color.a);
                     paint.anti_alias = true;
 
-                    pixmap.fill_path(
-                        &path,
-                        &paint,
-                        FillRule::Winding,
-                        Transform::identity(),
-                        mask.as_ref(),
-                    );
+                    pixmap.fill_path(&path, &paint, FillRule::Winding, current_ts, mask.as_ref());
                 }
 
                 SceneCommand::StrokeEllipse {
@@ -436,13 +476,7 @@ impl RasterBackend for TinySkiaBackend {
                     // AA-on: curved stroke edge, deterministic same-machine.
                     paint.anti_alias = true;
 
-                    pixmap.stroke_path(
-                        &path,
-                        &paint,
-                        &stroke,
-                        Transform::identity(),
-                        mask.as_ref(),
-                    );
+                    pixmap.stroke_path(&path, &paint, &stroke, current_ts, mask.as_ref());
                 }
 
                 SceneCommand::StrokeLine {
@@ -511,13 +545,7 @@ impl RasterBackend for TinySkiaBackend {
                     // same-machine like ellipse/glyph fills.
                     paint.anti_alias = true;
 
-                    pixmap.stroke_path(
-                        &path,
-                        &paint,
-                        &stroke,
-                        Transform::identity(),
-                        mask.as_ref(),
-                    );
+                    pixmap.stroke_path(&path, &paint, &stroke, current_ts, mask.as_ref());
                 }
 
                 SceneCommand::DrawGlyphRun {
@@ -596,7 +624,7 @@ impl RasterBackend for TinySkiaBackend {
                             &path,
                             &paint,
                             FillRule::Winding,
-                            Transform::identity(),
+                            current_ts,
                             mask.as_ref(),
                         );
                     }
@@ -734,8 +762,12 @@ impl RasterBackend for TinySkiaBackend {
                     };
 
                     // ── f. Scale + translate transform ────────────────────────
-                    let transform =
+                    // Compose the rotation transform stack on top of the fit
+                    // transform. For the identity case `current_ts.pre_concat(fit)`
+                    // == `fit`, so the unrotated output is byte-identical.
+                    let fit =
                         Transform::from_row(sx as f32, 0.0, 0.0, sy as f32, tx as f32, ty as f32);
+                    let transform = current_ts.pre_concat(fit);
 
                     // ── g. Composite. Box-clip (G-22) is enforced by the Mask;
                     // deterministic same-machine (pure-software bilinear). ─────
@@ -777,13 +809,7 @@ impl RasterBackend for TinySkiaBackend {
                     paint.set_color_rgba8(color.r, color.g, color.b, color.a);
                     paint.anti_alias = true;
 
-                    pixmap.fill_path(
-                        &path,
-                        &paint,
-                        fill_rule,
-                        Transform::identity(),
-                        mask.as_ref(),
-                    );
+                    pixmap.fill_path(&path, &paint, fill_rule, current_ts, mask.as_ref());
                 }
 
                 SceneCommand::StrokePolyline {
@@ -825,13 +851,7 @@ impl RasterBackend for TinySkiaBackend {
                     paint.set_color_rgba8(color.r, color.g, color.b, color.a);
                     paint.anti_alias = true;
 
-                    pixmap.stroke_path(
-                        &path,
-                        &paint,
-                        &stroke,
-                        Transform::identity(),
-                        mask.as_ref(),
-                    );
+                    pixmap.stroke_path(&path, &paint, &stroke, current_ts, mask.as_ref());
                 }
 
                 SceneCommand::StrokeRect {
@@ -888,13 +908,7 @@ impl RasterBackend for TinySkiaBackend {
                     paint.set_color_rgba8(color.r, color.g, color.b, color.a);
                     paint.anti_alias = true;
 
-                    pixmap.stroke_path(
-                        &path,
-                        &paint,
-                        &stroke,
-                        Transform::identity(),
-                        mask.as_ref(),
-                    );
+                    pixmap.stroke_path(&path, &paint, &stroke, current_ts, mask.as_ref());
                 }
 
                 SceneCommand::FillRoundedRect {
@@ -940,13 +954,7 @@ impl RasterBackend for TinySkiaBackend {
                     paint.set_color_rgba8(color.r, color.g, color.b, color.a);
                     paint.anti_alias = true;
 
-                    pixmap.fill_path(
-                        &path,
-                        &paint,
-                        FillRule::Winding,
-                        Transform::identity(),
-                        mask.as_ref(),
-                    );
+                    pixmap.fill_path(&path, &paint, FillRule::Winding, current_ts, mask.as_ref());
                 }
 
                 SceneCommand::StrokeRoundedRect {
@@ -1007,13 +1015,7 @@ impl RasterBackend for TinySkiaBackend {
                     paint.set_color_rgba8(color.r, color.g, color.b, color.a);
                     paint.anti_alias = true;
 
-                    pixmap.stroke_path(
-                        &path,
-                        &paint,
-                        &stroke,
-                        Transform::identity(),
-                        mask.as_ref(),
-                    );
+                    pixmap.stroke_path(&path, &paint, &stroke, current_ts, mask.as_ref());
                 }
 
                 // PopClip when the stack is already at the page clip (depth 0),
@@ -2180,6 +2182,118 @@ mod tests {
         assert!(
             any_red,
             "SVG <text> must produce at least one red pixel after convert_text + rasterize"
+        );
+    }
+
+    // ── PushTransform: rotation moves ink outside the axis-aligned bbox ────
+
+    /// A red FillRect [25,25,50,50] on a 100×100 page is wrapped in a 45°
+    /// rotation about the rect center (50,50). We assert:
+    /// - at least one red pixel exists (the rect still renders), and
+    /// - the inked-pixel set differs from the SAME FillRect rendered WITHOUT
+    ///   the transform (proving the rotation actually rotated the geometry), and
+    /// - two renders of the rotated scene are byte-identical (deterministic).
+    #[test]
+    fn push_transform_rotates_fill_rect() {
+        let red_color = Color {
+            r: 255,
+            g: 0,
+            b: 0,
+            a: 255,
+        };
+
+        // Rotated scene.
+        let mut rotated = Scene::new(100.0, 100.0);
+        rotated.commands.push(SceneCommand::PushClip {
+            x: 0.0,
+            y: 0.0,
+            w: 100.0,
+            h: 100.0,
+        });
+        rotated.commands.push(SceneCommand::PushTransform {
+            angle_deg: 45.0,
+            cx: 50.0,
+            cy: 50.0,
+        });
+        rotated.commands.push(SceneCommand::FillRect {
+            x: 25.0,
+            y: 25.0,
+            w: 50.0,
+            h: 50.0,
+            color: red_color,
+        });
+        rotated.commands.push(SceneCommand::PopTransform);
+        rotated.commands.push(SceneCommand::PopClip);
+
+        // Unrotated baseline (same FillRect, no transform).
+        let mut plain = Scene::new(100.0, 100.0);
+        plain.commands.push(SceneCommand::PushClip {
+            x: 0.0,
+            y: 0.0,
+            w: 100.0,
+            h: 100.0,
+        });
+        plain.commands.push(SceneCommand::FillRect {
+            x: 25.0,
+            y: 25.0,
+            w: 50.0,
+            h: 50.0,
+            color: red_color,
+        });
+        plain.commands.push(SceneCommand::PopClip);
+
+        let backend = TinySkiaBackend;
+        let provider = default_provider();
+        let rot1 = backend
+            .rasterize(&rotated, &provider, &no_assets())
+            .expect("rotated rasterize 1");
+        let rot2 = backend
+            .rasterize(&rotated, &provider, &no_assets())
+            .expect("rotated rasterize 2");
+        let base = backend
+            .rasterize(&plain, &provider, &no_assets())
+            .expect("plain rasterize");
+
+        // (i) Determinism: two renders of the rotated scene are byte-identical.
+        assert_eq!(
+            rot1.rgba, rot2.rgba,
+            "two rasterizes of the rotated scene must be byte-identical"
+        );
+
+        // (ii) At least one red pixel was drawn.
+        let any_red = (0..rot1.height).any(|py| {
+            (0..rot1.width).any(|px| {
+                let (r, g, b, a) = pixel(&rot1.rgba, rot1.width, px, py);
+                a > 0 && r > g && r > b
+            })
+        });
+        assert!(
+            any_red,
+            "rotated FillRect must produce at least one red pixel"
+        );
+
+        // (iii) The inked-pixel set must differ from the unrotated baseline —
+        // a 45° rotation pushes ink past the original [25,75] axis-aligned bbox
+        // (the rotated diamond reaches the page edges at x≈14.6 and x≈85.4).
+        assert_ne!(
+            rot1.rgba, base.rgba,
+            "rotation must change the inked pixels versus the unrotated FillRect"
+        );
+
+        // (iv) A specific pixel OUTSIDE the original axis-aligned bbox but inside
+        // the rotated diamond must be inked. The rotated diamond has corners at
+        // (50,~14.6),(85.4,50),(50,85.4),(14.6,50); the point (20,50) lies inside
+        // the diamond but outside the original [25..75]×[25..75] rect.
+        let (_, _, _, a_outside_bbox) = pixel(&rot1.rgba, rot1.width, 20, 50);
+        assert!(
+            a_outside_bbox > 0,
+            "pixel (20,50) is outside the unrotated bbox but inside the rotated diamond; must be inked"
+        );
+        // Sanity: the same pixel is transparent in the unrotated baseline.
+        let (_, _, _, a_base) = pixel(&base.rgba, base.width, 20, 50);
+        assert_eq!(
+            a_base, 0,
+            "pixel (20,50) must be transparent in the unrotated baseline"
         );
     }
 }
