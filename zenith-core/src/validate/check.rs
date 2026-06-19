@@ -136,6 +136,18 @@ pub fn validate(doc: &Document) -> ValidationReport {
             ));
         }
 
+        // ── Page background token: validate type/existence and record the
+        //    reference so it is not falsely reported as an unused token.
+        check_visual_prop(
+            &page.id,
+            "background",
+            page.background.as_ref(),
+            VisualExpect::Color,
+            &mut referenced_token_ids,
+            resolved_tokens,
+            &mut diagnostics,
+        );
+
         // ── Walk page children ────────────────────────────────────────────
         for node in &page.children {
             walk_node(
