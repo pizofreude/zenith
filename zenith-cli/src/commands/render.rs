@@ -96,9 +96,9 @@ pub fn to_scene_json(
 
 /// Parse `src`, validate it, compile the scene, and return PNG bytes.
 ///
-/// No image assets are loaded (an empty asset provider is used); any `image`
-/// nodes are rendered without their raster (the bytes are unavailable). Use
-/// [`to_png_with_dir`] to source image bytes relative to the document's
+/// No image or SVG assets are loaded (an empty asset provider is used); any
+/// `image`/`svg` nodes are rendered without their content. Use
+/// [`to_png_with_dir`] to source asset bytes relative to the document's
 /// directory.
 ///
 /// `page` is the 1-based page number to render.
@@ -112,19 +112,18 @@ pub fn to_png(src: &str, page: usize) -> Result<PngArtifact, RenderCmdErr> {
     to_png_with_dir(src, None, page, false)
 }
 
-/// Like [`to_png`], but sources image asset bytes from `project_dir` (the
-/// `.zen` file's parent directory) when provided.
+/// Like [`to_png`], but sources image and SVG asset bytes from `project_dir`
+/// (the `.zen` file's parent directory) when provided.
 ///
-/// For each `image`-kind `AssetDecl`, the `src` is resolved relative to
-/// `project_dir` and read into a [`BytesAssetProvider`]. A read failure prints
-/// a warning and skips that asset (the matching image is then skipped at
-/// render time — never a panic). When `project_dir` is `None` no assets are
-/// loaded.
+/// For each `image`- or `svg`-kind `AssetDecl`, the `src` is resolved relative
+/// to `project_dir` and read into a [`BytesAssetProvider`]. A read failure
+/// prints a warning and skips that asset (the node is then skipped at render
+/// time — never a panic). When `project_dir` is `None` no assets are loaded.
 ///
-/// When `locked` is set, every image asset's bytes are verified against its
-/// declared `sha256` and any mismatch, missing hash, or read failure is a hard
-/// error (exit code 2). When `project_dir` is `None` there are no assets, so
-/// `locked` is a no-op.
+/// When `locked` is set, every image and SVG asset's bytes are verified against
+/// their declared `sha256` and any mismatch, missing hash, or read failure is a
+/// hard error (exit code 2). When `project_dir` is `None` there are no assets,
+/// so `locked` is a no-op.
 ///
 /// `page` is the 1-based page number to render.
 pub fn to_png_with_dir(
@@ -152,11 +151,11 @@ pub fn to_png_with_dir(
 /// Parse `src`, validate it, and render EVERY page to PNG, returning one
 /// [`PngArtifact`] per page in document order (page 1 first).
 ///
-/// Image asset bytes are sourced once from `project_dir` (shared across all
-/// pages). Returns `Err` on parse failure (exit 2), validation errors (exit 1),
-/// an empty document (exit 2), or a render failure (exit 2). When `locked` is
-/// set, image asset bytes are verified against their declared `sha256` (exit 2
-/// on any mismatch/missing hash/read failure).
+/// Image and SVG asset bytes are sourced once from `project_dir` (shared
+/// across all pages). Returns `Err` on parse failure (exit 2), validation
+/// errors (exit 1), an empty document (exit 2), or a render failure (exit 2).
+/// When `locked` is set, image and SVG asset bytes are verified against their
+/// declared `sha256` (exit 2 on any mismatch/missing hash/read failure).
 pub fn to_png_all_pages(
     src: &str,
     project_dir: Option<&Path>,
@@ -200,7 +199,7 @@ pub fn to_png_all_pages(
 /// Non-locked failures (unreadable file, unparseable font) emit a warning
 /// to stderr and skip the asset. When `locked` is `true`, the same conditions
 /// are hard errors (exit code 2), and every font asset's bytes are verified
-/// against its declared `sha256` exactly like image assets.
+/// against its declared `sha256` exactly like image and SVG assets.
 fn build_font_provider(
     doc: &Document,
     project_dir: Option<&Path>,
@@ -272,13 +271,14 @@ fn build_font_provider(
 /// Build a [`BytesAssetProvider`] from a parsed document and the project
 /// directory (the `.zen` file's parent).
 ///
-/// Only `image`-kind assets are loaded (SVG/font are deferred).
+/// `image`- and `svg`-kind assets are loaded; `font`-kind assets are handled
+/// separately by [`build_font_provider`].
 ///
 /// When `locked` is `false` (the default), a read failure skips the asset with
-/// a warning and no hash is checked. When `locked` is `true`, every image asset
-/// must read successfully and its bytes must match its declared `sha256`
-/// (compared case-insensitively, trimmed); a read failure, a missing hash, or a
-/// mismatch is a hard error (exit code 2).
+/// a warning and no hash is checked. When `locked` is `true`, every image or
+/// SVG asset must read successfully and its bytes must match its declared
+/// `sha256` (compared case-insensitively, trimmed); a read failure, a missing
+/// hash, or a mismatch is a hard error (exit code 2).
 fn build_asset_provider(
     doc: &Document,
     project_dir: &Path,
@@ -286,7 +286,7 @@ fn build_asset_provider(
 ) -> Result<BytesAssetProvider, RenderCmdErr> {
     let mut provider = BytesAssetProvider::new();
     for decl in &doc.assets.assets {
-        if decl.kind != AssetKind::Image {
+        if !matches!(decl.kind, AssetKind::Image | AssetKind::Svg) {
             continue;
         }
         let path = project_dir.join(&decl.src);
@@ -305,8 +305,9 @@ fn build_asset_provider(
                     ));
                 }
                 eprintln!(
-                    "warning: could not read asset '{}' from '{}': {}; image will be skipped",
+                    "warning: could not read asset '{}' ({}) from '{}': {} — skipping",
                     decl.id,
+                    decl.kind.kind_str(),
                     path.display(),
                     e
                 );
@@ -318,7 +319,7 @@ fn build_asset_provider(
             verify_locked_sha256(&decl.id, "asset", decl.sha256.as_deref(), &bytes)?;
         }
 
-        provider.register(&decl.id, AssetKind::Image, bytes.into());
+        provider.register(&decl.id, decl.kind.clone(), bytes.into());
     }
     Ok(provider)
 }

@@ -4,6 +4,8 @@
 //! `ttf_parser` types.  All other modules see only the backend-neutral types
 //! from `backend.rs`.
 
+use resvg::usvg;
+use resvg::usvg::TreeParsing;
 use tiny_skia::{
     FillRule, FilterQuality, Mask, Paint, Path, PathBuilder, Pixmap, PixmapPaint, Rect, Stroke,
     Transform,
@@ -542,13 +544,44 @@ impl RasterBackend for TinySkiaBackend {
                     let Some(asset) = assets.by_id(asset_id) else {
                         continue; // unknown/missing asset: skip (no panic)
                     };
-                    if asset.kind != AssetKind::Image {
-                        continue; // SVG / font deferred
-                    }
-
-                    // ── b. Decode the PNG ─────────────────────────────────────
-                    let Ok(src) = Pixmap::decode_png(&asset.bytes) else {
-                        continue; // malformed PNG: skip
+                    // ── b. Produce a raster Pixmap from Image (PNG) or Svg ────
+                    let src: Pixmap = match asset.kind {
+                        AssetKind::Image => {
+                            let Ok(p) = Pixmap::decode_png(&asset.bytes) else {
+                                continue; // malformed PNG: skip
+                            };
+                            p
+                        }
+                        AssetKind::Svg => {
+                            // Empty fontdb → deterministic (SVG <text> renders no
+                            // glyphs; documented v0 limitation).
+                            let opts = usvg::Options::default();
+                            let Ok(usvg_tree) = usvg::Tree::from_data(&asset.bytes, &opts) else {
+                                continue; // malformed SVG: skip
+                            };
+                            let sz = usvg_tree.size;
+                            let (svw, svh) = (f64::from(sz.width()), f64::from(sz.height()));
+                            if !(svw > 0.0 && svh > 0.0) {
+                                continue;
+                            }
+                            // Rasterize at destination resolution so the
+                            // downstream bilinear scale is near 1:1 (crisp),
+                            // preserving the SVG's own aspect ratio.
+                            let raster_scale = ((*w / svw).max(*h / svh)).clamp(0.01, 16.0);
+                            let pw = ((svw * raster_scale).ceil() as u32).max(1);
+                            let ph = ((svh * raster_scale).ceil() as u32).max(1);
+                            let Some(mut pm) = Pixmap::new(pw, ph) else {
+                                continue;
+                            };
+                            let resvg_tree = resvg::Tree::from_usvg(&usvg_tree);
+                            resvg_tree.render(
+                                Transform::from_scale(raster_scale as f32, raster_scale as f32),
+                                &mut pm.as_mut(),
+                            );
+                            pm
+                        }
+                        // Font or Unknown: not a drawable image; skip.
+                        _ => continue,
                     };
                     let (sw, sh) = (f64::from(src.width()), f64::from(src.height()));
                     if !(sw > 0.0 && sh > 0.0) {
@@ -1897,6 +1930,56 @@ mod tests {
         assert_eq!(
             png1, png2,
             "StrokeRect + FillRoundedRect + StrokeRoundedRect scene must render byte-identically"
+        );
+    }
+
+    // ── SVG asset: rasterizes and draws red pixels ────────────────────────
+
+    /// An inline 10×10 SVG filled solid red is registered as `AssetKind::Svg`,
+    /// drawn stretched into a 10×10 box on a 10×10 page, and the center pixel
+    /// must be red (proving the SVG was rasterized and composited).
+    #[test]
+    fn draw_image_svg_asset_renders_red_pixels() {
+        const RED_SVG: &[u8] = b"<svg xmlns='http://www.w3.org/2000/svg' \
+            width='10' height='10'>\
+            <rect width='10' height='10' fill='#ff0000'/>\
+            </svg>";
+
+        let mut assets = BytesAssetProvider::new();
+        assets.register("asset.red", AssetKind::Svg, Arc::from(RED_SVG));
+
+        let mut scene = Scene::new(10.0, 10.0);
+        scene.commands.push(SceneCommand::PushClip {
+            x: 0.0,
+            y: 0.0,
+            w: 10.0,
+            h: 10.0,
+        });
+        scene.commands.push(SceneCommand::DrawImage {
+            x: 0.0,
+            y: 0.0,
+            w: 10.0,
+            h: 10.0,
+            asset_id: "asset.red".to_string(),
+            fit: FitMode::Stretch,
+            pos_x: 50.0,
+            pos_y: 50.0,
+            opacity: 1.0,
+        });
+        scene.commands.push(SceneCommand::PopClip);
+
+        let backend = TinySkiaBackend;
+        let fonts = default_provider();
+        let img = backend
+            .rasterize(&scene, &fonts, &assets)
+            .expect("SVG rasterize must succeed");
+
+        // Center pixel must be red (r dominant, a > 0).
+        let (r, g, b, a) = pixel(&img.rgba, img.width, 5, 5);
+        assert!(a > 0, "center pixel must be opaque after SVG rasterize");
+        assert!(
+            r > g && r > b,
+            "center pixel must be red-dominant; got r={r} g={g} b={b}"
         );
     }
 }
