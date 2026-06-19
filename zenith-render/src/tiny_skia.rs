@@ -48,6 +48,34 @@ fn f64_to_px(value: f64, axis: &str) -> Result<u32, RenderError> {
     Ok(px_u32)
 }
 
+/// Build a clip `Mask` from the current effective clip rectangle.
+///
+/// Returns:
+/// - `None` — the effective clip is empty or fully off-canvas; the caller
+///   should skip the draw entirely (`continue`).
+/// - `Some(None)` — the clip covers the whole pixmap; no masking needed,
+///   draw with `mask = None` (the common, no-frame case — avoids allocating
+///   a full-size mask on every top-level draw).
+/// - `Some(Some(mask))` — a real sub-page clip; draw with `mask = Some(&mask)`.
+fn clip_mask(
+    effective_clip: (f64, f64, f64, f64),
+    width: u32,
+    height: u32,
+) -> Option<Option<Mask>> {
+    let pixmap_bounds = (0.0, 0.0, f64::from(width), f64::from(height));
+    let (cx, cy, cx2, cy2) = intersect_rects(effective_clip, pixmap_bounds)?; // empty → None (skip)
+    // If the clip covers the entire pixmap, no mask is needed.
+    if cx <= 0.0 && cy <= 0.0 && cx2 >= f64::from(width) && cy2 >= f64::from(height) {
+        return Some(None);
+    }
+    let mut mask = Mask::new(width, height)?;
+    let rect = Rect::from_xywh(cx as f32, cy as f32, (cx2 - cx) as f32, (cy2 - cy) as f32)?;
+    let clip_path = PathBuilder::from_rect(rect);
+    // AA off: the clip is an axis-aligned rect and must be exact.
+    mask.fill_path(&clip_path, FillRule::Winding, false, Transform::identity());
+    Some(Some(mask))
+}
+
 /// Intersect two axis-aligned rectangles expressed as `(x, y, x2, y2)`.
 ///
 /// Returns `None` when the intersection is empty.
@@ -237,50 +265,53 @@ impl RasterBackend for TinySkiaBackend {
                 }
 
                 SceneCommand::FillEllipse { x, y, w, h, color } => {
-                    let fill_rect = (*x, *y, x + w, y + h);
                     let effective_clip = *clip_stack.last().unwrap_or(&page_clip);
 
-                    // Intersect the bounding box with the current effective clip.
-                    let (ix, iy, ix2, iy2) = match intersect_rects(fill_rect, effective_clip) {
-                        Some(r) => r,
-                        None => continue, // nothing to draw
-                    };
+                    // Early-out: skip if the ellipse bbox is entirely outside the clip.
+                    if intersect_rects((*x, *y, x + w, y + h), effective_clip).is_none() {
+                        continue;
+                    }
 
-                    let iw = ix2 - ix;
-                    let ih = iy2 - iy;
-
-                    if iw <= 0.0
-                        || ih <= 0.0
-                        || !ix.is_finite()
-                        || !iy.is_finite()
-                        || !iw.is_finite()
-                        || !ih.is_finite()
+                    // Guard against non-finite or degenerate dimensions.
+                    if !x.is_finite()
+                        || !y.is_finite()
+                        || !w.is_finite()
+                        || !h.is_finite()
+                        || *w <= 0.0
+                        || *h <= 0.0
                     {
                         continue;
                     }
 
-                    let rect = match Rect::from_xywh(ix as f32, iy as f32, iw as f32, ih as f32) {
-                        Some(r) => r,
-                        None => continue,
+                    // Build the oval at its TRUE bounding box — NOT the intersected box.
+                    // Intersecting the bbox before building the oval would reshape (squish)
+                    // the ellipse under partial clip; instead we draw the full ellipse and
+                    // let the clip mask truncate it.
+                    let Some(rect) = Rect::from_xywh(*x as f32, *y as f32, *w as f32, *h as f32)
+                    else {
+                        continue;
+                    };
+                    let Some(path) = PathBuilder::from_oval(rect) else {
+                        continue; // degenerate rect: skip
                     };
 
-                    // Ellipse is a curved fill — AA-on like glyph outlines
-                    // (deterministic same-machine), unlike axis-aligned rects.
+                    // Build clip mask from the effective clip (truncates, not reshapes).
+                    // AA-on: curved fill, deterministic same-machine.
+                    let mask = match clip_mask(effective_clip, width, height) {
+                        None => continue,
+                        Some(m) => m,
+                    };
+
                     let mut paint = Paint::default();
                     paint.set_color_rgba8(color.r, color.g, color.b, color.a);
                     paint.anti_alias = true;
-
-                    let path = match PathBuilder::from_oval(rect) {
-                        Some(p) => p,
-                        None => continue, // degenerate rect: skip
-                    };
 
                     pixmap.fill_path(
                         &path,
                         &paint,
                         FillRule::Winding,
                         Transform::identity(),
-                        None,
+                        mask.as_ref(),
                     );
                 }
 
@@ -309,11 +340,9 @@ impl RasterBackend for TinySkiaBackend {
 
                     // A line is 1-D so we cannot reshape it to the clip; instead we
                     // compute the ink bounding box (endpoints expanded by half the
-                    // stroke width) and skip entirely if it is outside the clip.
-                    // We still rely on native pixmap-edge clipping for on-screen
-                    // pixels: the page clip equals the pixmap extent in v0.
-                    // Sub-page clip regions will need Mask-based clipping in the
-                    // future clip-mask unit.
+                    // stroke width) as a cheap early-out, then clip the stroke to the
+                    // effective clip via a mask so sub-page (frame) clips truncate the
+                    // line at the frame edge.
                     let half_sw = stroke_width / 2.0;
                     let ink_x = x1.min(*x2) - half_sw;
                     let ink_y = y1.min(*y2) - half_sw;
@@ -322,6 +351,11 @@ impl RasterBackend for TinySkiaBackend {
                     if intersect_rects((ink_x, ink_y, ink_x2, ink_y2), effective_clip).is_none() {
                         continue;
                     }
+
+                    let mask = match clip_mask(effective_clip, width, height) {
+                        None => continue,
+                        Some(m) => m,
+                    };
 
                     // Build path: a single open segment from (x1,y1) to (x2,y2).
                     let mut pb = PathBuilder::new();
@@ -347,7 +381,13 @@ impl RasterBackend for TinySkiaBackend {
                     // same-machine like ellipse/glyph fills.
                     paint.anti_alias = true;
 
-                    pixmap.stroke_path(&path, &paint, &stroke, Transform::identity(), None);
+                    pixmap.stroke_path(
+                        &path,
+                        &paint,
+                        &stroke,
+                        Transform::identity(),
+                        mask.as_ref(),
+                    );
                 }
 
                 SceneCommand::DrawGlyphRun {
@@ -389,7 +429,17 @@ impl RasterBackend for TinySkiaBackend {
                     // the same machine (no GPU, no random state).
                     paint.anti_alias = true;
 
-                    // ── 5. Rasterize each glyph ───────────────────────────────
+                    // ── 5. Build the clip mask (once per run) ─────────────────
+                    // Glyph ink is clipped to the effective clip via the mask, so
+                    // text inside a frame is truncated at the frame edge; deterministic
+                    // same-machine (pure-software AA, no GPU).
+                    let effective_clip = *clip_stack.last().unwrap_or(&page_clip);
+                    let mask = match clip_mask(effective_clip, width, height) {
+                        None => continue, // entire run is off-canvas / clip is empty
+                        Some(m) => m,
+                    };
+
+                    // ── 6. Rasterize each glyph ───────────────────────────────
                     for glyph in glyphs {
                         let origin_x = *x as f32 + glyph.dx;
                         let baseline_y = *y as f32 + glyph.dy;
@@ -412,18 +462,12 @@ impl RasterBackend for TinySkiaBackend {
                             None => continue,
                         };
 
-                        // Note: glyph pixels that fall outside the pixmap bounds
-                        // are automatically discarded by tiny-skia — no explicit
-                        // clip intersection needed. Applying the clip stack for
-                        // per-glyph clipping (beyond the page edge) is deferred;
-                        // the page-edge clip equals the pixmap for the current
-                        // single-page skeleton, so this is correct for that case.
                         pixmap.fill_path(
                             &path,
                             &paint,
                             FillRule::Winding,
                             Transform::identity(),
-                            None,
+                            mask.as_ref(),
                         );
                     }
                 }
@@ -491,32 +535,16 @@ impl RasterBackend for TinySkiaBackend {
                     }
 
                     // ── d. Build the clip Mask from the effective clip ────────
-                    // compile pushed PushClip(box), so clip_stack.last() already
-                    // equals the image box ∩ enclosing clips (G-22 box-clip).
-                    let (cx, cy, cx2, cy2) = *clip_stack.last().unwrap_or(&page_clip);
-                    let pixmap_bounds = (0.0, 0.0, f64::from(width), f64::from(height));
-                    let (cx, cy, cx2, cy2) =
-                        match intersect_rects((cx, cy, cx2, cy2), pixmap_bounds) {
-                            Some(r) => r,
+                    // The compiler emits PushClip(box) before DrawImage, so
+                    // clip_stack.last() already equals the image box ∩ enclosing
+                    // clips (G-22 box-clip).  clip_mask() handles the full-pixmap
+                    // fast path (returns Some(None) → no mask allocation) and the
+                    // sub-page case (returns Some(Some(mask))).
+                    let mask =
+                        match clip_mask(*clip_stack.last().unwrap_or(&page_clip), width, height) {
                             None => continue, // clip fully off-canvas
+                            Some(m) => m,
                         };
-                    let Some(mut mask) = Mask::new(width, height) else {
-                        continue;
-                    };
-                    let clip_rect = match Rect::from_xywh(
-                        cx as f32,
-                        cy as f32,
-                        (cx2 - cx) as f32,
-                        (cy2 - cy) as f32,
-                    ) {
-                        Some(r) => r,
-                        None => continue,
-                    };
-                    // PathBuilder::from_rect returns a Path directly (infallible
-                    // for a valid Rect).
-                    let clip_path = PathBuilder::from_rect(clip_rect);
-                    // AA off: the box-clip is axis-aligned and must be exact.
-                    mask.fill_path(&clip_path, FillRule::Winding, false, Transform::identity());
 
                     // ── e. Paint: opacity + bilinear filtering ────────────────
                     let paint = PixmapPaint {
@@ -531,7 +559,7 @@ impl RasterBackend for TinySkiaBackend {
 
                     // ── g. Composite. Box-clip (G-22) is enforced by the Mask;
                     // deterministic same-machine (pure-software bilinear). ─────
-                    pixmap.draw_pixmap(0, 0, src.as_ref(), &paint, transform, Some(&mask));
+                    pixmap.draw_pixmap(0, 0, src.as_ref(), &paint, transform, mask.as_ref());
                 }
 
                 // PopClip when the stack is already at the page clip (depth 0),
@@ -1072,6 +1100,218 @@ mod tests {
         assert!(
             !any_opaque,
             "no pixels should be drawn when the asset is missing"
+        );
+    }
+
+    // ── ellipse: partial clip truncates, does not reshape ─────────────────
+
+    /// A 20×20 circle (FillEllipse x=0,y=0,w=20,h=20) is drawn inside a
+    /// bottom-right quadrant clip [10,10,20,20].
+    ///
+    /// Correct behaviour (TRUNCATE): the ellipse is drawn at its TRUE bounds
+    /// and the mask chops off the parts outside [10,10,20,20].
+    ///
+    /// Old wrong behaviour (RESHAPE): the ellipse bbox was intersected with the
+    /// clip, yielding a tiny oval fitted to [10,10,10,10].  A corner pixel such
+    /// as (18,18) — inside the clip box but outside the true circle — would
+    /// have been filled because the reshaping made the oval touch it.
+    ///
+    /// We assert:
+    /// - (18,18) alpha == 0  (outside the true circle; must stay transparent)
+    /// - (12,12) alpha > 0   (inside both clip and true circle; must be filled)
+    #[test]
+    fn ellipse_partial_clip_truncates_not_reshapes() {
+        let mut scene = Scene::new(20.0, 20.0);
+        // Full-page outer clip.
+        scene.commands.push(SceneCommand::PushClip {
+            x: 0.0,
+            y: 0.0,
+            w: 20.0,
+            h: 20.0,
+        });
+        // Bottom-right quadrant sub-page clip.
+        scene.commands.push(SceneCommand::PushClip {
+            x: 10.0,
+            y: 10.0,
+            w: 10.0,
+            h: 10.0,
+        });
+        // A circle that exactly fits the full page (center (10,10), r=10).
+        scene.commands.push(SceneCommand::FillEllipse {
+            x: 0.0,
+            y: 0.0,
+            w: 20.0,
+            h: 20.0,
+            color: Color {
+                r: 255,
+                g: 255,
+                b: 255,
+                a: 255,
+            },
+        });
+        scene.commands.push(SceneCommand::PopClip);
+        scene.commands.push(SceneCommand::PopClip);
+
+        let backend = TinySkiaBackend;
+        let provider = default_provider();
+        let img = backend
+            .rasterize(&scene, &provider, &no_assets())
+            .expect("rasterize must succeed");
+
+        // (18,18): inside clip [10,10,20,20] but outside the true circle
+        // (dist from center (10,10) ≈ √(8²+8²) ≈ 11.3 > 10).
+        // Must be transparent — the ellipse should be TRUNCATED here, not
+        // reshaping the oval to fill the entire clip box.
+        let (_, _, _, a_outside) = pixel(&img.rgba, img.width, 18, 18);
+        assert_eq!(
+            a_outside, 0,
+            "pixel (18,18) is outside the true circle; must be transparent (truncate, not reshape)"
+        );
+
+        // (12,12): inside both the clip box and the true circle
+        // (dist from center (10,10) ≈ √(2²+2²) ≈ 2.8 < 10).
+        // Must have been drawn (alpha > 0).
+        let (_, _, _, a_inside) = pixel(&img.rgba, img.width, 12, 12);
+        assert!(
+            a_inside > 0,
+            "pixel (12,12) is inside both the clip and the circle; must be filled"
+        );
+    }
+
+    // ── stroke line: sub-page clip mask is honored ────────────────────────
+
+    /// A diagonal stroked line spanning the page is wrapped in a small top-left
+    /// clip [0,0,5,5]. After wiring StrokeLine to `mask.as_ref()`, ink beyond the
+    /// clip (e.g. (15,15), on the line but outside the box) must be suppressed,
+    /// while ink inside the clip (near (2,2)) remains. Before the fix the line
+    /// drew its full length (sub-page clip ignored) and (15,15) would be inked.
+    #[test]
+    fn stroke_line_clipped_to_subpage_clip() {
+        let mut scene = Scene::new(20.0, 20.0);
+        scene.commands.push(SceneCommand::PushClip {
+            x: 0.0,
+            y: 0.0,
+            w: 20.0,
+            h: 20.0,
+        });
+        scene.commands.push(SceneCommand::PushClip {
+            x: 0.0,
+            y: 0.0,
+            w: 5.0,
+            h: 5.0,
+        });
+        scene.commands.push(SceneCommand::StrokeLine {
+            x1: 0.0,
+            y1: 0.0,
+            x2: 20.0,
+            y2: 20.0,
+            color: Color {
+                r: 0,
+                g: 0,
+                b: 0,
+                a: 255,
+            },
+            stroke_width: 4.0,
+        });
+        scene.commands.push(SceneCommand::PopClip);
+        scene.commands.push(SceneCommand::PopClip);
+
+        let backend = TinySkiaBackend;
+        let provider = default_provider();
+        let img = backend
+            .rasterize(&scene, &provider, &no_assets())
+            .expect("rasterize must succeed");
+
+        // (15,15): on the line but outside the [0,0,5,5] clip → must be clipped away.
+        let (_, _, _, a_outside) = pixel(&img.rgba, img.width, 15, 15);
+        assert_eq!(
+            a_outside, 0,
+            "pixel (15,15) is outside the sub-page clip; the stroked line must be truncated there"
+        );
+
+        // (2,2): on the line and inside the clip → must be inked.
+        let (_, _, _, a_inside) = pixel(&img.rgba, img.width, 2, 2);
+        assert!(
+            a_inside > 0,
+            "pixel (2,2) is on the line inside the clip; must be inked"
+        );
+    }
+
+    // ── glyph run: sub-page clip mask is honored ──────────────────────────
+
+    /// A glyph run for "A" at 32px is placed at x≈20, baseline≈34 on an
+    /// 80×40 page, then wrapped in a tiny clip [0,0,4,4] that lies far from
+    /// the glyph ink.  After fixing DrawGlyphRun to pass `mask.as_ref()`, the
+    /// effective clip mask must suppress all ink → NO opaque pixel anywhere.
+    ///
+    /// Before the fix (mask=None) tiny-skia only clips to the pixmap edge, so
+    /// the glyph would render normally and the test would fail.
+    #[test]
+    fn glyph_run_clipped_to_subpage_clip() {
+        let provider = default_provider();
+        let families = vec!["Noto Sans".to_string()];
+        let font_size = 32.0_f32;
+
+        let req = ShapeRequest {
+            text: "A",
+            families: &families,
+            weight: 400,
+            style: FontStyle::Normal,
+            font_size,
+        };
+        let run = RustybuzzEngine::new()
+            .shape(&req, &provider)
+            .expect("shaping must succeed");
+
+        let glyphs: Vec<SceneGlyph> = run
+            .glyphs
+            .iter()
+            .map(|g| SceneGlyph {
+                glyph_id: g.glyph_id,
+                dx: g.x,
+                dy: g.y,
+            })
+            .collect();
+
+        let mut scene = Scene::new(80.0, 40.0);
+        // Tiny clip box [0,0,4,4] — entirely disjoint from the glyph ink.
+        scene.commands.push(SceneCommand::PushClip {
+            x: 0.0,
+            y: 0.0,
+            w: 4.0,
+            h: 4.0,
+        });
+        // Glyph ink lands around x≥20, y up to baseline 34 — well outside the clip.
+        scene.commands.push(SceneCommand::DrawGlyphRun {
+            x: 20.0,
+            y: 34.0,
+            font_id: run.font_id.clone(),
+            font_size,
+            color: Color {
+                r: 0,
+                g: 0,
+                b: 200,
+                a: 255,
+            },
+            glyphs,
+        });
+        scene.commands.push(SceneCommand::PopClip);
+
+        let backend = TinySkiaBackend;
+        let img = backend
+            .rasterize(&scene, &provider, &no_assets())
+            .expect("rasterize must succeed");
+
+        // The clip mask must suppress all glyph ink — no opaque pixel anywhere.
+        let any_opaque = (0..img.height).any(|py| {
+            (0..img.width).any(|px| {
+                let (_, _, _, a) = pixel(&img.rgba, img.width, px, py);
+                a > 0
+            })
+        });
+        assert!(
+            !any_opaque,
+            "glyph ink must be fully clipped by the sub-page mask; found opaque pixels"
         );
     }
 }
