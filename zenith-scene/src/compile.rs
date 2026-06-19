@@ -622,6 +622,7 @@ fn compile_node(
                     }
                     Ok(run) => {
                         let baseline_y = text_y + run.ascent as f64;
+                        let run_advance = run.advance_width as f64;
                         let glyphs: Vec<SceneGlyph> = run
                             .glyphs
                             .iter()
@@ -631,6 +632,32 @@ fn compile_node(
                                 dy: g.y,
                             })
                             .collect();
+
+                        // Per-span decorations: a thin filled rule in the span's
+                        // own color, spanning the run's advance. Position/thickness
+                        // are derived from the font size (the shaped run does not
+                        // expose the font's underline metrics) — a deterministic v0
+                        // approximation. Emitted before the glyphs so the text sits
+                        // on top of any overlap.
+                        let deco_thickness = (font_size as f64 / 14.0).max(1.0);
+                        if span.underline == Some(true) {
+                            commands.push(SceneCommand::FillRect {
+                                x: x_cursor,
+                                y: baseline_y + font_size as f64 * 0.12,
+                                w: run_advance,
+                                h: deco_thickness,
+                                color: color.clone(),
+                            });
+                        }
+                        if span.strikethrough == Some(true) {
+                            commands.push(SceneCommand::FillRect {
+                                x: x_cursor,
+                                y: baseline_y - font_size as f64 * 0.30,
+                                w: run_advance,
+                                h: deco_thickness,
+                                color: color.clone(),
+                            });
+                        }
 
                         commands.push(SceneCommand::DrawGlyphRun {
                             x: x_cursor,
@@ -642,7 +669,7 @@ fn compile_node(
                         });
 
                         // Advance the cursor past this run for the next span.
-                        x_cursor += run.advance_width as f64;
+                        x_cursor += run_advance;
                     }
                 }
             }
@@ -4147,6 +4174,39 @@ mod tests {
             runs[1].2.contains("italic"),
             "second span must use the italic face; got {}",
             runs[1].2
+        );
+    }
+
+    /// Underline/strikethrough spans each emit one decoration `FillRect`; a
+    /// plain span emits none.
+    #[test]
+    fn text_span_decorations_emit_fill_rects() {
+        let src = r##"zenith version=1 {
+  project id="proj.dec" name="DEC"
+  tokens format="zenith-token-v1" {}
+  styles {}
+  document id="doc.dec" title="DEC" {
+    page id="page.dec" w=(px)400 h=(px)200 {
+      text id="text.dec" x=(px)10 y=(px)20 w=(px)380 h=(px)40 {
+        span "plain"
+        span "under" underline=#true
+        span "strike" strikethrough=#true
+      }
+    }
+  }
+}
+"##;
+        let doc = parse(src);
+        let result = compile(&doc, &default_provider());
+        let fill_rects = result
+            .scene
+            .commands
+            .iter()
+            .filter(|c| matches!(c, SceneCommand::FillRect { .. }))
+            .count();
+        assert_eq!(
+            fill_rects, 2,
+            "one underline + one strikethrough → 2 decoration rects; got {fill_rects}"
         );
     }
 
