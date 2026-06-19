@@ -1,0 +1,28 @@
+zenith version=1 {
+  project id="proj.star" name="Star Example"
+  tokens format="zenith-token-v1" {
+    token id="color.bg" type="color" value="#0f172a"
+    token id="color.fill" type="color" value="#fbbf24"
+    token id="color.stroke" type="color" value="#f59e0b"
+    token id="size.stroke" type="dimension" value=(px)2
+  }
+  styles {
+  }
+  document id="doc.star" title="Star Example" {
+    page id="page.star" w=(px)320 h=(px)200 {
+      rect id="rect.bg" x=(px)0 y=(px)0 w=(px)320 h=(px)200 fill=(token)"color.bg"
+      polygon id="poly.star" fill=(token)"color.fill" stroke=(token)"color.stroke" stroke-width=(token)"size.stroke" fill-rule="evenodd" {
+        point x=(px)160 y=(px)30
+        point x=(px)185 y=(px)105
+        point x=(px)265 y=(px)105
+        point x=(px)200 y=(px)150
+        point x=(px)225 y=(px)170
+        point x=(px)160 y=(px)125
+        point x=(px)95 y=(px)170
+        point x=(px)120 y=(px)150
+        point x=(px)55 y=(px)105
+        point x=(px)135 y=(px)105
+      }
+    }
+  }
+}

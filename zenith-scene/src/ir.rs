@@ -100,18 +100,24 @@ pub enum SceneCommand {
         color: Color,
         stroke_width: f64,
     },
-    /// Fill a closed polygon (nonzero winding rule by default).
+    /// Fill a closed polygon.
     FillPolygon {
         /// Flat list of `[x0, y0, x1, y1, …]` vertex coordinates.
         points: Vec<f64>,
         color: Color,
+        /// When `true`, use the even-odd fill rule; otherwise nonzero (winding).
+        #[serde(default)]
+        even_odd: bool,
     },
-    /// Stroke an open polyline.
+    /// Stroke a polyline (open or closed depending on `closed`).
     StrokePolyline {
         /// Flat list of `[x0, y0, x1, y1, …]` vertex coordinates.
         points: Vec<f64>,
         color: Color,
         stroke_width: f64,
+        /// When `true`, the path is closed before stroking (polygon outline).
+        #[serde(default)]
+        closed: bool,
     },
     // ── Asset commands ────────────────────────────────────────────────────
     /// Draw a raster image asset clipped to its declared box.

@@ -12,8 +12,9 @@ use crate::ast::{
     asset::{AssetBlock, AssetDecl, AssetKind},
     document::{Document, DocumentBody, Page, Project},
     node::{
-        EllipseNode, FrameNode, GroupNode, ImageNode, LineNode, Node, ObjectPosition, RectNode,
-        TextNode, TextSpan, UnknownNode, UnknownProperty, UnknownValue,
+        EllipseNode, FrameNode, GroupNode, ImageNode, LineNode, Node, ObjectPosition, Point,
+        PolygonNode, PolylineNode, RectNode, TextNode, TextSpan, UnknownNode, UnknownProperty,
+        UnknownValue,
     },
     style::{Style, StyleBlock},
     token::{Token, TokenBlock, TokenLiteral, TokenType, TokenValue},
@@ -607,6 +608,8 @@ fn transform_node(node: &KdlNode) -> Result<Node, ParseError> {
         "frame" => transform_frame(node).map(Node::Frame),
         "group" => transform_group(node).map(Node::Group),
         "image" => transform_image(node).map(Node::Image),
+        "polygon" => transform_polygon(node).map(Node::Polygon),
+        "polyline" => transform_polyline(node).map(Node::Polyline),
         _ => Ok(Node::Unknown(UnknownNode {
             kind: node.name().value().to_owned(),
             source_span: node_span(node),
@@ -918,6 +921,132 @@ fn transform_group(node: &KdlNode) -> Result<GroupNode, ParseError> {
         rotate: optional_dimension_prop(node, "rotate"),
         style: optional_string_prop(node, "style").map(str::to_owned),
         children: transform_children(node)?,
+        source_span: node_span(node),
+        unknown_props,
+    })
+}
+
+const POLYGON_KNOWN_PROPS: &[&str] = &[
+    "id",
+    "name",
+    "role",
+    "fill",
+    "stroke",
+    "stroke-width",
+    "stroke_width",
+    "stroke-alignment",
+    "stroke_alignment",
+    "fill-rule",
+    "fill_rule",
+    "opacity",
+    "visible",
+    "locked",
+    "rotate",
+    "style",
+];
+
+// NOTE: polyline intentionally omits stroke-alignment (doc 09) — an author
+// writing it gets a node.unknown_property warning, which is correct.
+const POLYLINE_KNOWN_PROPS: &[&str] = &[
+    "id",
+    "name",
+    "role",
+    "fill",
+    "stroke",
+    "stroke-width",
+    "stroke_width",
+    "fill-rule",
+    "fill_rule",
+    "opacity",
+    "visible",
+    "locked",
+    "rotate",
+    "style",
+];
+
+/// Transform a `point` child node into a [`Point`].
+///
+/// `x` and `y` are optional at parse time; validate checks their presence.
+fn transform_point(node: &KdlNode) -> Point {
+    Point {
+        x: optional_dimension_prop(node, "x"),
+        y: optional_dimension_prop(node, "y"),
+    }
+}
+
+fn transform_polygon(node: &KdlNode) -> Result<PolygonNode, ParseError> {
+    let id = required_string_prop(node, "id")?.to_owned();
+
+    let stroke_width = optional_property_value_aliased(node, "stroke-width", "stroke_width");
+    let stroke_alignment =
+        optional_string_prop_aliased(node, "stroke-alignment", "stroke_alignment")
+            .map(str::to_owned);
+    let fill_rule = optional_string_prop_aliased(node, "fill-rule", "fill_rule").map(str::to_owned);
+
+    // Collect `point` child nodes — this is where the vertex list lives.
+    let mut points: Vec<Point> = Vec::new();
+    if let Some(children) = node.children() {
+        for child in children.nodes() {
+            if child.name().value() == "point" {
+                points.push(transform_point(child));
+            }
+        }
+    }
+
+    let unknown_props = collect_unknown_props(node, POLYGON_KNOWN_PROPS);
+
+    Ok(PolygonNode {
+        id,
+        name: optional_string_prop(node, "name").map(str::to_owned),
+        role: optional_string_prop(node, "role").map(str::to_owned),
+        fill: optional_property_value(node, "fill"),
+        stroke: optional_property_value(node, "stroke"),
+        stroke_width,
+        stroke_alignment,
+        fill_rule,
+        opacity: optional_f64_prop(node, "opacity"),
+        visible: optional_bool_prop(node, "visible"),
+        locked: optional_bool_prop(node, "locked"),
+        rotate: optional_dimension_prop(node, "rotate"),
+        style: optional_string_prop(node, "style").map(str::to_owned),
+        points,
+        source_span: node_span(node),
+        unknown_props,
+    })
+}
+
+fn transform_polyline(node: &KdlNode) -> Result<PolylineNode, ParseError> {
+    let id = required_string_prop(node, "id")?.to_owned();
+
+    let stroke_width = optional_property_value_aliased(node, "stroke-width", "stroke_width");
+    let fill_rule = optional_string_prop_aliased(node, "fill-rule", "fill_rule").map(str::to_owned);
+
+    // Collect `point` child nodes.
+    let mut points: Vec<Point> = Vec::new();
+    if let Some(children) = node.children() {
+        for child in children.nodes() {
+            if child.name().value() == "point" {
+                points.push(transform_point(child));
+            }
+        }
+    }
+
+    let unknown_props = collect_unknown_props(node, POLYLINE_KNOWN_PROPS);
+
+    Ok(PolylineNode {
+        id,
+        name: optional_string_prop(node, "name").map(str::to_owned),
+        role: optional_string_prop(node, "role").map(str::to_owned),
+        fill: optional_property_value(node, "fill"),
+        stroke: optional_property_value(node, "stroke"),
+        stroke_width,
+        fill_rule,
+        opacity: optional_f64_prop(node, "opacity"),
+        visible: optional_bool_prop(node, "visible"),
+        locked: optional_bool_prop(node, "locked"),
+        rotate: optional_dimension_prop(node, "rotate"),
+        style: optional_string_prop(node, "style").map(str::to_owned),
+        points,
         source_span: node_span(node),
         unknown_props,
     })

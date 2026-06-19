@@ -23,8 +23,9 @@ use std::fmt::Write as _;
 
 use crate::ast::{
     AssetBlock, AssetDecl, Dimension, Document, DocumentBody, EllipseNode, FrameNode, GroupNode,
-    ImageNode, LineNode, Node, ObjectPosition, Page, Project, PropertyValue, RectNode, TextNode,
-    TextSpan, Token, TokenBlock, TokenLiteral, TokenType, TokenValue, Unit, UnknownValue,
+    ImageNode, LineNode, Node, ObjectPosition, Page, Point, PolygonNode, PolylineNode, Project,
+    PropertyValue, RectNode, TextNode, TextSpan, Token, TokenBlock, TokenLiteral, TokenType,
+    TokenValue, Unit, UnknownValue,
 };
 use crate::error::FormatError;
 
@@ -452,6 +453,8 @@ fn write_node(node: &Node, out: &mut String, depth: usize) {
         Node::Frame(f) => write_frame(f, out, depth),
         Node::Group(g) => write_group(g, out, depth),
         Node::Image(i) => write_image(i, out, depth),
+        Node::Polygon(p) => write_polygon(p, out, depth),
+        Node::Polyline(p) => write_polyline(p, out, depth),
         Node::Unknown(u) => write_unknown_node(u, out, depth),
     }
 }
@@ -735,6 +738,97 @@ fn write_span(span: &TextSpan, out: &mut String, depth: usize) {
     out.push('\n');
 }
 
+/// Emit a `point x=(unit)N y=(unit)N` line for each vertex in the list.
+///
+/// The block is always emitted (even for zero points) to maintain a consistent
+/// brace-block style, mirroring how `write_text` always emits its `{ … }`.
+fn write_points(points: &[Point], out: &mut String, depth: usize) {
+    for pt in points {
+        indent(out, depth);
+        out.push_str("point");
+        write_opt_dimension(out, "x", &pt.x);
+        write_opt_dimension(out, "y", &pt.y);
+        out.push('\n');
+    }
+}
+
+fn write_polygon(p: &PolygonNode, out: &mut String, depth: usize) {
+    indent(out, depth);
+    out.push_str("polygon");
+
+    // Canonical property order: id, name, role, fill, stroke, stroke-width,
+    // stroke-alignment, fill-rule, opacity, visible, locked, rotate, style,
+    // then unknown props, then the points block.
+    out.push_str(" id=\"");
+    out.push_str(&p.id);
+    out.push('"');
+    write_opt_str(out, "name", &p.name);
+    write_opt_str(out, "role", &p.role);
+    write_opt_property_value(out, "fill", &p.fill);
+    write_opt_property_value(out, "stroke", &p.stroke);
+    write_opt_property_value(out, "stroke-width", &p.stroke_width);
+    // DEFERRED: stroke-alignment offset (rendered centered in v0)
+    write_opt_str(out, "stroke-alignment", &p.stroke_alignment);
+    write_opt_str(out, "fill-rule", &p.fill_rule);
+    write_opt_f64(out, "opacity", &p.opacity);
+    write_opt_bool(out, "visible", &p.visible);
+    write_opt_bool(out, "locked", &p.locked);
+    write_opt_dimension(out, "rotate", &p.rotate);
+    write_opt_str(out, "style", &p.style);
+
+    // Unknown properties in sorted key order.
+    for (key, prop) in &p.unknown_props {
+        out.push(' ');
+        out.push_str(key);
+        out.push('=');
+        out.push_str(&fmt_unknown_value(&prop.value));
+    }
+
+    // Points block: always emit braces (container style).
+    out.push_str(" {\n");
+    write_points(&p.points, out, depth + 1);
+    indent(out, depth);
+    out.push_str("}\n");
+}
+
+fn write_polyline(p: &PolylineNode, out: &mut String, depth: usize) {
+    indent(out, depth);
+    out.push_str("polyline");
+
+    // Canonical property order: id, name, role, fill, stroke, stroke-width,
+    // fill-rule, opacity, visible, locked, rotate, style,
+    // then unknown props, then the points block.
+    // NOTE: polyline has NO stroke-alignment.
+    out.push_str(" id=\"");
+    out.push_str(&p.id);
+    out.push('"');
+    write_opt_str(out, "name", &p.name);
+    write_opt_str(out, "role", &p.role);
+    write_opt_property_value(out, "fill", &p.fill);
+    write_opt_property_value(out, "stroke", &p.stroke);
+    write_opt_property_value(out, "stroke-width", &p.stroke_width);
+    write_opt_str(out, "fill-rule", &p.fill_rule);
+    write_opt_f64(out, "opacity", &p.opacity);
+    write_opt_bool(out, "visible", &p.visible);
+    write_opt_bool(out, "locked", &p.locked);
+    write_opt_dimension(out, "rotate", &p.rotate);
+    write_opt_str(out, "style", &p.style);
+
+    // Unknown properties in sorted key order.
+    for (key, prop) in &p.unknown_props {
+        out.push(' ');
+        out.push_str(key);
+        out.push('=');
+        out.push_str(&fmt_unknown_value(&prop.value));
+    }
+
+    // Points block.
+    out.push_str(" {\n");
+    write_points(&p.points, out, depth + 1);
+    indent(out, depth);
+    out.push_str("}\n");
+}
+
 fn write_unknown_node(u: &crate::ast::UnknownNode, out: &mut String, depth: usize) {
     // Emit `<kind>` as a leaf (UnknownNode has no property map in current AST).
     indent(out, depth);
@@ -854,6 +948,8 @@ mod tests {
                 }
             }
             Node::Image(i) => i.source_span = None,
+            Node::Polygon(p) => p.source_span = None,
+            Node::Polyline(p) => p.source_span = None,
             Node::Unknown(u) => u.source_span = None,
         }
     }

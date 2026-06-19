@@ -294,6 +294,76 @@ pub struct GroupNode {
     pub unknown_props: BTreeMap<String, UnknownProperty>,
 }
 
+/// A single vertex in a polygon or polyline point list.
+///
+/// Both `x` and `y` are `Option` for consistency with line endpoint geometry
+/// — validate-time checks enforce their presence.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Point {
+    pub x: Option<Dimension>,
+    pub y: Option<Dimension>,
+}
+
+/// A `polygon` node — a CLOSED filled shape defined by an ordered list of
+/// `point` child nodes.
+///
+/// `polygon` supports both fill and stroke (stroke is centered in v0).
+/// `fill-rule` controls the winding rule for self-intersecting fills.
+/// `stroke-alignment` is parsed and preserved for future use but the stroke
+/// is ALWAYS rendered centered in v0.
+#[derive(Debug, Clone, PartialEq)]
+pub struct PolygonNode {
+    pub id: String,
+    pub name: Option<String>,
+    pub role: Option<String>,
+    pub fill: Option<PropertyValue>,
+    pub stroke: Option<PropertyValue>,
+    pub stroke_width: Option<PropertyValue>,
+    /// DEFERRED: stroke-alignment offset (rendered centered in v0)
+    pub stroke_alignment: Option<String>,
+    /// `"nonzero"` (default) or `"evenodd"`.
+    pub fill_rule: Option<String>,
+    pub opacity: Option<f64>,
+    pub visible: Option<bool>,
+    pub locked: Option<bool>,
+    pub rotate: Option<Dimension>,
+    pub style: Option<String>,
+    /// Ordered vertex list parsed from `point` child nodes.
+    pub points: Vec<Point>,
+    /// Source declaration span, when available.
+    pub source_span: Option<Span>,
+    /// Unknown properties preserved for forward-compat.
+    pub unknown_props: BTreeMap<String, UnknownProperty>,
+}
+
+/// A `polyline` node — an OPEN stroked path defined by an ordered list of
+/// `point` child nodes.
+///
+/// `polyline` has stroke (required for visible output) and optional fill.
+/// Unlike `polygon`, `polyline` does NOT support `stroke-alignment` (doc 09).
+#[derive(Debug, Clone, PartialEq)]
+pub struct PolylineNode {
+    pub id: String,
+    pub name: Option<String>,
+    pub role: Option<String>,
+    pub fill: Option<PropertyValue>,
+    pub stroke: Option<PropertyValue>,
+    pub stroke_width: Option<PropertyValue>,
+    /// `"nonzero"` (default) or `"evenodd"`.
+    pub fill_rule: Option<String>,
+    pub opacity: Option<f64>,
+    pub visible: Option<bool>,
+    pub locked: Option<bool>,
+    pub rotate: Option<Dimension>,
+    pub style: Option<String>,
+    /// Ordered vertex list parsed from `point` child nodes.
+    pub points: Vec<Point>,
+    /// Source declaration span, when available.
+    pub source_span: Option<Span>,
+    /// Unknown properties preserved for forward-compat.
+    pub unknown_props: BTreeMap<String, UnknownProperty>,
+}
+
 /// A renderable content node within a page.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Node {
@@ -304,5 +374,7 @@ pub enum Node {
     Frame(FrameNode),
     Group(GroupNode),
     Image(ImageNode),
+    Polygon(PolygonNode),
+    Polyline(PolylineNode),
     Unknown(UnknownNode),
 }

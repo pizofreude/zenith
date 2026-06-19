@@ -12,8 +12,9 @@ pub mod value;
 pub use asset::{AssetBlock, AssetDecl, AssetKind};
 pub use document::{Document, DocumentBody, Page, Project};
 pub use node::{
-    EllipseNode, FrameNode, GroupNode, ImageNode, LineNode, Node, ObjectPosition, RectNode,
-    TextNode, TextSpan, UnknownNode, UnknownProperty, UnknownValue,
+    EllipseNode, FrameNode, GroupNode, ImageNode, LineNode, Node, ObjectPosition, Point,
+    PolygonNode, PolylineNode, RectNode, TextNode, TextSpan, UnknownNode, UnknownProperty,
+    UnknownValue,
 };
 pub use span::Span;
 pub use style::{Style, StyleBlock};

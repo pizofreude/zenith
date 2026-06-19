@@ -10,7 +10,8 @@ use std::collections::BTreeMap;
 
 use zenith_core::{
     Diagnostic, Document, FontProvider, FontStyle, FrameNode, GroupNode, ImageNode, Node,
-    ObjectPosition, PropertyValue, ResolvedToken, ResolvedValue, Span, Unit, resolve_tokens,
+    ObjectPosition, Point, PolygonNode, PolylineNode, PropertyValue, ResolvedToken, ResolvedValue,
+    Span, Unit, resolve_tokens,
 };
 use zenith_layout::{RustybuzzEngine, ShapeRequest, TextLayoutEngine};
 
@@ -588,6 +589,14 @@ fn compile_node(
             compile_image(image, commands, diagnostics, ctx);
         }
 
+        Node::Polygon(poly) => {
+            compile_polygon(poly, resolved, commands, diagnostics, ctx);
+        }
+
+        Node::Polyline(poly) => {
+            compile_polyline(poly, resolved, commands, diagnostics, ctx);
+        }
+
         Node::Unknown(unknown) => {
             diagnostics.push(Diagnostic::advisory(
                 "scene.unsupported_node",
@@ -871,6 +880,190 @@ fn compile_image(
         opacity,
     });
     commands.push(SceneCommand::PopClip);
+}
+
+/// Resolve an ordered point list into a flat `[x0, y0, x1, y1, …]` pixel-
+/// coordinate vector, applying `ctx.dx`/`ctx.dy`.
+///
+/// Returns `None` on the first point with a missing or unsupported-unit
+/// coordinate, after pushing a diagnostic. The minimum-count check is the
+/// caller's responsibility (polygon requires ≥ 6 coords, polyline ≥ 4).
+fn resolve_flat_points(
+    points: &[Point],
+    node_kind: &str,
+    node_id: &str,
+    source_span: Option<Span>,
+    ctx: RenderCtx,
+    diagnostics: &mut Vec<Diagnostic>,
+) -> Option<Vec<f64>> {
+    let mut flat: Vec<f64> = Vec::with_capacity(points.len() * 2);
+    for (idx, pt) in points.iter().enumerate() {
+        let (Some(xd), Some(yd)) = (&pt.x, &pt.y) else {
+            diagnostics.push(Diagnostic::advisory(
+                "scene.missing_geometry",
+                format!(
+                    "{} '{}' point[{}] is missing x or y coordinate; skipped",
+                    node_kind, node_id, idx
+                ),
+                source_span,
+                Some(node_id.to_owned()),
+            ));
+            return None;
+        };
+        let Some(px) = dim_to_px(xd.value, &xd.unit) else {
+            diagnostics.push(unsupported_unit_diag(
+                node_kind,
+                node_id,
+                "point x",
+                source_span,
+            ));
+            return None;
+        };
+        let Some(py) = dim_to_px(yd.value, &yd.unit) else {
+            diagnostics.push(unsupported_unit_diag(
+                node_kind,
+                node_id,
+                "point y",
+                source_span,
+            ));
+            return None;
+        };
+        flat.push(px + ctx.dx);
+        flat.push(py + ctx.dy);
+    }
+    Some(flat)
+}
+
+/// Compile a `polygon` leaf node.
+///
+/// Emits `FillPolygon` (if fill is present) THEN `StrokePolyline { closed: true }`
+/// (if stroke is present) so the stroke draws on top of the fill.
+///
+/// Points are in absolute document coordinates — `ctx.dx`/`ctx.dy` are added
+/// exactly as for `line` endpoints.
+fn compile_polygon(
+    poly: &PolygonNode,
+    resolved: &BTreeMap<String, ResolvedToken>,
+    commands: &mut Vec<SceneCommand>,
+    diagnostics: &mut Vec<Diagnostic>,
+    ctx: RenderCtx,
+) {
+    if poly.visible == Some(false) {
+        return;
+    }
+
+    // Build the flat point list: require both x and y for every point.
+    let Some(flat_points) = resolve_flat_points(
+        &poly.points,
+        "polygon",
+        &poly.id,
+        poly.source_span,
+        ctx,
+        diagnostics,
+    ) else {
+        return;
+    };
+
+    // Need at least 3 points (6 coordinates) — validate already errors, skip emit.
+    if flat_points.len() < 6 {
+        return;
+    }
+
+    let node_opacity = poly.opacity.unwrap_or(1.0).clamp(0.0, 1.0);
+    let even_odd = poly.fill_rule.as_deref() == Some("evenodd");
+
+    // FILL (drawn first, stroke on top).
+    if let Some(fill_prop) = &poly.fill
+        && let Some(mut color) = resolve_property_color(fill_prop, resolved, diagnostics, &poly.id)
+    {
+        color.a = (color.a as f64 * node_opacity * ctx.opacity).round() as u8;
+        commands.push(SceneCommand::FillPolygon {
+            points: flat_points.clone(),
+            color,
+            even_odd,
+        });
+    }
+
+    // STROKE (drawn on top of fill).
+    if let Some(stroke_prop) = &poly.stroke
+        && let Some(mut color) =
+            resolve_property_color(stroke_prop, resolved, diagnostics, &poly.id)
+    {
+        color.a = (color.a as f64 * node_opacity * ctx.opacity).round() as u8;
+        let stroke_width = resolve_property_dimension_px(&poly.stroke_width, resolved, 1.0);
+        commands.push(SceneCommand::StrokePolyline {
+            points: flat_points,
+            color,
+            stroke_width,
+            closed: true,
+        });
+    }
+}
+
+/// Compile a `polyline` leaf node.
+///
+/// Emits `FillPolygon` (if fill is present, renderer closes the path implicitly)
+/// THEN `StrokePolyline { closed: false }` (if stroke is present).
+///
+/// Points are in absolute document coordinates — `ctx.dx`/`ctx.dy` are added
+/// exactly as for `line` endpoints.
+fn compile_polyline(
+    poly: &PolylineNode,
+    resolved: &BTreeMap<String, ResolvedToken>,
+    commands: &mut Vec<SceneCommand>,
+    diagnostics: &mut Vec<Diagnostic>,
+    ctx: RenderCtx,
+) {
+    if poly.visible == Some(false) {
+        return;
+    }
+
+    // Build the flat point list.
+    let Some(flat_points) = resolve_flat_points(
+        &poly.points,
+        "polyline",
+        &poly.id,
+        poly.source_span,
+        ctx,
+        diagnostics,
+    ) else {
+        return;
+    };
+
+    // Need at least 2 points (4 coordinates) — validate already errors, skip emit.
+    if flat_points.len() < 4 {
+        return;
+    }
+
+    let node_opacity = poly.opacity.unwrap_or(1.0).clamp(0.0, 1.0);
+    let even_odd = poly.fill_rule.as_deref() == Some("evenodd");
+
+    // FILL (drawn first; FillPolygon renderer closes the path).
+    if let Some(fill_prop) = &poly.fill
+        && let Some(mut color) = resolve_property_color(fill_prop, resolved, diagnostics, &poly.id)
+    {
+        color.a = (color.a as f64 * node_opacity * ctx.opacity).round() as u8;
+        commands.push(SceneCommand::FillPolygon {
+            points: flat_points.clone(),
+            color,
+            even_odd,
+        });
+    }
+
+    // STROKE — open path (closed: false).
+    if let Some(stroke_prop) = &poly.stroke
+        && let Some(mut color) =
+            resolve_property_color(stroke_prop, resolved, diagnostics, &poly.id)
+    {
+        color.a = (color.a as f64 * node_opacity * ctx.opacity).round() as u8;
+        let stroke_width = resolve_property_dimension_px(&poly.stroke_width, resolved, 1.0);
+        commands.push(SceneCommand::StrokePolyline {
+            points: flat_points,
+            color,
+            stroke_width,
+            closed: false,
+        });
+    }
 }
 
 /// Resolve an object-position anchor to `0.0..=100.0`.
@@ -2394,6 +2587,239 @@ mod tests {
         assert!(
             (opacity - 0.25).abs() < 1e-9,
             "cascaded opacity must be 0.25; got {opacity}"
+        );
+    }
+
+    // ══════════════════════════════════════════════════════════════════════
+    // Polygon / Polyline compile tests
+    // ══════════════════════════════════════════════════════════════════════
+
+    // ── polygon: fill + stroke emits FillPolygon then StrokePolyline(closed) ─
+
+    #[test]
+    fn polygon_emits_fill_and_stroke() {
+        let src = r##"zenith version=1 {
+  project id="proj.p1" name="P1"
+  tokens format="zenith-token-v1" {
+    token id="color.fill" type="color" value="#ff0000"
+    token id="color.stroke" type="color" value="#000000"
+    token id="size.stroke" type="dimension" value=(px)2
+  }
+  styles {}
+  document id="doc.p1" title="P1" {
+    page id="page.p1" w=(px)320 h=(px)200 {
+      polygon id="poly.tri" fill=(token)"color.fill" stroke=(token)"color.stroke" stroke-width=(token)"size.stroke" {
+        point x=(px)160 y=(px)40
+        point x=(px)260 y=(px)170
+        point x=(px)60 y=(px)170
+      }
+    }
+  }
+}
+"##;
+        let doc = parse(src);
+        let result = compile(&doc, &default_provider());
+
+        assert!(
+            result.diagnostics.is_empty(),
+            "unexpected diagnostics: {:?}",
+            result.diagnostics
+        );
+
+        // PushClip, FillPolygon, StrokePolyline, PopClip
+        let cmds = &result.scene.commands;
+        assert_eq!(cmds.len(), 4, "expected 4 commands, got: {:?}", cmds);
+
+        match &cmds[1] {
+            SceneCommand::FillPolygon {
+                points,
+                color,
+                even_odd,
+            } => {
+                // 3 points × 2 = 6 coordinates
+                assert_eq!(points.len(), 6, "must have 6 flat coords");
+                assert_eq!(points[0], 160.0, "x0 must be 160");
+                assert_eq!(points[1], 40.0, "y0 must be 40");
+                assert_eq!(color.r, 255, "fill color must be red");
+                assert!(!even_odd, "even_odd must be false by default");
+            }
+            other => panic!("cmd[1] must be FillPolygon, got {other:?}"),
+        }
+
+        match &cmds[2] {
+            SceneCommand::StrokePolyline {
+                points,
+                closed,
+                color,
+                stroke_width,
+            } => {
+                assert_eq!(points.len(), 6);
+                assert!(closed, "polygon stroke must be closed");
+                assert_eq!(color.r, 0, "stroke color must be black");
+                assert!((stroke_width - 2.0).abs() < 1e-9);
+            }
+            other => panic!("cmd[2] must be StrokePolyline, got {other:?}"),
+        }
+    }
+
+    // ── polygon: fill-rule="evenodd" → FillPolygon.even_odd == true ───────
+
+    #[test]
+    fn polygon_evenodd_fill_rule() {
+        let src = r##"zenith version=1 {
+  project id="proj.p2" name="P2"
+  tokens format="zenith-token-v1" {
+    token id="color.fill" type="color" value="#0000ff"
+  }
+  styles {}
+  document id="doc.p2" title="P2" {
+    page id="page.p2" w=(px)200 h=(px)200 {
+      polygon id="poly.star" fill=(token)"color.fill" fill-rule="evenodd" {
+        point x=(px)100 y=(px)10
+        point x=(px)40 y=(px)180
+        point x=(px)190 y=(px)60
+        point x=(px)10 y=(px)60
+        point x=(px)160 y=(px)180
+      }
+    }
+  }
+}
+"##;
+        let doc = parse(src);
+        let result = compile(&doc, &default_provider());
+
+        let fp = result.scene.commands.iter().find_map(|c| match c {
+            SceneCommand::FillPolygon { even_odd, .. } => Some(*even_odd),
+            _ => None,
+        });
+        assert_eq!(fp, Some(true), "fill-rule=evenodd must set even_odd=true");
+    }
+
+    // ── polyline: stroke-only → one StrokePolyline(closed:false), no FillPolygon ─
+
+    #[test]
+    fn polyline_emits_open_stroke() {
+        let src = r##"zenith version=1 {
+  project id="proj.pl1" name="PL1"
+  tokens format="zenith-token-v1" {
+    token id="color.stroke" type="color" value="#334155"
+    token id="size.stroke" type="dimension" value=(px)3
+  }
+  styles {}
+  document id="doc.pl1" title="PL1" {
+    page id="page.pl1" w=(px)320 h=(px)200 {
+      polyline id="line.conn" stroke=(token)"color.stroke" stroke-width=(token)"size.stroke" {
+        point x=(px)40 y=(px)100
+        point x=(px)120 y=(px)60
+        point x=(px)200 y=(px)140
+      }
+    }
+  }
+}
+"##;
+        let doc = parse(src);
+        let result = compile(&doc, &default_provider());
+
+        assert!(
+            result.diagnostics.is_empty(),
+            "unexpected diagnostics: {:?}",
+            result.diagnostics
+        );
+
+        // PushClip, StrokePolyline, PopClip — no FillPolygon
+        let cmds = &result.scene.commands;
+        assert_eq!(cmds.len(), 3, "expected 3 commands, got: {:?}", cmds);
+
+        assert!(
+            !cmds
+                .iter()
+                .any(|c| matches!(c, SceneCommand::FillPolygon { .. })),
+            "stroke-only polyline must not emit FillPolygon"
+        );
+
+        match &cmds[1] {
+            SceneCommand::StrokePolyline { points, closed, .. } => {
+                assert_eq!(points.len(), 6, "3 points × 2 = 6 flat coords");
+                assert!(!closed, "polyline stroke must NOT be closed");
+            }
+            other => panic!("cmd[1] must be StrokePolyline, got {other:?}"),
+        }
+    }
+
+    // ── polygon: visible=false → not emitted ──────────────────────────────
+
+    #[test]
+    fn invisible_polygon_not_emitted() {
+        let src = r##"zenith version=1 {
+  project id="proj.p3" name="P3"
+  tokens format="zenith-token-v1" {
+    token id="color.fill" type="color" value="#ff0000"
+  }
+  styles {}
+  document id="doc.p3" title="P3" {
+    page id="page.p3" w=(px)100 h=(px)100 {
+      polygon id="poly.hidden" fill=(token)"color.fill" visible=#false {
+        point x=(px)10 y=(px)10
+        point x=(px)90 y=(px)10
+        point x=(px)50 y=(px)90
+      }
+    }
+  }
+}
+"##;
+        let doc = parse(src);
+        let result = compile(&doc, &default_provider());
+
+        assert!(
+            result.diagnostics.is_empty(),
+            "unexpected diagnostics: {:?}",
+            result.diagnostics
+        );
+        let cmds = &result.scene.commands;
+        assert_eq!(
+            cmds.len(),
+            2,
+            "expected PushClip + PopClip only; got: {:?}",
+            cmds
+        );
+        assert!(matches!(cmds[0], SceneCommand::PushClip { .. }));
+        assert!(matches!(cmds[1], SceneCommand::PopClip));
+    }
+
+    // ── polygon: group opacity 0.5 cascades into fill color.a ─────────────
+
+    #[test]
+    fn polygon_opacity_cascades() {
+        let src = r##"zenith version=1 {
+  project id="proj.p4" name="P4"
+  tokens format="zenith-token-v1" {
+    token id="color.fill" type="color" value="#ffffff"
+  }
+  styles {}
+  document id="doc.p4" title="P4" {
+    page id="page.p4" w=(px)200 h=(px)200 {
+      group id="grp.p4" opacity=0.5 {
+        polygon id="poly.p4" fill=(token)"color.fill" {
+          point x=(px)10 y=(px)10
+          point x=(px)100 y=(px)10
+          point x=(px)55 y=(px)100
+        }
+      }
+    }
+  }
+}
+"##;
+        let doc = parse(src);
+        let result = compile(&doc, &default_provider());
+
+        let fill_a = result.scene.commands.iter().find_map(|c| match c {
+            SceneCommand::FillPolygon { color, .. } => Some(color.a),
+            _ => None,
+        });
+        // #ffffff α=255, node opacity=1.0, ctx opacity=0.5 → 255*0.5 ≈ 128
+        assert!(
+            fill_a.map(|a| (a as i32 - 128).abs() <= 1).unwrap_or(false),
+            "cascaded opacity 0.5 must halve fill alpha to ≈128; got {fill_a:?}"
         );
     }
 }

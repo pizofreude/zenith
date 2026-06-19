@@ -5,7 +5,8 @@
 //! from `backend.rs`.
 
 use tiny_skia::{
-    FillRule, FilterQuality, Mask, Paint, PathBuilder, Pixmap, PixmapPaint, Rect, Stroke, Transform,
+    FillRule, FilterQuality, Mask, Paint, Path, PathBuilder, Pixmap, PixmapPaint, Rect, Stroke,
+    Transform,
 };
 use zenith_core::{AssetKind, AssetProvider, FontProvider};
 use zenith_scene::{FitMode, Scene, SceneCommand};
@@ -92,6 +93,37 @@ fn intersect_rects(
     } else {
         None
     }
+}
+
+/// Build a `tiny_skia::Path` from a flat `[x0, y0, x1, y1, …]` point list.
+///
+/// `closed` — when `true` the path is closed after the final vertex (polygon);
+/// when `false` the path is left open (polyline stroke).
+///
+/// Returns `None` when the path is degenerate (e.g. zero-length). The caller
+/// must have already verified that `points` contains at least 4 elements (2
+/// vertices) and that all values are finite before calling this function.
+fn build_poly_path(points: &[f64], closed: bool) -> Option<Path> {
+    let mut pb = PathBuilder::new();
+    // Safety: caller guarantees points.len() >= 4; first() / get(1) always Some.
+    let (x0, y0) = match (points.first(), points.get(1)) {
+        (Some(&x), Some(&y)) => (x as f32, y as f32),
+        _ => return None,
+    };
+    pb.move_to(x0, y0);
+    let mut i = 2;
+    while i + 1 < points.len() {
+        let (px, py) = match (points.get(i), points.get(i + 1)) {
+            (Some(&x), Some(&y)) => (x as f32, y as f32),
+            _ => break,
+        };
+        pb.line_to(px, py);
+        i += 2;
+    }
+    if closed {
+        pb.close();
+    }
+    pb.finish()
 }
 
 /// Convert premultiplied RGBA8 (tiny-skia's internal storage) to straight-alpha RGBA8.
@@ -560,6 +592,98 @@ impl RasterBackend for TinySkiaBackend {
                     // ── g. Composite. Box-clip (G-22) is enforced by the Mask;
                     // deterministic same-machine (pure-software bilinear). ─────
                     pixmap.draw_pixmap(0, 0, src.as_ref(), &paint, transform, mask.as_ref());
+                }
+
+                SceneCommand::FillPolygon {
+                    points,
+                    color,
+                    even_odd,
+                } => {
+                    // Guard: need at least 3 points (6 coordinates).
+                    if points.len() < 6 {
+                        continue;
+                    }
+                    // Guard: any non-finite coordinate.
+                    if points.iter().any(|v| !v.is_finite()) {
+                        continue;
+                    }
+
+                    let path = match build_poly_path(points, true) {
+                        Some(p) => p,
+                        None => continue,
+                    };
+
+                    let effective_clip = *clip_stack.last().unwrap_or(&page_clip);
+                    let mask = match clip_mask(effective_clip, width, height) {
+                        None => continue,
+                        Some(m) => m,
+                    };
+
+                    let fill_rule = if *even_odd {
+                        FillRule::EvenOdd
+                    } else {
+                        FillRule::Winding
+                    };
+
+                    let mut paint = Paint::default();
+                    paint.set_color_rgba8(color.r, color.g, color.b, color.a);
+                    paint.anti_alias = true;
+
+                    pixmap.fill_path(
+                        &path,
+                        &paint,
+                        fill_rule,
+                        Transform::identity(),
+                        mask.as_ref(),
+                    );
+                }
+
+                SceneCommand::StrokePolyline {
+                    points,
+                    color,
+                    stroke_width,
+                    closed,
+                } => {
+                    // Guard: need at least 2 points (4 coordinates).
+                    if points.len() < 4 {
+                        continue;
+                    }
+                    // Guard: any non-finite coordinate or invalid stroke_width.
+                    if points.iter().any(|v| !v.is_finite())
+                        || !stroke_width.is_finite()
+                        || *stroke_width > f64::from(f32::MAX)
+                    {
+                        continue;
+                    }
+
+                    let path = match build_poly_path(points, *closed) {
+                        Some(p) => p,
+                        None => continue,
+                    };
+
+                    let effective_clip = *clip_stack.last().unwrap_or(&page_clip);
+                    let mask = match clip_mask(effective_clip, width, height) {
+                        None => continue,
+                        Some(m) => m,
+                    };
+
+                    // Stroke defaults: Butt cap, Miter join, miter_limit 4 — normative v0.
+                    let stroke = Stroke {
+                        width: *stroke_width as f32,
+                        ..Default::default()
+                    };
+
+                    let mut paint = Paint::default();
+                    paint.set_color_rgba8(color.r, color.g, color.b, color.a);
+                    paint.anti_alias = true;
+
+                    pixmap.stroke_path(
+                        &path,
+                        &paint,
+                        &stroke,
+                        Transform::identity(),
+                        mask.as_ref(),
+                    );
                 }
 
                 // PopClip when the stack is already at the page clip (depth 0),
@@ -1057,6 +1181,113 @@ mod tests {
         assert!(
             any_ink,
             "DrawImage stretch must rasterize at least one non-transparent pixel"
+        );
+    }
+
+    // ── FillPolygon: triangle renders + determinism ───────────────────────
+
+    #[test]
+    fn fill_polygon_renders() {
+        // A simple triangle on a 100×100 page.
+        let color = Color {
+            r: 0,
+            g: 200,
+            b: 0,
+            a: 255,
+        };
+        let mut scene = Scene::new(100.0, 100.0);
+        scene.commands.push(SceneCommand::PushClip {
+            x: 0.0,
+            y: 0.0,
+            w: 100.0,
+            h: 100.0,
+        });
+        scene.commands.push(SceneCommand::FillPolygon {
+            // Triangle: top-center, bottom-right, bottom-left
+            points: vec![50.0, 10.0, 90.0, 90.0, 10.0, 90.0],
+            color: color.clone(),
+            even_odd: false,
+        });
+        scene.commands.push(SceneCommand::PopClip);
+
+        let backend = TinySkiaBackend;
+        let provider = default_provider();
+        let img1 = backend
+            .rasterize(&scene, &provider, &no_assets())
+            .expect("rasterize 1");
+
+        // At least one pixel inside the triangle must be green.
+        let any_ink = (0..img1.height).any(|py| {
+            (0..img1.width).any(|px| {
+                let (_, g, _, a) = pixel(&img1.rgba, img1.width, px, py);
+                a > 0 && g > 0
+            })
+        });
+        assert!(
+            any_ink,
+            "FillPolygon must rasterize at least one green pixel"
+        );
+
+        // Determinism: two renders must be byte-identical.
+        let img2 = backend
+            .rasterize(&scene, &provider, &no_assets())
+            .expect("rasterize 2");
+        assert_eq!(
+            img1.rgba, img2.rgba,
+            "two rasterizes of FillPolygon must be byte-identical"
+        );
+    }
+
+    // ── StrokePolyline: open stroke renders + determinism ─────────────────
+
+    #[test]
+    fn stroke_polyline_renders() {
+        let color = Color {
+            r: 255,
+            g: 0,
+            b: 0,
+            a: 255,
+        };
+        let mut scene = Scene::new(100.0, 100.0);
+        scene.commands.push(SceneCommand::PushClip {
+            x: 0.0,
+            y: 0.0,
+            w: 100.0,
+            h: 100.0,
+        });
+        scene.commands.push(SceneCommand::StrokePolyline {
+            points: vec![10.0, 50.0, 50.0, 10.0, 90.0, 50.0],
+            color: color.clone(),
+            stroke_width: 4.0,
+            closed: false,
+        });
+        scene.commands.push(SceneCommand::PopClip);
+
+        let backend = TinySkiaBackend;
+        let provider = default_provider();
+        let img1 = backend
+            .rasterize(&scene, &provider, &no_assets())
+            .expect("rasterize 1");
+
+        // At least one pixel must be inked.
+        let any_ink = (0..img1.height).any(|py| {
+            (0..img1.width).any(|px| {
+                let (_, _, _, a) = pixel(&img1.rgba, img1.width, px, py);
+                a > 0
+            })
+        });
+        assert!(
+            any_ink,
+            "StrokePolyline must rasterize at least one ink pixel"
+        );
+
+        // Determinism.
+        let img2 = backend
+            .rasterize(&scene, &provider, &no_assets())
+            .expect("rasterize 2");
+        assert_eq!(
+            img1.rgba, img2.rgba,
+            "two rasterizes of StrokePolyline must be byte-identical"
         );
     }
 

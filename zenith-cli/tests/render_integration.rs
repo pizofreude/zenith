@@ -75,3 +75,18 @@ fn frame_zen_renders_to_valid_png() {
 fn image_zen_renders_to_valid_png() {
     assert_example_renders("image");
 }
+
+#[test]
+fn polygon_zen_renders_to_valid_png() {
+    assert_example_renders("polygon");
+}
+
+#[test]
+fn polyline_zen_renders_to_valid_png() {
+    assert_example_renders("polyline");
+}
+
+#[test]
+fn star_zen_renders_to_valid_png() {
+    assert_example_renders("star");
+}

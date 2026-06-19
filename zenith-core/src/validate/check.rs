@@ -25,7 +25,7 @@ use std::collections::{BTreeMap, HashSet};
 
 use crate::ast::asset::{AssetDecl, AssetKind};
 use crate::ast::document::Document;
-use crate::ast::node::Node;
+use crate::ast::node::{Node, PolygonNode, PolylineNode};
 use crate::ast::token::TokenType;
 use crate::ast::value::{PropertyValue, Unit};
 use crate::diagnostics::{Diagnostic, Severity};
@@ -498,6 +498,26 @@ fn walk_node(
             // Image is a leaf — no child recursion.
         }
 
+        Node::Polygon(poly) => {
+            check_polygon(
+                poly,
+                seen_ids,
+                referenced_token_ids,
+                resolved_tokens,
+                diagnostics,
+            );
+        }
+
+        Node::Polyline(poly) => {
+            check_polyline(
+                poly,
+                seen_ids,
+                referenced_token_ids,
+                resolved_tokens,
+                diagnostics,
+            );
+        }
+
         Node::Unknown(u) => {
             diagnostics.push(Diagnostic::warning(
                 "node.unknown_kind",
@@ -512,6 +532,216 @@ fn walk_node(
             // Unknown nodes have no children in the v0 AST; nothing to recurse.
         }
     }
+}
+
+// ── polygon / polyline validation ─────────────────────────────────────────────
+
+fn check_polygon(
+    poly: &PolygonNode,
+    seen_ids: &mut HashSet<String>,
+    referenced_token_ids: &mut HashSet<String>,
+    resolved_tokens: &BTreeMap<String, ResolvedToken>,
+    diagnostics: &mut Vec<Diagnostic>,
+) {
+    register_id(&poly.id, seen_ids, diagnostics);
+
+    // Validate each point's x and y (both must be present with a known unit).
+    for (idx, pt) in poly.points.iter().enumerate() {
+        let x_label = format!("point[{idx}].x");
+        let y_label = format!("point[{idx}].y");
+        check_optional_dim(
+            &poly.id,
+            &x_label,
+            pt.x.as_ref(),
+            poly.source_span,
+            diagnostics,
+        );
+        check_optional_dim(
+            &poly.id,
+            &y_label,
+            pt.y.as_ref(),
+            poly.source_span,
+            diagnostics,
+        );
+    }
+
+    // polygon requires at least 3 points.
+    if poly.points.len() < 3 {
+        diagnostics.push(Diagnostic::error(
+            "shape.insufficient_points",
+            format!(
+                "polygon '{}': requires at least 3 points, got {}",
+                poly.id,
+                poly.points.len()
+            ),
+            poly.source_span,
+            Some(poly.id.clone()),
+        ));
+    }
+
+    // Visual properties.
+    check_visual_prop(
+        &poly.id,
+        "fill",
+        poly.fill.as_ref(),
+        VisualExpect::Color,
+        referenced_token_ids,
+        resolved_tokens,
+        diagnostics,
+    );
+    check_visual_prop(
+        &poly.id,
+        "stroke",
+        poly.stroke.as_ref(),
+        VisualExpect::Color,
+        referenced_token_ids,
+        resolved_tokens,
+        diagnostics,
+    );
+    check_visual_prop(
+        &poly.id,
+        "stroke-width",
+        poly.stroke_width.as_ref(),
+        VisualExpect::Dimension,
+        referenced_token_ids,
+        resolved_tokens,
+        diagnostics,
+    );
+
+    // fill-rule: only "nonzero" and "evenodd" are valid.
+    if let Some(fr) = &poly.fill_rule
+        && !matches!(fr.as_str(), "nonzero" | "evenodd")
+    {
+        diagnostics.push(Diagnostic::warning(
+            "node.unknown_property",
+            format!(
+                "polygon '{}': unrecognized fill-rule '{}' (version-relative; \
+                 allowed values are nonzero, evenodd)",
+                poly.id, fr
+            ),
+            poly.source_span,
+            Some(poly.id.clone()),
+        ));
+    }
+
+    // Unknown properties.
+    for prop_name in poly.unknown_props.keys() {
+        diagnostics.push(Diagnostic::warning(
+            "node.unknown_property",
+            format!(
+                "polygon '{}': unknown property '{}' (version-relative; \
+                 may be valid in a later schema version)",
+                poly.id, prop_name
+            ),
+            poly.source_span,
+            Some(poly.id.clone()),
+        ));
+    }
+    // polygon is a LEAF: no child-node recursion (points are sub-data).
+}
+
+fn check_polyline(
+    poly: &PolylineNode,
+    seen_ids: &mut HashSet<String>,
+    referenced_token_ids: &mut HashSet<String>,
+    resolved_tokens: &BTreeMap<String, ResolvedToken>,
+    diagnostics: &mut Vec<Diagnostic>,
+) {
+    register_id(&poly.id, seen_ids, diagnostics);
+
+    // Validate each point's x and y.
+    for (idx, pt) in poly.points.iter().enumerate() {
+        let x_label = format!("point[{idx}].x");
+        let y_label = format!("point[{idx}].y");
+        check_optional_dim(
+            &poly.id,
+            &x_label,
+            pt.x.as_ref(),
+            poly.source_span,
+            diagnostics,
+        );
+        check_optional_dim(
+            &poly.id,
+            &y_label,
+            pt.y.as_ref(),
+            poly.source_span,
+            diagnostics,
+        );
+    }
+
+    // polyline requires at least 2 points.
+    if poly.points.len() < 2 {
+        diagnostics.push(Diagnostic::error(
+            "shape.insufficient_points",
+            format!(
+                "polyline '{}': requires at least 2 points, got {}",
+                poly.id,
+                poly.points.len()
+            ),
+            poly.source_span,
+            Some(poly.id.clone()),
+        ));
+    }
+
+    // Visual properties.
+    check_visual_prop(
+        &poly.id,
+        "fill",
+        poly.fill.as_ref(),
+        VisualExpect::Color,
+        referenced_token_ids,
+        resolved_tokens,
+        diagnostics,
+    );
+    check_visual_prop(
+        &poly.id,
+        "stroke",
+        poly.stroke.as_ref(),
+        VisualExpect::Color,
+        referenced_token_ids,
+        resolved_tokens,
+        diagnostics,
+    );
+    check_visual_prop(
+        &poly.id,
+        "stroke-width",
+        poly.stroke_width.as_ref(),
+        VisualExpect::Dimension,
+        referenced_token_ids,
+        resolved_tokens,
+        diagnostics,
+    );
+
+    // fill-rule: only "nonzero" and "evenodd" are valid.
+    if let Some(fr) = &poly.fill_rule
+        && !matches!(fr.as_str(), "nonzero" | "evenodd")
+    {
+        diagnostics.push(Diagnostic::warning(
+            "node.unknown_property",
+            format!(
+                "polyline '{}': unrecognized fill-rule '{}' (version-relative; \
+                 allowed values are nonzero, evenodd)",
+                poly.id, fr
+            ),
+            poly.source_span,
+            Some(poly.id.clone()),
+        ));
+    }
+
+    // Unknown properties.
+    for prop_name in poly.unknown_props.keys() {
+        diagnostics.push(Diagnostic::warning(
+            "node.unknown_property",
+            format!(
+                "polyline '{}': unknown property '{}' (version-relative; \
+                 may be valid in a later schema version)",
+                poly.id, prop_name
+            ),
+            poly.source_span,
+            Some(poly.id.clone()),
+        ));
+    }
+    // polyline is a LEAF: no child-node recursion (points are sub-data).
 }
 
 // ── Geometry helpers ──────────────────────────────────────────────────────────
@@ -2252,6 +2482,292 @@ mod tests {
             .expect("should exist");
         assert_eq!(diag.severity, Severity::Warning);
         // invalid_fit is forward-compat: a Warning, not an Error.
+        assert!(!report.has_errors());
+    }
+
+    // ══════════════════════════════════════════════════════════════════════
+    // Polygon / Polyline validation tests
+    // ══════════════════════════════════════════════════════════════════════
+
+    use crate::ast::node::{Point, PolygonNode, PolylineNode};
+
+    fn tri_points() -> Vec<Point> {
+        vec![
+            Point {
+                x: Some(px(160.0)),
+                y: Some(px(40.0)),
+            },
+            Point {
+                x: Some(px(260.0)),
+                y: Some(px(170.0)),
+            },
+            Point {
+                x: Some(px(60.0)),
+                y: Some(px(170.0)),
+            },
+        ]
+    }
+
+    fn minimal_polygon(id: &str, fill: Option<PropertyValue>) -> Node {
+        Node::Polygon(PolygonNode {
+            id: id.to_owned(),
+            name: None,
+            role: None,
+            fill,
+            stroke: None,
+            stroke_width: None,
+            stroke_alignment: None,
+            fill_rule: None,
+            opacity: None,
+            visible: None,
+            locked: None,
+            rotate: None,
+            style: None,
+            points: tri_points(),
+            source_span: None,
+            unknown_props: BTreeMap::new(),
+        })
+    }
+
+    // ── polygon: clean doc with token fill → no errors ────────────────────
+
+    #[test]
+    fn polygon_clean_no_errors() {
+        let doc = doc_with(
+            vec![
+                color_token("color.fill"),
+                color_token("color.stroke"),
+                dim_token("size.stroke"),
+            ],
+            vec![minimal_page(
+                "page.one",
+                vec![Node::Polygon(PolygonNode {
+                    id: "poly.tri".to_owned(),
+                    name: None,
+                    role: None,
+                    fill: Some(token_ref("color.fill")),
+                    stroke: Some(token_ref("color.stroke")),
+                    stroke_width: Some(token_ref("size.stroke")),
+                    stroke_alignment: None,
+                    fill_rule: None,
+                    opacity: None,
+                    visible: None,
+                    locked: None,
+                    rotate: None,
+                    style: None,
+                    points: tri_points(),
+                    source_span: None,
+                    unknown_props: BTreeMap::new(),
+                })],
+            )],
+        );
+        let report = validate(&doc);
+        assert!(
+            report.diagnostics.is_empty(),
+            "expected no diagnostics for clean polygon, got: {:?}",
+            codes(&report)
+        );
+        assert!(!report.has_errors());
+    }
+
+    // ── polygon: only 2 points → shape.insufficient_points (Error) ───────
+
+    #[test]
+    fn polygon_too_few_points_insufficient() {
+        let doc = doc_with(
+            vec![],
+            vec![minimal_page(
+                "page.one",
+                vec![Node::Polygon(PolygonNode {
+                    id: "poly.bad".to_owned(),
+                    name: None,
+                    role: None,
+                    fill: None,
+                    stroke: None,
+                    stroke_width: None,
+                    stroke_alignment: None,
+                    fill_rule: None,
+                    opacity: None,
+                    visible: None,
+                    locked: None,
+                    rotate: None,
+                    style: None,
+                    points: vec![
+                        Point {
+                            x: Some(px(0.0)),
+                            y: Some(px(0.0)),
+                        },
+                        Point {
+                            x: Some(px(100.0)),
+                            y: Some(px(0.0)),
+                        },
+                    ],
+                    source_span: None,
+                    unknown_props: BTreeMap::new(),
+                })],
+            )],
+        );
+        let report = validate(&doc);
+        assert!(
+            has_code(&report, "shape.insufficient_points"),
+            "codes: {:?}",
+            codes(&report)
+        );
+        assert!(report.has_errors());
+    }
+
+    // ── polyline: only 1 point → shape.insufficient_points (Error) ───────
+
+    #[test]
+    fn polyline_too_few_points_insufficient() {
+        let doc = doc_with(
+            vec![],
+            vec![minimal_page(
+                "page.one",
+                vec![Node::Polyline(PolylineNode {
+                    id: "line.bad".to_owned(),
+                    name: None,
+                    role: None,
+                    fill: None,
+                    stroke: None,
+                    stroke_width: None,
+                    fill_rule: None,
+                    opacity: None,
+                    visible: None,
+                    locked: None,
+                    rotate: None,
+                    style: None,
+                    points: vec![Point {
+                        x: Some(px(0.0)),
+                        y: Some(px(0.0)),
+                    }],
+                    source_span: None,
+                    unknown_props: BTreeMap::new(),
+                })],
+            )],
+        );
+        let report = validate(&doc);
+        assert!(
+            has_code(&report, "shape.insufficient_points"),
+            "codes: {:?}",
+            codes(&report)
+        );
+        assert!(report.has_errors());
+    }
+
+    // ── polygon: point with missing y → node.missing_geometry ─────────────
+
+    #[test]
+    fn polygon_point_missing_coord() {
+        let doc = doc_with(
+            vec![],
+            vec![minimal_page(
+                "page.one",
+                vec![Node::Polygon(PolygonNode {
+                    id: "poly.missy".to_owned(),
+                    name: None,
+                    role: None,
+                    fill: None,
+                    stroke: None,
+                    stroke_width: None,
+                    stroke_alignment: None,
+                    fill_rule: None,
+                    opacity: None,
+                    visible: None,
+                    locked: None,
+                    rotate: None,
+                    style: None,
+                    points: vec![
+                        Point {
+                            x: Some(px(0.0)),
+                            y: None,
+                        }, // missing y
+                        Point {
+                            x: Some(px(100.0)),
+                            y: Some(px(0.0)),
+                        },
+                        Point {
+                            x: Some(px(50.0)),
+                            y: Some(px(100.0)),
+                        },
+                    ],
+                    source_span: None,
+                    unknown_props: BTreeMap::new(),
+                })],
+            )],
+        );
+        let report = validate(&doc);
+        assert!(
+            has_code(&report, "node.missing_geometry"),
+            "codes: {:?}",
+            codes(&report)
+        );
+        assert!(report.has_errors());
+    }
+
+    // ── polygon: fill raw literal → token.raw_visual_literal ─────────────
+
+    #[test]
+    fn polygon_fill_raw_literal() {
+        let doc = doc_with(
+            vec![],
+            vec![minimal_page(
+                "page.one",
+                vec![minimal_polygon(
+                    "poly.lit",
+                    Some(PropertyValue::Literal("#ff0000".to_owned())),
+                )],
+            )],
+        );
+        let report = validate(&doc);
+        assert!(
+            has_code(&report, "token.raw_visual_literal"),
+            "codes: {:?}",
+            codes(&report)
+        );
+        assert!(report.has_errors());
+    }
+
+    // ── polygon: unknown fill-rule warns ──────────────────────────────────
+
+    #[test]
+    fn polygon_unknown_fill_rule_warns() {
+        let doc = doc_with(
+            vec![],
+            vec![minimal_page(
+                "page.one",
+                vec![Node::Polygon(PolygonNode {
+                    id: "poly.fr".to_owned(),
+                    name: None,
+                    role: None,
+                    fill: None,
+                    stroke: None,
+                    stroke_width: None,
+                    stroke_alignment: None,
+                    fill_rule: Some("oddeven".to_owned()), // wrong spelling
+                    opacity: None,
+                    visible: None,
+                    locked: None,
+                    rotate: None,
+                    style: None,
+                    points: tri_points(),
+                    source_span: None,
+                    unknown_props: BTreeMap::new(),
+                })],
+            )],
+        );
+        let report = validate(&doc);
+        assert!(
+            has_code(&report, "node.unknown_property"),
+            "expected node.unknown_property warning for bad fill-rule; codes: {:?}",
+            codes(&report)
+        );
+        let diag = report
+            .diagnostics
+            .iter()
+            .find(|d| d.code == "node.unknown_property")
+            .expect("must exist");
+        assert_eq!(diag.severity, Severity::Warning);
         assert!(!report.has_errors());
     }
 }

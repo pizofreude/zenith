@@ -271,6 +271,9 @@ fn find_in_children_mut<'a>(children: &'a mut [Node], id: &str) -> Option<FindRe
                 Some(Hit::Descend(i))
             }
             Node::Image(img) if img.id == id => Some(Hit::WrongType("image")),
+            // Polygon and polyline are leaf nodes — no Descend arm.
+            Node::Polygon(p) if p.id == id => Some(Hit::WrongType("polygon")),
+            Node::Polyline(p) if p.id == id => Some(Hit::WrongType("polyline")),
             // All other variants without a matching id (Unknown): skip.
             _ => None,
         });
@@ -340,6 +343,8 @@ fn node_id_of(node: &Node) -> Option<&str> {
         Node::Frame(f) => Some(&f.id),
         Node::Group(g) => Some(&g.id),
         Node::Image(i) => Some(&i.id),
+        Node::Polygon(p) => Some(&p.id),
+        Node::Polyline(p) => Some(&p.id),
         Node::Unknown(_) => None,
     }
 }
