@@ -12,8 +12,8 @@ use crate::ast::{
     asset::{AssetBlock, AssetDecl, AssetKind},
     document::{Document, DocumentBody, Page, Project},
     node::{
-        EllipseNode, FrameNode, GroupNode, LineNode, Node, RectNode, TextNode, TextSpan,
-        UnknownNode, UnknownProperty, UnknownValue,
+        EllipseNode, FrameNode, GroupNode, ImageNode, LineNode, Node, ObjectPosition, RectNode,
+        TextNode, TextSpan, UnknownNode, UnknownProperty, UnknownValue,
     },
     style::{Style, StyleBlock},
     token::{Token, TokenBlock, TokenLiteral, TokenType, TokenValue},
@@ -178,6 +178,34 @@ fn optional_string_prop<'a>(node: &'a KdlNode, key: &str) -> Option<&'a str> {
 fn optional_dimension_prop(node: &KdlNode, key: &str) -> Option<Dimension> {
     let entry = node.entry(key)?;
     entry_to_dimension(entry, key).ok()
+}
+
+/// Extract an optional object-position property from a node.
+///
+/// Accepts EITHER a plain string anchor (`"start"`/`"center"`/`"end"`) OR a
+/// KDL `(pct)N` annotated number → `ObjectPosition::Pct(N)`. Any other string
+/// or shape yields `None` (the property is simply absent / unrecognized).
+fn optional_object_position_prop(node: &KdlNode, key: &str) -> Option<ObjectPosition> {
+    let entry = node.entry(key)?;
+    // A `(pct)N` annotated number → Pct(N).
+    if entry_annotation(entry) == Some("pct") {
+        let value = match entry.value() {
+            KdlValue::Integer(n) => *n as f64,
+            KdlValue::Float(f) => *f,
+            _ => return None,
+        };
+        return Some(ObjectPosition::Pct(value));
+    }
+    // Otherwise a plain string anchor.
+    match entry.value() {
+        KdlValue::String(s) => match s.as_str() {
+            "start" => Some(ObjectPosition::Start),
+            "center" => Some(ObjectPosition::Center),
+            "end" => Some(ObjectPosition::End),
+            _ => None,
+        },
+        _ => None,
+    }
 }
 
 /// Extract an optional property value (token ref or literal) from a node.
@@ -578,6 +606,7 @@ fn transform_node(node: &KdlNode) -> Result<Node, ParseError> {
         "text" => transform_text(node).map(Node::Text),
         "frame" => transform_frame(node).map(Node::Frame),
         "group" => transform_group(node).map(Node::Group),
+        "image" => transform_image(node).map(Node::Image),
         _ => Ok(Node::Unknown(UnknownNode {
             kind: node.name().value().to_owned(),
             source_span: node_span(node),
@@ -636,6 +665,61 @@ fn transform_rect(node: &KdlNode) -> Result<RectNode, ParseError> {
         visible: optional_bool_prop(node, "visible"),
         locked: optional_bool_prop(node, "locked"),
         rotate: optional_dimension_prop(node, "rotate"),
+        source_span: node_span(node),
+        unknown_props,
+    })
+}
+
+const IMAGE_KNOWN_PROPS: &[&str] = &[
+    "id",
+    "name",
+    "role",
+    "asset",
+    "x",
+    "y",
+    "w",
+    "h",
+    "fit",
+    "object-position-x",
+    "object_position_x",
+    "object-position-y",
+    "object_position_y",
+    "opacity",
+    "visible",
+    "locked",
+    "rotate",
+    "style",
+];
+
+fn transform_image(node: &KdlNode) -> Result<ImageNode, ParseError> {
+    let id = required_string_prop(node, "id")?.to_owned();
+    let asset = required_string_prop(node, "asset")?.to_owned();
+
+    // object-position accepts hyphenated or underscored spellings.
+    let object_position_x = optional_object_position_prop(node, "object-position-x")
+        .or_else(|| optional_object_position_prop(node, "object_position_x"));
+    let object_position_y = optional_object_position_prop(node, "object-position-y")
+        .or_else(|| optional_object_position_prop(node, "object_position_y"));
+
+    let unknown_props = collect_unknown_props(node, IMAGE_KNOWN_PROPS);
+
+    Ok(ImageNode {
+        id,
+        name: optional_string_prop(node, "name").map(str::to_owned),
+        role: optional_string_prop(node, "role").map(str::to_owned),
+        asset,
+        x: optional_dimension_prop(node, "x"),
+        y: optional_dimension_prop(node, "y"),
+        w: optional_dimension_prop(node, "w"),
+        h: optional_dimension_prop(node, "h"),
+        fit: optional_string_prop(node, "fit").map(str::to_owned),
+        object_position_x,
+        object_position_y,
+        opacity: optional_f64_prop(node, "opacity"),
+        visible: optional_bool_prop(node, "visible"),
+        locked: optional_bool_prop(node, "locked"),
+        rotate: optional_dimension_prop(node, "rotate"),
+        style: optional_string_prop(node, "style").map(str::to_owned),
         source_span: node_span(node),
         unknown_props,
     })

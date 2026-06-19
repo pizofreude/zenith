@@ -4,9 +4,11 @@
 //! `ttf_parser` types.  All other modules see only the backend-neutral types
 //! from `backend.rs`.
 
-use tiny_skia::{FillRule, Paint, PathBuilder, Pixmap, Rect, Stroke, Transform};
-use zenith_core::FontProvider;
-use zenith_scene::{Scene, SceneCommand};
+use tiny_skia::{
+    FillRule, FilterQuality, Mask, Paint, PathBuilder, Pixmap, PixmapPaint, Rect, Stroke, Transform,
+};
+use zenith_core::{AssetKind, AssetProvider, FontProvider};
+use zenith_scene::{FitMode, Scene, SceneCommand};
 
 use crate::backend::{RasterBackend, RasterImage};
 use crate::error::RenderError;
@@ -165,6 +167,7 @@ impl RasterBackend for TinySkiaBackend {
         &self,
         scene: &Scene,
         fonts: &dyn FontProvider,
+        assets: &dyn AssetProvider,
     ) -> Result<RasterImage, RenderError> {
         let width = f64_to_px(scene.width, "width")?;
         let height = f64_to_px(scene.height, "height")?;
@@ -425,6 +428,112 @@ impl RasterBackend for TinySkiaBackend {
                     }
                 }
 
+                SceneCommand::DrawImage {
+                    x,
+                    y,
+                    w,
+                    h,
+                    asset_id,
+                    fit,
+                    pos_x,
+                    pos_y,
+                    opacity,
+                } => {
+                    // ── a. Resolve bytes; only raster images are drawn ────────
+                    let Some(asset) = assets.by_id(asset_id) else {
+                        continue; // unknown/missing asset: skip (no panic)
+                    };
+                    if asset.kind != AssetKind::Image {
+                        continue; // SVG / font deferred
+                    }
+
+                    // ── b. Decode the PNG ─────────────────────────────────────
+                    let Ok(src) = Pixmap::decode_png(&asset.bytes) else {
+                        continue; // malformed PNG: skip
+                    };
+                    let (sw, sh) = (f64::from(src.width()), f64::from(src.height()));
+                    if !(sw > 0.0 && sh > 0.0) {
+                        continue;
+                    }
+
+                    // ── c. Compute the fit transform (sx, sy, tx, ty) ─────────
+                    // pos_x / pos_y are 0..=100 object-position anchors.
+                    let (sx, sy, tx, ty) = match fit {
+                        FitMode::Stretch => (w / sw, h / sh, *x, *y),
+                        FitMode::Contain => {
+                            let s = (w / sw).min(h / sh);
+                            let (rw, rh) = (sw * s, sh * s);
+                            let tx = x + (w - rw) * pos_x / 100.0;
+                            let ty = y + (h - rh) * pos_y / 100.0;
+                            (s, s, tx, ty)
+                        }
+                        FitMode::Cover => {
+                            let s = (w / sw).max(h / sh);
+                            let (rw, rh) = (sw * s, sh * s);
+                            let tx = x - (rw - w) * pos_x / 100.0;
+                            let ty = y - (rh - h) * pos_y / 100.0;
+                            (s, s, tx, ty)
+                        }
+                        FitMode::None => {
+                            let tx = x - (sw - w) * pos_x / 100.0;
+                            let ty = y - (sh - h) * pos_y / 100.0;
+                            (1.0, 1.0, tx, ty)
+                        }
+                    };
+                    if !sx.is_finite()
+                        || !sy.is_finite()
+                        || !tx.is_finite()
+                        || !ty.is_finite()
+                        || sx <= 0.0
+                        || sy <= 0.0
+                    {
+                        continue;
+                    }
+
+                    // ── d. Build the clip Mask from the effective clip ────────
+                    // compile pushed PushClip(box), so clip_stack.last() already
+                    // equals the image box ∩ enclosing clips (G-22 box-clip).
+                    let (cx, cy, cx2, cy2) = *clip_stack.last().unwrap_or(&page_clip);
+                    let pixmap_bounds = (0.0, 0.0, f64::from(width), f64::from(height));
+                    let (cx, cy, cx2, cy2) =
+                        match intersect_rects((cx, cy, cx2, cy2), pixmap_bounds) {
+                            Some(r) => r,
+                            None => continue, // clip fully off-canvas
+                        };
+                    let Some(mut mask) = Mask::new(width, height) else {
+                        continue;
+                    };
+                    let clip_rect = match Rect::from_xywh(
+                        cx as f32,
+                        cy as f32,
+                        (cx2 - cx) as f32,
+                        (cy2 - cy) as f32,
+                    ) {
+                        Some(r) => r,
+                        None => continue,
+                    };
+                    // PathBuilder::from_rect returns a Path directly (infallible
+                    // for a valid Rect).
+                    let clip_path = PathBuilder::from_rect(clip_rect);
+                    // AA off: the box-clip is axis-aligned and must be exact.
+                    mask.fill_path(&clip_path, FillRule::Winding, false, Transform::identity());
+
+                    // ── e. Paint: opacity + bilinear filtering ────────────────
+                    let paint = PixmapPaint {
+                        opacity: (*opacity as f32).clamp(0.0, 1.0),
+                        quality: FilterQuality::Bilinear,
+                        ..Default::default()
+                    };
+
+                    // ── f. Scale + translate transform ────────────────────────
+                    let transform =
+                        Transform::from_row(sx as f32, 0.0, 0.0, sy as f32, tx as f32, ty as f32);
+
+                    // ── g. Composite. Box-clip (G-22) is enforced by the Mask;
+                    // deterministic same-machine (pure-software bilinear). ─────
+                    pixmap.draw_pixmap(0, 0, src.as_ref(), &paint, transform, Some(&mask));
+                }
+
                 // PopClip when the stack is already at the page clip (depth 0),
                 // and any future variants not yet handled: skip deterministically.
                 _ => {}
@@ -495,14 +604,21 @@ impl RasterBackend for TinySkiaBackend {
 
 #[cfg(test)]
 mod tests {
-    use zenith_core::{FontStyle, default_provider};
+    use std::sync::Arc;
+
+    use zenith_core::{AssetKind, BytesAssetProvider, FontStyle, default_provider};
     use zenith_layout::{RustybuzzEngine, ShapeRequest, TextLayoutEngine};
-    use zenith_scene::{Color, Scene, SceneCommand, SceneGlyph};
+    use zenith_scene::{Color, FitMode, Scene, SceneCommand, SceneGlyph};
 
     use crate::backend::RasterBackend;
     use crate::render::{render_image, render_png};
 
     use super::TinySkiaBackend;
+
+    /// A shared empty asset provider for tests that draw no images.
+    fn no_assets() -> BytesAssetProvider {
+        BytesAssetProvider::new()
+    }
 
     fn red() -> Color {
         Color {
@@ -547,7 +663,7 @@ mod tests {
         let backend = TinySkiaBackend;
         let provider = default_provider();
         let img = backend
-            .rasterize(&scene, &provider)
+            .rasterize(&scene, &provider, &no_assets())
             .expect("rasterize must succeed");
         assert_eq!(img.width, 4);
         assert_eq!(img.height, 4);
@@ -565,11 +681,11 @@ mod tests {
         let backend = TinySkiaBackend;
         let provider = default_provider();
         let png1 = backend
-            .rasterize(&scene, &provider)
+            .rasterize(&scene, &provider, &no_assets())
             .and_then(|img| backend.encode_png(&img))
             .expect("first render");
         let png2 = backend
-            .rasterize(&scene, &provider)
+            .rasterize(&scene, &provider, &no_assets())
             .and_then(|img| backend.encode_png(&img))
             .expect("second render");
         assert_eq!(
@@ -586,7 +702,7 @@ mod tests {
         let backend = TinySkiaBackend;
         let provider = default_provider();
         let png = backend
-            .rasterize(&scene, &provider)
+            .rasterize(&scene, &provider, &no_assets())
             .and_then(|img| backend.encode_png(&img))
             .expect("render");
         assert_eq!(
@@ -620,7 +736,7 @@ mod tests {
         let backend = TinySkiaBackend;
         let provider = default_provider();
         let img = backend
-            .rasterize(&scene, &provider)
+            .rasterize(&scene, &provider, &no_assets())
             .expect("must not panic or error");
         assert_eq!(img.width, 4);
         assert_eq!(img.height, 4);
@@ -645,7 +761,9 @@ mod tests {
 
         let backend = TinySkiaBackend;
         let provider = default_provider();
-        let img = backend.rasterize(&scene, &provider).expect("must succeed");
+        let img = backend
+            .rasterize(&scene, &provider, &no_assets())
+            .expect("must succeed");
         // All pixels must be fully transparent.
         for i in 0..(img.width * img.height) {
             let base = (i * 4) as usize;
@@ -665,7 +783,7 @@ mod tests {
         let backend = TinySkiaBackend;
         let provider = default_provider();
         assert!(
-            backend.rasterize(&scene, &provider).is_err(),
+            backend.rasterize(&scene, &provider, &no_assets()).is_err(),
             "zero-size scene must return RenderError"
         );
     }
@@ -727,7 +845,7 @@ mod tests {
             glyphs,
         });
 
-        let img = render_image(&scene, &provider).expect("render must succeed");
+        let img = render_image(&scene, &provider, &no_assets()).expect("render must succeed");
 
         // At least one pixel must have non-zero blue (the ink color).
         let any_ink = (0..img.height).any(|py| {
@@ -789,8 +907,8 @@ mod tests {
             glyphs,
         });
 
-        let png1 = render_png(&scene, &provider).expect("first render");
-        let png2 = render_png(&scene, &provider).expect("second render");
+        let png1 = render_png(&scene, &provider, &no_assets()).expect("first render");
+        let png2 = render_png(&scene, &provider, &no_assets()).expect("second render");
         assert_eq!(
             png1, png2,
             "glyph run PNG must be byte-identical across two renders"
@@ -823,8 +941,8 @@ mod tests {
         });
 
         // Must succeed (Ok) — the run is skipped, no panic, no error.
-        let img =
-            render_image(&scene, &provider).expect("render must succeed even with unknown font");
+        let img = render_image(&scene, &provider, &no_assets())
+            .expect("render must succeed even with unknown font");
 
         // All pixels should be transparent (nothing was drawn).
         let any_opaque = (0..img.height).any(|py| {
@@ -836,6 +954,124 @@ mod tests {
         assert!(
             !any_opaque,
             "no pixels should be drawn when the font id is unknown"
+        );
+    }
+
+    // ── image: stretch renders + determinism ──────────────────────────────
+
+    /// The committed 2×2 RGBA test PNG.
+    const SWATCH_PNG: &[u8] = include_bytes!("../../examples/assets/swatch.png");
+
+    fn swatch_provider() -> BytesAssetProvider {
+        let mut p = BytesAssetProvider::new();
+        p.register("asset.swatch", AssetKind::Image, Arc::from(SWATCH_PNG));
+        p
+    }
+
+    /// Build a scene that draws the swatch stretched into a box, clipped to it.
+    fn swatch_scene() -> Scene {
+        let mut scene = Scene::new(40.0, 40.0);
+        scene.commands.push(SceneCommand::PushClip {
+            x: 0.0,
+            y: 0.0,
+            w: 40.0,
+            h: 40.0,
+        });
+        scene.commands.push(SceneCommand::PushClip {
+            x: 8.0,
+            y: 8.0,
+            w: 24.0,
+            h: 24.0,
+        });
+        scene.commands.push(SceneCommand::DrawImage {
+            x: 8.0,
+            y: 8.0,
+            w: 24.0,
+            h: 24.0,
+            asset_id: "asset.swatch".to_string(),
+            fit: FitMode::Stretch,
+            pos_x: 50.0,
+            pos_y: 50.0,
+            opacity: 1.0,
+        });
+        scene.commands.push(SceneCommand::PopClip);
+        scene.commands.push(SceneCommand::PopClip);
+        scene
+    }
+
+    #[test]
+    fn draw_image_stretch_renders() {
+        let backend = TinySkiaBackend;
+        let fonts = default_provider();
+        let assets = swatch_provider();
+        let scene = swatch_scene();
+
+        let img1 = backend
+            .rasterize(&scene, &fonts, &assets)
+            .expect("rasterize 1");
+        let img2 = backend
+            .rasterize(&scene, &fonts, &assets)
+            .expect("rasterize 2");
+
+        // (i) determinism: byte-identical pixels across two rasterizes.
+        assert_eq!(
+            img1.rgba, img2.rgba,
+            "two rasterizes of the same image scene must be byte-identical"
+        );
+
+        // (ii) at least one pixel inside the box is non-transparent.
+        let any_ink = (0..img1.height).any(|py| {
+            (0..img1.width).any(|px| {
+                let (_, _, _, a) = pixel(&img1.rgba, img1.width, px, py);
+                a > 0
+            })
+        });
+        assert!(
+            any_ink,
+            "DrawImage stretch must rasterize at least one non-transparent pixel"
+        );
+    }
+
+    #[test]
+    fn draw_image_missing_asset_is_skipped() {
+        let backend = TinySkiaBackend;
+        let fonts = default_provider();
+        // Empty provider: the asset id is not registered.
+        let assets = BytesAssetProvider::new();
+
+        let mut scene = Scene::new(20.0, 20.0);
+        scene.commands.push(SceneCommand::PushClip {
+            x: 0.0,
+            y: 0.0,
+            w: 20.0,
+            h: 20.0,
+        });
+        scene.commands.push(SceneCommand::DrawImage {
+            x: 0.0,
+            y: 0.0,
+            w: 20.0,
+            h: 20.0,
+            asset_id: "asset.missing".to_string(),
+            fit: FitMode::Stretch,
+            pos_x: 50.0,
+            pos_y: 50.0,
+            opacity: 1.0,
+        });
+        scene.commands.push(SceneCommand::PopClip);
+
+        // Must not panic; renders without any image pixels.
+        let img = backend
+            .rasterize(&scene, &fonts, &assets)
+            .expect("rasterize must succeed even with a missing asset");
+        let any_opaque = (0..img.height).any(|py| {
+            (0..img.width).any(|px| {
+                let (_, _, _, a) = pixel(&img.rgba, img.width, px, py);
+                a > 0
+            })
+        });
+        assert!(
+            !any_opaque,
+            "no pixels should be drawn when the asset is missing"
         );
     }
 }

@@ -23,8 +23,8 @@ use std::fmt::Write as _;
 
 use crate::ast::{
     AssetBlock, AssetDecl, Dimension, Document, DocumentBody, EllipseNode, FrameNode, GroupNode,
-    LineNode, Node, Page, Project, PropertyValue, RectNode, TextNode, TextSpan, Token, TokenBlock,
-    TokenLiteral, TokenType, TokenValue, Unit, UnknownValue,
+    ImageNode, LineNode, Node, ObjectPosition, Page, Project, PropertyValue, RectNode, TextNode,
+    TextSpan, Token, TokenBlock, TokenLiteral, TokenType, TokenValue, Unit, UnknownValue,
 };
 use crate::error::FormatError;
 
@@ -156,6 +156,25 @@ fn write_opt_bool(out: &mut String, key: &str, opt: &Option<bool>) {
         out.push_str(key);
         out.push('=');
         out.push_str(if *b { "#true" } else { "#false" });
+    }
+}
+
+/// Emit `key="anchor"` (string) or `key=(pct)N` (annotated number) for an
+/// optional [`ObjectPosition`].
+fn write_opt_object_position(out: &mut String, key: &str, opt: &Option<ObjectPosition>) {
+    if let Some(pos) = opt {
+        out.push(' ');
+        out.push_str(key);
+        out.push('=');
+        match pos {
+            ObjectPosition::Start => out.push_str("\"start\""),
+            ObjectPosition::Center => out.push_str("\"center\""),
+            ObjectPosition::End => out.push_str("\"end\""),
+            ObjectPosition::Pct(n) => {
+                out.push_str("(pct)");
+                out.push_str(&fmt_f64(*n));
+            }
+        }
     }
 }
 
@@ -432,6 +451,7 @@ fn write_node(node: &Node, out: &mut String, depth: usize) {
         Node::Text(t) => write_text(t, out, depth),
         Node::Frame(f) => write_frame(f, out, depth),
         Node::Group(g) => write_group(g, out, depth),
+        Node::Image(i) => write_image(i, out, depth),
         Node::Unknown(u) => write_unknown_node(u, out, depth),
     }
 }
@@ -464,6 +484,45 @@ fn write_rect(r: &RectNode, out: &mut String, depth: usize) {
 
     // Unknown properties in sorted key order (BTreeMap iteration is sorted).
     for (key, prop) in &r.unknown_props {
+        out.push(' ');
+        out.push_str(key);
+        out.push('=');
+        out.push_str(&fmt_unknown_value(&prop.value));
+    }
+
+    out.push('\n');
+}
+
+fn write_image(i: &ImageNode, out: &mut String, depth: usize) {
+    indent(out, depth);
+    out.push_str("image");
+
+    // Canonical property order: id, name, role, asset, x, y, w, h, fit,
+    // object-position-x, object-position-y, opacity, visible, locked, rotate,
+    // style, then unknown props (sorted).
+    out.push_str(" id=\"");
+    out.push_str(&i.id);
+    out.push('"');
+    write_opt_str(out, "name", &i.name);
+    write_opt_str(out, "role", &i.role);
+    out.push_str(" asset=\"");
+    out.push_str(&i.asset);
+    out.push('"');
+    write_opt_dimension(out, "x", &i.x);
+    write_opt_dimension(out, "y", &i.y);
+    write_opt_dimension(out, "w", &i.w);
+    write_opt_dimension(out, "h", &i.h);
+    write_opt_str(out, "fit", &i.fit);
+    write_opt_object_position(out, "object-position-x", &i.object_position_x);
+    write_opt_object_position(out, "object-position-y", &i.object_position_y);
+    write_opt_f64(out, "opacity", &i.opacity);
+    write_opt_bool(out, "visible", &i.visible);
+    write_opt_bool(out, "locked", &i.locked);
+    write_opt_dimension(out, "rotate", &i.rotate);
+    write_opt_str(out, "style", &i.style);
+
+    // Unknown properties in sorted key order (BTreeMap iteration is sorted).
+    for (key, prop) in &i.unknown_props {
         out.push(' ');
         out.push_str(key);
         out.push('=');
@@ -794,6 +853,7 @@ mod tests {
                     strip_node_span(child);
                 }
             }
+            Node::Image(i) => i.source_span = None,
             Node::Unknown(u) => u.source_span = None,
         }
     }
@@ -1160,5 +1220,87 @@ mod tests {
         assert!(pos_id < pos_kind, "id must come before kind");
         assert!(pos_kind < pos_src, "kind must come before src");
         assert!(pos_src < pos_sha256, "src must come before sha256");
+    }
+
+    // ── Image node parse + format tests ───────────────────────────────────
+
+    /// A `.zen` document with an image node exercising the string and `(pct)`
+    /// object-position forms.
+    const WITH_IMAGE: &str = r##"zenith version=1 {
+  project id="proj.img" name="Image Test"
+  assets {
+    asset id="asset.logo" kind="image" src="assets/logo.png"
+  }
+  tokens format="zenith-token-v1" {
+  }
+  styles {
+  }
+  document id="doc.img" title="Image Test" {
+    page id="page.one" w=(px)320 h=(px)200 {
+      image id="img.logo" asset="asset.logo" x=(px)80 y=(px)60 w=(px)160 h=(px)48 fit="contain" object-position-x="center" object-position-y=(pct)25
+    }
+  }
+}
+"##;
+
+    /// Image node parses all fields including both object-position forms.
+    #[test]
+    fn image_parses_fields() {
+        use crate::ast::{Node, ObjectPosition, Unit};
+        let adapter = KdlAdapter;
+        let doc = adapter.parse(WITH_IMAGE.as_bytes()).expect("parse");
+        let node = &doc.body.pages[0].children[0];
+        let img = match node {
+            Node::Image(i) => i,
+            other => panic!("expected Image, got {other:?}"),
+        };
+        assert_eq!(img.id, "img.logo");
+        assert_eq!(img.asset, "asset.logo");
+        assert_eq!(img.x.as_ref().map(|d| d.value), Some(80.0));
+        assert_eq!(img.y.as_ref().map(|d| d.value), Some(60.0));
+        assert_eq!(img.w.as_ref().map(|d| d.value), Some(160.0));
+        assert_eq!(img.h.as_ref().map(|d| d.value), Some(48.0));
+        assert!(matches!(img.x.as_ref().map(|d| &d.unit), Some(Unit::Px)));
+        assert_eq!(img.fit.as_deref(), Some("contain"));
+        assert_eq!(img.object_position_x, Some(ObjectPosition::Center));
+        assert_eq!(img.object_position_y, Some(ObjectPosition::Pct(25.0)));
+    }
+
+    /// Image node round-trips through format → parse with fields intact, and
+    /// the formatter is idempotent (incl. an object-position `(pct)25`).
+    #[test]
+    fn image_format_round_trip_and_idempotency() {
+        use crate::ast::{Node, ObjectPosition};
+        let adapter = KdlAdapter;
+        let doc1 = adapter.parse(WITH_IMAGE.as_bytes()).expect("parse 1");
+        let s1 = format_document(&doc1).expect("format 1");
+
+        // The (pct)25 must survive as an annotated number, not a string.
+        let text = String::from_utf8(s1.clone()).unwrap();
+        assert!(
+            text.contains("object-position-y=(pct)25"),
+            "object-position (pct) must format as annotated number; got:\n{text}"
+        );
+        assert!(
+            text.contains("object-position-x=\"center\""),
+            "object-position anchor must format as string; got:\n{text}"
+        );
+
+        let doc2 = adapter.parse(&s1).expect("parse 2");
+        let img2 = match &doc2.body.pages[0].children[0] {
+            Node::Image(i) => i,
+            other => panic!("expected Image, got {other:?}"),
+        };
+        assert_eq!(img2.asset, "asset.logo");
+        assert_eq!(img2.fit.as_deref(), Some("contain"));
+        assert_eq!(img2.object_position_x, Some(ObjectPosition::Center));
+        assert_eq!(img2.object_position_y, Some(ObjectPosition::Pct(25.0)));
+
+        let s2 = format_document(&doc2).expect("format 2");
+        assert_eq!(
+            String::from_utf8(s1).unwrap(),
+            String::from_utf8(s2).unwrap(),
+            "image format must be idempotent"
+        );
     }
 }

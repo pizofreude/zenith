@@ -68,6 +68,11 @@ pub fn validate(doc: &Document) -> ValidationReport {
     let mut seen_ids: HashSet<String> = HashSet::new();
     let mut referenced_token_ids: HashSet<String> = HashSet::new();
 
+    // Declared asset ids, collected once so the node walk can validate that
+    // every `image.asset` reference points at a declared `AssetDecl.id`.
+    let declared_asset_ids: HashSet<String> =
+        doc.assets.assets.iter().map(|d| d.id.clone()).collect();
+
     // ── Token IDs ─────────────────────────────────────────────────────────
     for token in &doc.tokens.tokens {
         register_id(&token.id, &mut seen_ids, &mut diagnostics);
@@ -124,6 +129,7 @@ pub fn validate(doc: &Document) -> ValidationReport {
                 &mut seen_ids,
                 &mut referenced_token_ids,
                 resolved_tokens,
+                &declared_asset_ids,
                 &mut diagnostics,
             );
         }
@@ -161,11 +167,13 @@ pub fn validate(doc: &Document) -> ValidationReport {
 /// Recursion through `Node::Group` and `Node::Frame` children has no depth
 /// guard.  Pathologically deep trees can overflow the stack.  This is an
 /// accepted v0 limitation.
+#[allow(clippy::too_many_arguments)]
 fn walk_node(
     node: &Node,
     seen_ids: &mut HashSet<String>,
     referenced_token_ids: &mut HashSet<String>,
     resolved_tokens: &BTreeMap<String, ResolvedToken>,
+    declared_asset_ids: &HashSet<String>,
     diagnostics: &mut Vec<Diagnostic>,
 ) {
     match node {
@@ -396,6 +404,7 @@ fn walk_node(
                     seen_ids,
                     referenced_token_ids,
                     resolved_tokens,
+                    declared_asset_ids,
                     diagnostics,
                 );
             }
@@ -428,9 +437,65 @@ fn walk_node(
                     seen_ids,
                     referenced_token_ids,
                     resolved_tokens,
+                    declared_asset_ids,
                     diagnostics,
                 );
             }
+        }
+
+        Node::Image(img) => {
+            register_id(&img.id, seen_ids, diagnostics);
+
+            // Required geometry: x, y, w, h must all be present (mirror rect).
+            check_optional_dim(&img.id, "x", img.x.as_ref(), img.source_span, diagnostics);
+            check_optional_dim(&img.id, "y", img.y.as_ref(), img.source_span, diagnostics);
+            check_optional_dim(&img.id, "w", img.w.as_ref(), img.source_span, diagnostics);
+            check_optional_dim(&img.id, "h", img.h.as_ref(), img.source_span, diagnostics);
+
+            // The referenced asset must exist in the document's assets block.
+            if !declared_asset_ids.contains(&img.asset) {
+                diagnostics.push(Diagnostic::error(
+                    "asset.unknown_reference",
+                    format!(
+                        "image '{}': references asset '{}' which is not declared in the \
+                         assets block",
+                        img.id, img.asset
+                    ),
+                    img.source_span,
+                    Some(img.id.clone()),
+                ));
+            }
+
+            // Validate fit (version-relative; forward-compat warning).
+            if let Some(fit) = &img.fit
+                && !matches!(fit.as_str(), "contain" | "cover" | "stretch" | "none")
+            {
+                diagnostics.push(Diagnostic::warning(
+                    "image.invalid_fit",
+                    format!(
+                        "image '{}': unrecognized fit '{}' (version-relative; allowed \
+                         values are contain, cover, stretch, none)",
+                        img.id, fit
+                    ),
+                    img.source_span,
+                    Some(img.id.clone()),
+                ));
+            }
+
+            // Unknown properties.
+            for prop_name in img.unknown_props.keys() {
+                diagnostics.push(Diagnostic::warning(
+                    "node.unknown_property",
+                    format!(
+                        "image '{}': unknown property '{}' (version-relative; \
+                         may be valid in a later schema version)",
+                        img.id, prop_name
+                    ),
+                    img.source_span,
+                    Some(img.id.clone()),
+                ));
+            }
+            // Image is a leaf — no child recursion.
         }
 
         Node::Unknown(u) => {
@@ -2059,6 +2124,134 @@ mod tests {
             .find(|d| d.code == "asset.unknown_property")
             .expect("should exist");
         assert_eq!(diag.severity, Severity::Warning);
+        assert!(!report.has_errors());
+    }
+
+    // ══════════════════════════════════════════════════════════════════════
+    // Image node validation tests
+    // ══════════════════════════════════════════════════════════════════════
+
+    use crate::ast::node::ImageNode;
+
+    /// Build a Document with an assets block and a single page of nodes.
+    fn doc_with_assets_and_nodes(assets: Vec<AssetDecl>, children: Vec<Node>) -> Document {
+        let mut doc = doc_with(vec![], vec![minimal_page("page.one", children)]);
+        doc.assets = AssetBlock {
+            assets,
+            source_span: None,
+        };
+        doc
+    }
+
+    fn full_image(id: &str, asset: &str, fit: Option<&str>) -> ImageNode {
+        ImageNode {
+            id: id.to_owned(),
+            name: None,
+            role: None,
+            asset: asset.to_owned(),
+            x: Some(px(40.0)),
+            y: Some(px(40.0)),
+            w: Some(px(160.0)),
+            h: Some(px(120.0)),
+            fit: fit.map(str::to_owned),
+            object_position_x: None,
+            object_position_y: None,
+            opacity: None,
+            visible: None,
+            locked: None,
+            rotate: None,
+            style: None,
+            source_span: None,
+            unknown_props: BTreeMap::new(),
+        }
+    }
+
+    // ── image.clean: well-formed image with declared asset → no errors ────
+
+    #[test]
+    fn image_clean_no_errors() {
+        let doc = doc_with_assets_and_nodes(
+            vec![image_asset("asset.swatch", "assets/swatch.png")],
+            vec![Node::Image(full_image(
+                "img.swatch",
+                "asset.swatch",
+                Some("contain"),
+            ))],
+        );
+        let report = validate(&doc);
+        assert!(
+            report.diagnostics.is_empty(),
+            "expected no diagnostics for clean image doc, got: {:?}",
+            codes(&report)
+        );
+        assert!(!report.has_errors());
+    }
+
+    // ── image.missing_x → node.missing_geometry ───────────────────────────
+
+    #[test]
+    fn image_missing_x_node_missing_geometry() {
+        let mut img = full_image("img.nox", "asset.swatch", None);
+        img.x = None;
+        let doc = doc_with_assets_and_nodes(
+            vec![image_asset("asset.swatch", "assets/swatch.png")],
+            vec![Node::Image(img)],
+        );
+        let report = validate(&doc);
+        assert!(
+            has_code(&report, "node.missing_geometry"),
+            "codes: {:?}",
+            codes(&report)
+        );
+        assert!(report.has_errors());
+    }
+
+    // ── image referencing an undeclared asset → asset.unknown_reference ───
+
+    #[test]
+    fn image_unknown_asset_reference() {
+        let doc = doc_with_assets_and_nodes(
+            vec![image_asset("asset.swatch", "assets/swatch.png")],
+            vec![Node::Image(full_image(
+                "img.x",
+                "asset.does-not-exist",
+                None,
+            ))],
+        );
+        let report = validate(&doc);
+        assert!(
+            has_code(&report, "asset.unknown_reference"),
+            "codes: {:?}",
+            codes(&report)
+        );
+        assert!(report.has_errors());
+    }
+
+    // ── image with an unknown fit → image.invalid_fit (Warning) ───────────
+
+    #[test]
+    fn image_invalid_fit_warns() {
+        let doc = doc_with_assets_and_nodes(
+            vec![image_asset("asset.swatch", "assets/swatch.png")],
+            vec![Node::Image(full_image(
+                "img.squish",
+                "asset.swatch",
+                Some("squish"),
+            ))],
+        );
+        let report = validate(&doc);
+        assert!(
+            has_code(&report, "image.invalid_fit"),
+            "codes: {:?}",
+            codes(&report)
+        );
+        let diag = report
+            .diagnostics
+            .iter()
+            .find(|d| d.code == "image.invalid_fit")
+            .expect("should exist");
+        assert_eq!(diag.severity, Severity::Warning);
+        // invalid_fit is forward-compat: a Warning, not an Error.
         assert!(!report.has_errors());
     }
 }

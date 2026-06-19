@@ -49,6 +49,54 @@ pub struct TextSpan {
     pub strikethrough: Option<bool>,
 }
 
+/// How an `image` node aligns its content within the declared box when the
+/// `fit` mode leaves slack on an axis (`contain`, `cover`, `none`).
+///
+/// `Pct(n)` is an arbitrary 0–100 position; `Start`/`Center`/`End` are the
+/// named anchors (equivalent to `Pct(0)`, `Pct(50)`, `Pct(100)`).
+#[derive(Debug, Clone, PartialEq)]
+pub enum ObjectPosition {
+    Start,
+    Center,
+    End,
+    Pct(f64),
+}
+
+/// An `image` node — a LEAF that draws a raster (PNG) asset into a declared
+/// `[x, y, w, h]` box with a `fit` mode, ALWAYS clipped to that box
+/// (normative image box-clip, doc 09 G-22).
+///
+/// The `asset` field references an [`AssetDecl`](super::AssetDecl) by its
+/// stable id, declared in the document's `assets {}` block.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ImageNode {
+    pub id: String,
+    pub name: Option<String>,
+    pub role: Option<String>,
+    /// Required: the referenced asset id (matches an `AssetDecl.id`).
+    pub asset: String,
+    pub x: Option<Dimension>,
+    pub y: Option<Dimension>,
+    pub w: Option<Dimension>,
+    pub h: Option<Dimension>,
+    /// Fit mode string (`contain`/`cover`/`stretch`/`none`); validated, not
+    /// enum-typed in the AST so unknown values survive for forward-compat.
+    pub fit: Option<String>,
+    /// Horizontal object-position anchor (string anchor or `(pct)N`).
+    pub object_position_x: Option<ObjectPosition>,
+    /// Vertical object-position anchor (string anchor or `(pct)N`).
+    pub object_position_y: Option<ObjectPosition>,
+    pub opacity: Option<f64>,
+    pub visible: Option<bool>,
+    pub locked: Option<bool>,
+    pub rotate: Option<Dimension>,
+    pub style: Option<String>,
+    /// Source declaration span, when available.
+    pub source_span: Option<Span>,
+    /// Unknown properties preserved for forward-compat.
+    pub unknown_props: BTreeMap<String, UnknownProperty>,
+}
+
 /// A `rect` node.
 #[derive(Debug, Clone, PartialEq)]
 pub struct RectNode {
@@ -255,5 +303,6 @@ pub enum Node {
     Text(TextNode),
     Frame(FrameNode),
     Group(GroupNode),
+    Image(ImageNode),
     Unknown(UnknownNode),
 }

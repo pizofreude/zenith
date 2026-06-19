@@ -270,7 +270,8 @@ fn find_in_children_mut<'a>(children: &'a mut [Node], id: &str) -> Option<FindRe
             Node::Group(g) if g.children.iter().any(|c| subtree_contains(c, id)) => {
                 Some(Hit::Descend(i))
             }
-            // All other variants without a matching id, and Unknown: skip.
+            Node::Image(img) if img.id == id => Some(Hit::WrongType("image")),
+            // All other variants without a matching id (Unknown): skip.
             _ => None,
         });
 
@@ -338,6 +339,7 @@ fn node_id_of(node: &Node) -> Option<&str> {
         Node::Text(t) => Some(&t.id),
         Node::Frame(f) => Some(&f.id),
         Node::Group(g) => Some(&g.id),
+        Node::Image(i) => Some(&i.id),
         Node::Unknown(_) => None,
     }
 }
@@ -416,6 +418,23 @@ mod tests {
   document id="doc1" title="T" {
     page id="pg1" w=(px)400 h=(px)300 {
       ellipse id="dot" x=(px)0 y=(px)0 w=(px)100 h=(px)100
+      text id="lbl" x=(px)10 y=(px)10 w=(px)200 h=(px)40 {
+        span "Hi"
+      }
+    }
+  }
+}"##;
+
+    const IMAGE_DOC: &str = r##"zenith version=1 {
+  project id="proj" name="Test"
+  assets {
+    asset id="asset.pic" kind="image" src="pic.png"
+  }
+  tokens format="zenith-token-v1" { }
+  styles { }
+  document id="doc1" title="T" {
+    page id="pg1" w=(px)400 h=(px)300 {
+      image id="pic" asset="asset.pic" x=(px)0 y=(px)0 w=(px)100 h=(px)100
       text id="lbl" x=(px)10 y=(px)10 w=(px)200 h=(px)40 {
         span "Hi"
       }
@@ -577,6 +596,30 @@ mod tests {
                 .iter()
                 .any(|d| d.code == "tx.wrong_node_type" && d.message.contains("ellipse")),
             "expected tx.wrong_node_type diagnostic naming the ellipse kind"
+        );
+        assert_eq!(result.source_after, result.source_before);
+    }
+
+    // ── 5c. SetTextAlign on an image → wrong_node_type, Rejected ─────────────
+
+    #[test]
+    fn set_text_align_on_image_wrong_node_type() {
+        let doc = parse(IMAGE_DOC);
+        let tx = Transaction {
+            ops: vec![Op::SetTextAlign {
+                node: "pic".to_owned(),
+                align: "center".to_owned(),
+            }],
+        };
+        let result = run_transaction(&doc, &tx).expect("run_transaction should not error");
+
+        assert_eq!(result.status, TxStatus::Rejected);
+        assert!(
+            result
+                .diagnostics
+                .iter()
+                .any(|d| d.code == "tx.wrong_node_type" && d.message.contains("image")),
+            "expected tx.wrong_node_type diagnostic naming the image kind"
         );
         assert_eq!(result.source_after, result.source_before);
     }

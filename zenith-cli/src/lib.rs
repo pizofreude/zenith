@@ -136,7 +136,9 @@ pub fn run() -> ExitCode {
 
             // --png ───────────────────────────────────────────────────────────
             if let Some(png_out) = &args.png {
-                match commands::render::to_png(&src) {
+                // Source image asset bytes relative to the .zen file's parent
+                // directory so `image` nodes render their raster.
+                match commands::render::to_png_with_dir(&src, args.path.parent()) {
                     Ok(bytes) => {
                         if let Err(e) = write_bytes(png_out, &bytes) {
                             eprintln!("error writing PNG to '{}': {}", png_out.display(), e);

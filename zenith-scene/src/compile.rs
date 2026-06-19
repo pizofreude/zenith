@@ -9,13 +9,13 @@
 use std::collections::BTreeMap;
 
 use zenith_core::{
-    Diagnostic, Document, FontProvider, FontStyle, FrameNode, GroupNode, Node, PropertyValue,
-    ResolvedToken, ResolvedValue, Span, Unit, resolve_tokens,
+    Diagnostic, Document, FontProvider, FontStyle, FrameNode, GroupNode, ImageNode, Node,
+    ObjectPosition, PropertyValue, ResolvedToken, ResolvedValue, Span, Unit, resolve_tokens,
 };
 use zenith_layout::{RustybuzzEngine, ShapeRequest, TextLayoutEngine};
 
 use crate::color::parse_srgb_hex;
-use crate::ir::{Color, Scene, SceneCommand, SceneGlyph};
+use crate::ir::{Color, FitMode, Scene, SceneCommand, SceneGlyph};
 
 // ── Render context ────────────────────────────────────────────────────────────
 
@@ -584,6 +584,10 @@ fn compile_node(
             compile_group(group, resolved, fonts, engine, commands, diagnostics, ctx);
         }
 
+        Node::Image(image) => {
+            compile_image(image, commands, diagnostics, ctx);
+        }
+
         Node::Unknown(unknown) => {
             diagnostics.push(Diagnostic::advisory(
                 "scene.unsupported_node",
@@ -758,6 +762,128 @@ fn compile_group(
             diagnostics,
             child_ctx,
         );
+    }
+}
+
+/// Compile an `image` leaf node.
+///
+/// Mirrors the frame box-clip pattern: resolve geometry first (so early
+/// returns stay push/pop balanced), then emit `PushClip(box)` → `DrawImage` →
+/// `PopClip`. The box-clip is the normative image box-clip (doc 09 G-22): the
+/// raster is ALWAYS clipped to its declared `[x, y, w, h]` box. `compile_node`
+/// needs no asset provider here — the asset id string is enough; bytes are
+/// resolved at render time.
+fn compile_image(
+    image: &ImageNode,
+    commands: &mut Vec<SceneCommand>,
+    diagnostics: &mut Vec<Diagnostic>,
+    ctx: RenderCtx,
+) {
+    // Skip invisible images.
+    if image.visible == Some(false) {
+        return;
+    }
+
+    // All four geometry dimensions are required. Resolve BEFORE PushClip so
+    // any early return keeps push/pop balanced.
+    let (Some(x_dim), Some(y_dim), Some(w_dim), Some(h_dim)) =
+        (&image.x, &image.y, &image.w, &image.h)
+    else {
+        diagnostics.push(Diagnostic::advisory(
+            "scene.missing_geometry",
+            format!(
+                "image '{}' is missing one or more geometry properties (x, y, w, h); skipped",
+                image.id
+            ),
+            image.source_span,
+            Some(image.id.clone()),
+        ));
+        return;
+    };
+
+    let Some(x_raw) = dim_to_px(x_dim.value, &x_dim.unit) else {
+        diagnostics.push(unsupported_unit_diag(
+            "image",
+            &image.id,
+            "x",
+            image.source_span,
+        ));
+        return;
+    };
+    let Some(y_raw) = dim_to_px(y_dim.value, &y_dim.unit) else {
+        diagnostics.push(unsupported_unit_diag(
+            "image",
+            &image.id,
+            "y",
+            image.source_span,
+        ));
+        return;
+    };
+    let Some(w) = dim_to_px(w_dim.value, &w_dim.unit) else {
+        diagnostics.push(unsupported_unit_diag(
+            "image",
+            &image.id,
+            "w",
+            image.source_span,
+        ));
+        return;
+    };
+    let Some(h) = dim_to_px(h_dim.value, &h_dim.unit) else {
+        diagnostics.push(unsupported_unit_diag(
+            "image",
+            &image.id,
+            "h",
+            image.source_span,
+        ));
+        return;
+    };
+
+    // Apply group translation offset.
+    let x = x_raw + ctx.dx;
+    let y = y_raw + ctx.dy;
+
+    // Effective opacity: node opacity × cascaded ctx opacity.
+    let opacity = image.opacity.unwrap_or(1.0).clamp(0.0, 1.0) * ctx.opacity;
+
+    // Map fit string → FitMode. Default (absent or unknown) = Stretch.
+    let fit = match image.fit.as_deref() {
+        Some("contain") => FitMode::Contain,
+        Some("cover") => FitMode::Cover,
+        Some("none") => FitMode::None,
+        _ => FitMode::Stretch,
+    };
+
+    let pos_x = object_pos_to_f64(&image.object_position_x);
+    let pos_y = object_pos_to_f64(&image.object_position_y);
+
+    // Box-clip (G-22): push the box, draw the image, pop. The image is always
+    // clipped to its declared box ∩ enclosing clips.
+    commands.push(SceneCommand::PushClip { x, y, w, h });
+    commands.push(SceneCommand::DrawImage {
+        x,
+        y,
+        w,
+        h,
+        asset_id: image.asset.clone(),
+        fit,
+        pos_x,
+        pos_y,
+        opacity,
+    });
+    commands.push(SceneCommand::PopClip);
+}
+
+/// Resolve an object-position anchor to `0.0..=100.0`.
+///
+/// `None` defaults to `50.0` (centered); `Start`→0, `Center`→50, `End`→100,
+/// `Pct(n)`→`n` clamped to `0..=100`.
+fn object_pos_to_f64(pos: &Option<ObjectPosition>) -> f64 {
+    match pos {
+        None => 50.0,
+        Some(ObjectPosition::Start) => 0.0,
+        Some(ObjectPosition::Center) => 50.0,
+        Some(ObjectPosition::End) => 100.0,
+        Some(ObjectPosition::Pct(n)) => n.clamp(0.0, 100.0),
     }
 }
 
@@ -2091,5 +2217,183 @@ mod tests {
             }
             _ => panic!("expected a FillRect command"),
         }
+    }
+
+    // ══════════════════════════════════════════════════════════════════════
+    // Image node compile tests
+    // ══════════════════════════════════════════════════════════════════════
+
+    use crate::ir::FitMode;
+
+    // ── image → PushClip, DrawImage, PopClip with default fields ──────────
+
+    #[test]
+    fn image_emits_pushclip_drawimage_popclip() {
+        let src = r##"zenith version=1 {
+  project id="proj.i1" name="I1"
+  assets {
+    asset id="asset.swatch" kind="image" src="assets/swatch.png"
+  }
+  tokens format="zenith-token-v1" {}
+  styles {}
+  document id="doc.i1" title="I1" {
+    page id="page.i1" w=(px)320 h=(px)200 {
+      image id="img.i1" asset="asset.swatch" x=(px)40 y=(px)40 w=(px)160 h=(px)120 fit="stretch"
+    }
+  }
+}
+"##;
+        let doc = parse(src);
+        let result = compile(&doc, &default_provider());
+        assert!(
+            result.diagnostics.is_empty(),
+            "unexpected diagnostics: {:?}",
+            result.diagnostics
+        );
+
+        let cmds = &result.scene.commands;
+        // PushClip(page), PushClip(box), DrawImage, PopClip(box), PopClip(page)
+        assert_eq!(cmds.len(), 5, "expected 5 commands, got: {:?}", cmds);
+        assert!(
+            matches!(cmds[1], SceneCommand::PushClip { x, y, w, h } if x == 40.0 && y == 40.0 && w == 160.0 && h == 120.0),
+            "cmd[1] must be the image box PushClip"
+        );
+        match &cmds[2] {
+            SceneCommand::DrawImage {
+                x,
+                y,
+                w,
+                h,
+                asset_id,
+                fit,
+                pos_x,
+                pos_y,
+                opacity,
+            } => {
+                assert_eq!(*x, 40.0);
+                assert_eq!(*y, 40.0);
+                assert_eq!(*w, 160.0);
+                assert_eq!(*h, 120.0);
+                assert_eq!(asset_id, "asset.swatch");
+                assert_eq!(*fit, FitMode::Stretch);
+                assert_eq!(*pos_x, 50.0, "default object-position-x must be 50");
+                assert_eq!(*pos_y, 50.0, "default object-position-y must be 50");
+                assert_eq!(*opacity, 1.0);
+            }
+            other => panic!("expected DrawImage, got {other:?}"),
+        }
+        assert!(matches!(cmds[3], SceneCommand::PopClip));
+    }
+
+    // ── image fit="cover" + object-position-x=(pct)25 → mapped fields ─────
+
+    #[test]
+    fn image_fit_and_object_position_mapped() {
+        let src = r##"zenith version=1 {
+  project id="proj.i2" name="I2"
+  assets {
+    asset id="asset.swatch" kind="image" src="assets/swatch.png"
+  }
+  tokens format="zenith-token-v1" {}
+  styles {}
+  document id="doc.i2" title="I2" {
+    page id="page.i2" w=(px)320 h=(px)200 {
+      image id="img.i2" asset="asset.swatch" x=(px)0 y=(px)0 w=(px)100 h=(px)100 fit="cover" object-position-x=(pct)25 object-position-y="start"
+    }
+  }
+}
+"##;
+        let doc = parse(src);
+        let result = compile(&doc, &default_provider());
+
+        let draw = result
+            .scene
+            .commands
+            .iter()
+            .find_map(|c| match c {
+                SceneCommand::DrawImage {
+                    fit, pos_x, pos_y, ..
+                } => Some((*fit, *pos_x, *pos_y)),
+                _ => None,
+            })
+            .expect("must emit a DrawImage");
+        assert_eq!(draw.0, FitMode::Cover);
+        assert_eq!(draw.1, 25.0, "object-position-x (pct)25 → 25.0");
+        assert_eq!(draw.2, 0.0, "object-position-y start → 0.0");
+    }
+
+    // ── invisible image is not emitted ────────────────────────────────────
+
+    #[test]
+    fn invisible_image_not_emitted() {
+        let src = r##"zenith version=1 {
+  project id="proj.i3" name="I3"
+  assets {
+    asset id="asset.swatch" kind="image" src="assets/swatch.png"
+  }
+  tokens format="zenith-token-v1" {}
+  styles {}
+  document id="doc.i3" title="I3" {
+    page id="page.i3" w=(px)320 h=(px)200 {
+      image id="img.i3" asset="asset.swatch" x=(px)40 y=(px)40 w=(px)160 h=(px)120 visible=#false
+    }
+  }
+}
+"##;
+        let doc = parse(src);
+        let result = compile(&doc, &default_provider());
+
+        let cmds = &result.scene.commands;
+        // Only the page PushClip + PopClip; no image commands.
+        assert_eq!(
+            cmds.len(),
+            2,
+            "expected PushClip + PopClip only; got: {cmds:?}"
+        );
+        assert!(
+            !cmds
+                .iter()
+                .any(|c| matches!(c, SceneCommand::DrawImage { .. })),
+            "no DrawImage expected for invisible image"
+        );
+    }
+
+    // ── image opacity cascades under a group opacity ──────────────────────
+
+    #[test]
+    fn image_opacity_cascades() {
+        // Group opacity 0.5 × image opacity 0.5 = 0.25.
+        let src = r##"zenith version=1 {
+  project id="proj.i4" name="I4"
+  assets {
+    asset id="asset.swatch" kind="image" src="assets/swatch.png"
+  }
+  tokens format="zenith-token-v1" {}
+  styles {}
+  document id="doc.i4" title="I4" {
+    page id="page.i4" w=(px)320 h=(px)200 {
+      group id="group.i4" opacity=0.5 {
+        image id="img.i4" asset="asset.swatch" x=(px)40 y=(px)40 w=(px)160 h=(px)120 opacity=0.5
+      }
+    }
+  }
+}
+"##;
+        let doc = parse(src);
+        let result = compile(&doc, &default_provider());
+
+        let opacity = result
+            .scene
+            .commands
+            .iter()
+            .find_map(|c| match c {
+                SceneCommand::DrawImage { opacity, .. } => Some(*opacity),
+                _ => None,
+            })
+            .expect("must emit a DrawImage");
+        assert!(
+            (opacity - 0.25).abs() < 1e-9,
+            "cascaded opacity must be 0.25; got {opacity}"
+        );
     }
 }

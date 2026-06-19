@@ -69,12 +69,13 @@ impl BytesAssetProvider {
     /// Register an asset. If an asset with the same `id` already exists, the
     /// most recent registration wins (bytes and kind are replaced).
     pub fn register(&mut self, id: &str, kind: AssetKind, bytes: Arc<[u8]>) {
+        let key = id.to_owned();
         let data = AssetData {
-            id: id.to_owned(),
+            id: key.clone(),
             bytes,
             kind,
         };
-        self.by_id.insert(data.id.clone(), data);
+        self.by_id.insert(key, data);
     }
 }
 

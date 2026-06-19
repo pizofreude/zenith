@@ -24,6 +24,23 @@ pub struct Color {
     pub a: u8,
 }
 
+// ── Fit mode ────────────────────────────────────────────────────────────────
+
+/// How a raster image asset scales to fill its declared box.
+///
+/// - `Contain` — scale to fit entirely inside the box (letterboxed).
+/// - `Cover` — scale to cover the whole box (cropped, clipped to the box).
+/// - `Stretch` — scale each axis independently to exactly fill the box.
+/// - `None` — draw at native pixel size, anchored by object-position.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum FitMode {
+    Contain,
+    Cover,
+    Stretch,
+    None,
+}
+
 // ── Scene commands ────────────────────────────────────────────────────────────
 
 /// A single display-list command in the scene.
@@ -98,13 +115,25 @@ pub enum SceneCommand {
     },
     // ── Asset commands ────────────────────────────────────────────────────
     /// Draw a raster image asset clipped to its declared box.
+    ///
+    /// The renderer re-resolves bytes via `AssetProvider::by_id` using only the
+    /// `asset_id` string — no raw image bytes appear in the IR. `pos_x`/`pos_y`
+    /// are the object-position anchors resolved to `0.0..=100.0`.
     DrawImage {
         x: f64,
         y: f64,
         w: f64,
         h: f64,
-        /// Asset path (project-relative).
-        asset: String,
+        /// Stable asset id; renderer resolves bytes via `AssetProvider::by_id`.
+        asset_id: String,
+        /// How the image scales to fill the box.
+        fit: FitMode,
+        /// Horizontal object-position anchor in `0.0..=100.0`.
+        pos_x: f64,
+        /// Vertical object-position anchor in `0.0..=100.0`.
+        pos_y: f64,
+        /// Effective opacity (node opacity × cascaded ctx opacity), `0.0..=1.0`.
+        opacity: f64,
     },
     /// Draw a pre-resolved SVG asset.
     DrawSvgAsset {

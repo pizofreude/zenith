@@ -7,7 +7,11 @@
 //! Both operate entirely on in-memory source text; the caller is responsible
 //! for all filesystem I/O.
 
-use zenith_core::{KdlAdapter, KdlSource, default_provider, validate};
+use std::path::Path;
+
+use zenith_core::{
+    AssetKind, BytesAssetProvider, Document, KdlAdapter, KdlSource, default_provider, validate,
+};
 use zenith_render::render_png;
 use zenith_scene::compile;
 
@@ -50,28 +54,76 @@ pub fn to_scene_json(src: &str) -> Result<String, RenderCmdErr> {
 
 /// Parse `src`, validate it, compile the scene, and return PNG bytes.
 ///
+/// No image assets are loaded (an empty asset provider is used); any `image`
+/// nodes are rendered without their raster (the bytes are unavailable). Use
+/// [`to_png_with_dir`] to source image bytes relative to the document's
+/// directory.
+///
 /// Returns `Err` when:
 /// - The source fails to parse (exit code 2).
 /// - The document has validation errors (exit code 1).
 /// - Rendering fails (exit code 2).
 pub fn to_png(src: &str) -> Result<Vec<u8>, RenderCmdErr> {
-    let provider = default_provider();
-    let compile_result = parse_validate_compile(src, &provider)?;
-    render_png(&compile_result.scene, &provider)
+    to_png_with_dir(src, None)
+}
+
+/// Like [`to_png`], but sources image asset bytes from `project_dir` (the
+/// `.zen` file's parent directory) when provided.
+///
+/// For each `image`-kind `AssetDecl`, the `src` is resolved relative to
+/// `project_dir` and read into a [`BytesAssetProvider`]. A read failure prints
+/// a warning and skips that asset (the matching image is then skipped at
+/// render time — never a panic). When `project_dir` is `None` no assets are
+/// loaded.
+pub fn to_png_with_dir(src: &str, project_dir: Option<&Path>) -> Result<Vec<u8>, RenderCmdErr> {
+    let fonts = default_provider();
+    let doc = parse_validate(src)?;
+    let assets = match project_dir {
+        Some(dir) => build_asset_provider(&doc, dir),
+        None => BytesAssetProvider::new(),
+    };
+    let compile_result = compile(&doc, &fonts);
+    render_png(&compile_result.scene, &fonts, &assets)
         .map_err(|e| RenderCmdErr::new(format!("render error: {e}"), 2))
+}
+
+/// Build a [`BytesAssetProvider`] from a parsed document and the project
+/// directory (the `.zen` file's parent).
+///
+/// Only `image`-kind assets are loaded (SVG/font are deferred). On a read
+/// failure the asset is skipped with a warning. No `sha256` verification is
+/// done in this unit.
+//
+// TODO(locked): verify sha256 in --locked mode
+fn build_asset_provider(doc: &Document, project_dir: &Path) -> BytesAssetProvider {
+    let mut provider = BytesAssetProvider::new();
+    for decl in &doc.assets.assets {
+        if decl.kind != AssetKind::Image {
+            continue;
+        }
+        let path = project_dir.join(&decl.src);
+        match std::fs::read(&path) {
+            Ok(bytes) => provider.register(&decl.id, AssetKind::Image, bytes.into()),
+            Err(e) => {
+                eprintln!(
+                    "warning: could not read asset '{}' from '{}': {}; image will be skipped",
+                    decl.id,
+                    path.display(),
+                    e
+                );
+            }
+        }
+    }
+    provider
 }
 
 // ── Shared pipeline helper ────────────────────────────────────────────────────
 
-/// Parse → validate → compile, returning `CompileResult`.
+/// Parse → validate, returning the parsed [`Document`].
 ///
-/// Returns early with an error if parse fails or if validation has errors.
-/// The `provider` is the same instance used for both compile and render so
-/// the two steps see the same font registry.
-fn parse_validate_compile(
-    src: &str,
-    provider: &dyn zenith_core::FontProvider,
-) -> Result<zenith_scene::CompileResult, RenderCmdErr> {
+/// Returns early with an error if parse fails (exit code 2) or if validation
+/// has errors (exit code 1).
+fn parse_validate(src: &str) -> Result<Document, RenderCmdErr> {
     // Parse ─────────────────────────────────────────────────────────────────
     let doc = KdlAdapter
         .parse(src.as_bytes())
@@ -89,7 +141,17 @@ fn parse_validate_compile(
         return Err(RenderCmdErr::new(msgs.join("\n"), 1));
     }
 
-    // Compile ────────────────────────────────────────────────────────────────
+    Ok(doc)
+}
+
+/// Parse → validate → compile, returning `CompileResult`.
+///
+/// The `provider` is the font registry used for compilation.
+fn parse_validate_compile(
+    src: &str,
+    provider: &dyn zenith_core::FontProvider,
+) -> Result<zenith_scene::CompileResult, RenderCmdErr> {
+    let doc = parse_validate(src)?;
     Ok(compile(&doc, provider))
 }
 

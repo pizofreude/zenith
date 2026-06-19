@@ -6,7 +6,7 @@
 //! renders the post-transaction source to PNG and checks determinism.
 
 use zenith_cli::commands::tx::run as tx_run;
-use zenith_core::{KdlAdapter, KdlSource, default_provider};
+use zenith_core::{BytesAssetProvider, KdlAdapter, KdlSource, default_provider};
 use zenith_render::render_png;
 use zenith_scene::compile;
 use zenith_tx::TxStatus;
@@ -84,7 +84,7 @@ fn tx_then_render_produces_valid_png() {
     let compiled = compile(&doc, &provider);
 
     // Render first time.
-    let png1 = render_png(&compiled.scene, &provider)
+    let png1 = render_png(&compiled.scene, &provider, &BytesAssetProvider::new())
         .unwrap_or_else(|e| panic!("first render failed: {}", e));
 
     // Non-empty.
@@ -103,7 +103,7 @@ fn tx_then_render_produces_valid_png() {
     );
 
     // Render second time — must be byte-identical (determinism gate).
-    let png2 = render_png(&compiled.scene, &provider)
+    let png2 = render_png(&compiled.scene, &provider, &BytesAssetProvider::new())
         .unwrap_or_else(|e| panic!("second render failed: {}", e));
 
     assert_eq!(
@@ -142,7 +142,7 @@ fn full_pipeline_parse_tx_compile_render() {
     );
 
     // Step 4: rasterize.
-    let png = render_png(&compiled.scene, &provider)
+    let png = render_png(&compiled.scene, &provider, &BytesAssetProvider::new())
         .unwrap_or_else(|e| panic!("pipeline: render failed: {}", e));
 
     assert!(!png.is_empty(), "pipeline: PNG must not be empty");

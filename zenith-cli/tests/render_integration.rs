@@ -2,21 +2,24 @@
 //! directory and render them to PNG, asserting valid, non-empty output and
 //! byte-identical determinism across two back-to-back renders.
 
-use zenith_cli::commands::render::to_png;
+use zenith_cli::commands::render::to_png_with_dir;
 
 /// Render `examples/<name>.zen` twice and assert the output is a valid,
-/// byte-identical PNG.  All four per-fixture tests delegate here.
+/// byte-identical PNG.  All per-fixture tests delegate here.
+///
+/// The asset provider is built from the example's own directory (`examples/`)
+/// so that `image` nodes can source their raster bytes.
 fn assert_example_renders(name: &str) {
     let manifest_dir = env!("CARGO_MANIFEST_DIR");
-    let fixture = std::path::Path::new(manifest_dir)
+    let examples_dir = std::path::Path::new(manifest_dir)
         .join("..")
-        .join("examples")
-        .join(format!("{name}.zen"));
+        .join("examples");
+    let fixture = examples_dir.join(format!("{name}.zen"));
 
     let src = std::fs::read_to_string(&fixture)
         .unwrap_or_else(|e| panic!("could not read {}: {}", fixture.display(), e));
 
-    let png = to_png(&src)
+    let png = to_png_with_dir(&src, Some(&examples_dir))
         .unwrap_or_else(|e| panic!("render failed (exit {}): {}", e.exit_code, e.message));
 
     // Must be non-empty.
@@ -35,7 +38,7 @@ fn assert_example_renders(name: &str) {
     );
 
     // Determinism: two renders must be byte-identical.
-    let png2 = to_png(&src)
+    let png2 = to_png_with_dir(&src, Some(&examples_dir))
         .unwrap_or_else(|e| panic!("second render failed (exit {}): {}", e.exit_code, e.message));
     assert_eq!(
         png, png2,
@@ -66,4 +69,9 @@ fn ellipse_zen_renders_to_valid_png() {
 #[test]
 fn frame_zen_renders_to_valid_png() {
     assert_example_renders("frame");
+}
+
+#[test]
+fn image_zen_renders_to_valid_png() {
+    assert_example_renders("image");
 }

@@ -2,7 +2,7 @@
 //!
 //! No backend-specific types (e.g. tiny-skia) appear anywhere in this module.
 
-use zenith_core::FontProvider;
+use zenith_core::{AssetProvider, FontProvider};
 use zenith_scene::Scene;
 
 use crate::error::RenderError;
@@ -29,12 +29,14 @@ pub trait RasterBackend {
     /// Rasterize a scene to straight-alpha RGBA8 pixels plus dimensions.
     ///
     /// The `fonts` parameter is used to resolve font bytes for glyph runs.
-    /// Runs whose font id cannot be resolved are silently skipped — they do
-    /// not cause an error.
+    /// The `assets` parameter is used to resolve raster image bytes for
+    /// `DrawImage` commands. Runs/images whose id cannot be resolved are
+    /// silently skipped — they do not cause an error.
     fn rasterize(
         &self,
         scene: &Scene,
         fonts: &dyn FontProvider,
+        assets: &dyn AssetProvider,
     ) -> Result<RasterImage, RenderError>;
 
     /// Encode a [`RasterImage`] as deterministic PNG bytes.
