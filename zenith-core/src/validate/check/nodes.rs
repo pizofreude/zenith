@@ -654,7 +654,7 @@ fn resolve_axis(dim: &Dimension, basis: f64) -> Option<f64> {
 /// NOT accumulated here (that is a scene-compiler / render-time concern). The
 /// off_canvas advisory documents this v0 behavior: it checks authored geometry
 /// against the page rectangle, not render-time geometry.
-fn node_bbox(node: &Node, page_w: f64, page_h: f64) -> Option<(f64, f64, f64, f64)> {
+pub(super) fn node_bbox(node: &Node, page_w: f64, page_h: f64) -> Option<(f64, f64, f64, f64)> {
     match node {
         Node::Rect(n) => {
             let x = resolve_axis(n.x.as_ref()?, page_w)?;
@@ -751,7 +751,7 @@ fn points_bbox(
 }
 
 /// Extract the string id and source span from any node variant.
-fn node_id_and_span(node: &Node) -> (&str, Option<crate::ast::Span>) {
+pub(super) fn node_id_and_span(node: &Node) -> (&str, Option<crate::ast::Span>) {
     match node {
         Node::Rect(n) => (&n.id, n.source_span),
         Node::Ellipse(n) => (&n.id, n.source_span),

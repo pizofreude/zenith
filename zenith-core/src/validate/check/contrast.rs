@@ -1,7 +1,10 @@
 //! WCAG 2.2 contrast advisory check.
 //!
-//! Compares text-node fills against the page background colour and emits a
-//! `contrast.low` warning when the ratio is below the WCAG AA threshold.
+//! Compares text-node fills against the colour they visually sit ON — the
+//! topmost preceding sibling shape (rect / ellipse / frame) that fully
+//! contains the text and has an opaque fill, falling back to the page
+//! background colour — and emits a `contrast.low` warning when the ratio is
+//! below the WCAG AA threshold.
 
 use std::collections::BTreeMap;
 
@@ -12,11 +15,116 @@ use crate::color::{contrast_ratio, parse_rgb};
 use crate::diagnostics::Diagnostic;
 use crate::tokens::{ResolvedToken, ResolvedValue};
 
-/// Recursively check text nodes against the page background for WCAG AA contrast.
+use super::nodes::node_bbox;
+
+/// Minimum alpha for a backdrop fill to be treated as opaque enough to act as
+/// the effective background. Fills below this (e.g. a translucent scrim) are
+/// skipped so they don't override a more solid backdrop or the page colour.
+const BACKDROP_OPAQUE_ALPHA: u8 = 128;
+
+/// Resolve a fill property to an `(r, g, b, a)` tuple.
+///
+/// Mirrors the text-fill resolution path: a direct `fill` property, falling
+/// back to the referenced `style` block's `fill`, must be a `TokenRef` →
+/// `Color` token whose hex parses. The alpha byte is recovered from the hex
+/// (`#rrggbbaa`); a 6-digit `#rrggbb` is treated as fully opaque (`255`).
+///
+/// Returns `None` when no fill is set, it doesn't reference a colour token, or
+/// the hex fails to parse.
+fn resolve_fill_rgba(
+    fill: &Option<PropertyValue>,
+    style: &Option<String>,
+    style_map: &BTreeMap<&str, &Style>,
+    resolved_tokens: &BTreeMap<String, ResolvedToken>,
+) -> Option<(u8, u8, u8, u8)> {
+    let style_fill = || {
+        style_map
+            .get(style.as_deref()?)
+            .and_then(|s| s.properties.get("fill"))
+    };
+
+    let pv = fill.as_ref().or_else(style_fill)?;
+    let PropertyValue::TokenRef(id) = pv else {
+        return None;
+    };
+    let rt = resolved_tokens.get(id.as_str())?;
+    let ResolvedValue::Color(hex) = &rt.value else {
+        return None;
+    };
+
+    let (r, g, b) = parse_rgb(hex)?;
+    // Recover alpha from an 8-digit `#rrggbbaa`; default opaque otherwise.
+    let alpha = hex
+        .strip_prefix('#')
+        .filter(|h| h.len() == 8)
+        .and_then(|h| u8::from_str_radix(&h[6..8], 16).ok())
+        .unwrap_or(255);
+    Some((r, g, b, alpha))
+}
+
+/// Find the effective backdrop colour for a text node: the topmost preceding
+/// sibling shape (rect / ellipse / frame) that fully contains the text bbox and
+/// has an opaque-enough fill. Returns `None` when no such shape qualifies, in
+/// which case the caller falls back to the page background.
+fn backdrop_rgb(
+    text_bbox: (f64, f64, f64, f64),
+    preceding_siblings: &[Node],
+    page_w: f64,
+    page_h: f64,
+    style_map: &BTreeMap<&str, &Style>,
+    resolved_tokens: &BTreeMap<String, ResolvedToken>,
+) -> Option<(u8, u8, u8)> {
+    let (tx, ty, tw, th) = text_bbox;
+    // FrameNode has no `fill` field, so its backdrop colour can only come from
+    // a referenced style; this `None` stands in for the absent direct fill.
+    let no_fill: Option<PropertyValue> = None;
+
+    // Iterate topmost-first (later siblings paint on top of earlier ones).
+    for sibling in preceding_siblings.iter().rev() {
+        // Only fillable backdrop shapes qualify.
+        let (fill, style) = match sibling {
+            Node::Rect(r) => (&r.fill, &r.style),
+            Node::Ellipse(e) => (&e.fill, &e.style),
+            Node::Frame(f) => (&no_fill, &f.style),
+            _ => continue,
+        };
+
+        let Some((r, g, b, a)) = resolve_fill_rgba(fill, style, style_map, resolved_tokens) else {
+            continue;
+        };
+        // Skip mostly-transparent fills so a scrim doesn't override.
+        if a < BACKDROP_OPAQUE_ALPHA {
+            continue;
+        }
+
+        let Some((bx, by, bw, bh)) = node_bbox(sibling, page_w, page_h) else {
+            continue;
+        };
+        // The text must lie fully inside the shape.
+        if bx <= tx && by <= ty && bx + bw >= tx + tw && by + bh >= ty + th {
+            return Some((r, g, b));
+        }
+    }
+    None
+}
+
+/// Recursively check text nodes for WCAG AA contrast against their effective
+/// background.
+///
+/// The effective background is the topmost preceding sibling shape (rect /
+/// ellipse / frame) that fully contains the text and has an opaque-enough fill
+/// — i.e. the filled shape the text visually sits ON — falling back to the page
+/// background when no such shape qualifies.
+///
+/// `preceding_siblings` are the nodes painted UNDER `node` (lower z-order, same
+/// parent); `page_w` / `page_h` are the resolved page pixel bounds used to
+/// compute node bounding boxes.
 ///
 /// # v0 Limitations
-/// - Only compares against the PAGE background color; an intervening rect or
-///   scrim the text visually sits on is NOT detected or used.
+/// - Backdrop detection considers only DIRECT preceding siblings of the text
+///   node (at page level, or within the same group/frame). A backdrop shape in
+///   an outer scope, or group translation offsets, are not accumulated — bounds
+///   use authored coordinates, matching the off_canvas advisory.
 /// - Per-span fills (TextSpan.fill) are NOT individually checked; the node-level
 ///   `fill` is used as a proxy for all spans.
 /// - Fill / font-size / font-weight are resolved from the node's direct
@@ -27,15 +135,13 @@ use crate::tokens::{ResolvedToken, ResolvedValue};
 pub(super) fn check_text_contrast(
     node: &Node,
     page_bg_rgb: Option<(u8, u8, u8)>,
+    preceding_siblings: &[Node],
+    page_size: (f64, f64),
     resolved_tokens: &BTreeMap<String, ResolvedToken>,
     style_map: &BTreeMap<&str, &Style>,
     diagnostics: &mut Vec<Diagnostic>,
 ) {
-    // If we don't know the page background we cannot compute contrast — bail.
-    let Some(bg_rgb) = page_bg_rgb else {
-        return;
-    };
-
+    let (page_w, page_h) = page_size;
     match node {
         Node::Text(t) => {
             // Effective property = direct node property, falling back to the
@@ -64,6 +170,24 @@ pub(super) fn check_text_contrast(
             };
 
             let Some(fg_rgb) = text_rgb else {
+                return;
+            };
+
+            // Resolve the EFFECTIVE background: the filled shape the text sits
+            // ON (topmost qualifying preceding sibling), else the page bg.
+            // If neither is known we cannot compute contrast — bail.
+            let backdrop = node_bbox(node, page_w, page_h).and_then(|tbbox| {
+                backdrop_rgb(
+                    tbbox,
+                    preceding_siblings,
+                    page_w,
+                    page_h,
+                    style_map,
+                    resolved_tokens,
+                )
+            });
+            let on_backdrop = backdrop.is_some();
+            let Some(bg_rgb) = backdrop.or(page_bg_rgb) else {
                 return;
             };
 
@@ -114,12 +238,17 @@ pub(super) fn check_text_contrast(
             let ratio = contrast_ratio(fg_rgb, bg_rgb);
 
             if ratio < threshold {
+                let bg_source = if on_backdrop {
+                    "backdrop"
+                } else {
+                    "page background"
+                };
                 diagnostics.push(Diagnostic::warning(
                     "contrast.low",
                     format!(
-                        "text '{}': contrast ratio {:.2}:1 of fill on page background \
+                        "text '{}': contrast ratio {:.2}:1 of fill on {} \
                          is below WCAG AA ({:.1}:1)",
-                        t.id, ratio, threshold
+                        t.id, ratio, bg_source, threshold
                     ),
                     t.source_span,
                     Some(t.id.clone()),
@@ -127,16 +256,34 @@ pub(super) fn check_text_contrast(
             }
         }
 
-        // Recurse into container nodes, passing the same page_bg through.
+        // Recurse into container nodes, passing the same page_bg through and
+        // threading each child's own preceding siblings so a text node sitting
+        // on a shape WITHIN the container is judged against that shape.
         // Group and Frame children may contain text nodes.
         Node::Group(g) => {
-            for child in &g.children {
-                check_text_contrast(child, page_bg_rgb, resolved_tokens, style_map, diagnostics);
+            for (i, child) in g.children.iter().enumerate() {
+                check_text_contrast(
+                    child,
+                    page_bg_rgb,
+                    &g.children[..i],
+                    (page_w, page_h),
+                    resolved_tokens,
+                    style_map,
+                    diagnostics,
+                );
             }
         }
         Node::Frame(f) => {
-            for child in &f.children {
-                check_text_contrast(child, page_bg_rgb, resolved_tokens, style_map, diagnostics);
+            for (i, child) in f.children.iter().enumerate() {
+                check_text_contrast(
+                    child,
+                    page_bg_rgb,
+                    &f.children[..i],
+                    (page_w, page_h),
+                    resolved_tokens,
+                    style_map,
+                    diagnostics,
+                );
             }
         }
 

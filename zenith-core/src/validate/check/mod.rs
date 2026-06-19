@@ -202,7 +202,11 @@ pub fn validate(doc: &Document) -> ValidationReport {
         });
 
         // ── Walk page children ────────────────────────────────────────────
-        for node in &page.children {
+        // Page pixel bounds for backdrop bbox math; when the page unit was bad
+        // (already diagnosed) bounds are unresolved and we use (0, 0) — no
+        // shape will contain the text, so contrast falls back to the page bg.
+        let (page_w, page_h) = page_px_bounds.unwrap_or((0.0, 0.0));
+        for (i, node) in page.children.iter().enumerate() {
             walk_node(
                 node,
                 &mut seen_ids,
@@ -215,14 +219,25 @@ pub fn validate(doc: &Document) -> ValidationReport {
             );
             // Contrast check runs after the structural walk so that
             // token-reference errors are already diagnosed and we can
-            // safely skip nodes whose tokens didn't resolve.
+            // safely skip nodes whose tokens didn't resolve. The slice
+            // `page.children[..i]` is the set of siblings painted UNDER this
+            // node (lower z-order) — the candidate backdrops.
             check_text_contrast(
                 node,
                 page_bg_rgb,
+                &page.children[..i],
+                (page_w, page_h),
                 resolved_tokens,
                 &style_map,
                 &mut diagnostics,
             );
+        }
+
+        // ── Safe-zone advisories ──────────────────────────────────────────
+        // Only run when the page dimensions resolved; zone/node geometry is
+        // compared in the same pixel space the off_canvas check uses.
+        if let Some((page_w, page_h)) = page_px_bounds {
+            safezone::check_safe_zones(page, page_w, page_h, &mut diagnostics);
         }
     }
 
