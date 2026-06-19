@@ -6,6 +6,7 @@
 
 use resvg::usvg;
 use resvg::usvg::TreeParsing;
+use resvg::usvg::TreeTextToPath;
 use tiny_skia::{
     FillRule, FilterQuality, Mask, Paint, Path, PathBuilder, Pixmap, PixmapPaint, Rect, Stroke,
     Transform,
@@ -41,7 +42,6 @@ fn f64_to_px(value: f64, axis: &str) -> Result<u32, RenderError> {
             "scene {axis} rounds to a non-positive value ({px})"
         )));
     }
-    #[allow(clippy::cast_sign_loss, clippy::cast_possible_truncation)]
     let px_u32 = px as u32;
     if px_u32 > MAX_DIMENSION {
         return Err(RenderError::new(format!(
@@ -266,6 +266,11 @@ impl RasterBackend for TinySkiaBackend {
         // The outermost clip is the page rectangle.
         let page_clip = (0.0_f64, 0.0_f64, scene.width, scene.height);
         let mut clip_stack: Vec<(f64, f64, f64, f64)> = vec![page_clip];
+
+        // Lazily-built fontdb for SVG text→path conversion. Initialised at most
+        // once per render, only when an SVG asset is actually drawn. Never loads
+        // system fonts — only the registered faces from `fonts`.
+        let mut svg_fontdb: Option<resvg::usvg::fontdb::Database> = None;
 
         for cmd in &scene.commands {
             match cmd {
@@ -553,12 +558,31 @@ impl RasterBackend for TinySkiaBackend {
                             p
                         }
                         AssetKind::Svg => {
-                            // Empty fontdb → deterministic (SVG <text> renders no
-                            // glyphs; documented v0 limitation).
-                            let opts = usvg::Options::default();
-                            let Ok(usvg_tree) = usvg::Tree::from_data(&asset.bytes, &opts) else {
+                            // Build the fontdb at most once per render, only when
+                            // an SVG is drawn. Loaded from the registered faces in
+                            // deterministic BTreeMap (by_id) order — no system fonts.
+                            let fontdb: &resvg::usvg::fontdb::Database = svg_fontdb
+                                .get_or_insert_with(|| {
+                                    let mut db = resvg::usvg::fontdb::Database::new();
+                                    db.set_sans_serif_family("Noto Sans");
+                                    db.set_serif_family("Noto Sans");
+                                    db.set_monospace_family("Noto Sans Mono");
+                                    for face in fonts.all_faces() {
+                                        db.load_font_data(face.bytes.to_vec());
+                                    }
+                                    db
+                                });
+                            // Set default font-family so unstyled SVG <text> resolves
+                            // to "Noto Sans" instead of the usvg default "Times New Roman".
+                            let opts = usvg::Options {
+                                font_family: "Noto Sans".to_owned(),
+                                ..Default::default()
+                            };
+                            let Ok(mut usvg_tree) = usvg::Tree::from_data(&asset.bytes, &opts)
+                            else {
                                 continue; // malformed SVG: skip
                             };
+                            usvg_tree.convert_text(fontdb);
                             let sz = usvg_tree.size;
                             let (svw, svh) = (f64::from(sz.width()), f64::from(sz.height()));
                             if !(svw > 0.0 && svh > 0.0) {
@@ -1980,6 +2004,61 @@ mod tests {
         assert!(
             r > g && r > b,
             "center pixel must be red-dominant; got r={r} g={g} b={b}"
+        );
+    }
+
+    // ── SVG <text>: text element converts to paths and rasterizes ─────────
+
+    /// An inline SVG containing a red `<text>` element is registered as
+    /// `AssetKind::Svg`, drawn via DrawImage, and the output pixmap must contain
+    /// at least one RED pixel — proving the text was converted to paths and
+    /// rasterized (not silently dropped due to an empty fontdb).
+    #[test]
+    fn draw_image_svg_text_renders_red_pixels() {
+        const TEXT_SVG: &[u8] = b"<svg xmlns='http://www.w3.org/2000/svg' \
+            width='200' height='60'>\
+            <text x='0' y='40' font-size='40' fill='#ff0000'>Hi</text>\
+            </svg>";
+
+        let mut assets = BytesAssetProvider::new();
+        assets.register("asset.text_svg", AssetKind::Svg, Arc::from(TEXT_SVG));
+
+        let mut scene = Scene::new(200.0, 60.0);
+        scene.commands.push(SceneCommand::PushClip {
+            x: 0.0,
+            y: 0.0,
+            w: 200.0,
+            h: 60.0,
+        });
+        scene.commands.push(SceneCommand::DrawImage {
+            x: 0.0,
+            y: 0.0,
+            w: 200.0,
+            h: 60.0,
+            asset_id: "asset.text_svg".to_string(),
+            fit: FitMode::Stretch,
+            pos_x: 50.0,
+            pos_y: 50.0,
+            opacity: 1.0,
+        });
+        scene.commands.push(SceneCommand::PopClip);
+
+        let backend = TinySkiaBackend;
+        let fonts = default_provider();
+        let img = backend
+            .rasterize(&scene, &fonts, &assets)
+            .expect("SVG text rasterize must succeed");
+
+        // At least one pixel must be red-dominant — text paths were rasterized.
+        let any_red = (0..img.height).any(|py| {
+            (0..img.width).any(|px| {
+                let (r, g, b, a) = pixel(&img.rgba, img.width, px, py);
+                a > 0 && r > g && r > b
+            })
+        });
+        assert!(
+            any_red,
+            "SVG <text> must produce at least one red pixel after convert_text + rasterize"
         );
     }
 }

@@ -53,6 +53,10 @@ pub trait FontProvider {
     /// Resolve by the stable id recorded on a shaped run.
     #[must_use]
     fn by_id(&self, id: &str) -> Option<FontData>;
+
+    /// All registered faces, in a deterministic order (for building an SVG fontdb, etc.).
+    #[must_use]
+    fn all_faces(&self) -> Vec<FontData>;
 }
 
 // Internal key type for the primary registry map.
@@ -205,6 +209,10 @@ impl FontProvider for BytesFontProvider {
 
     fn by_id(&self, id: &str) -> Option<FontData> {
         self.by_id.get(id).cloned()
+    }
+
+    fn all_faces(&self) -> Vec<FontData> {
+        self.by_id.values().cloned().collect()
     }
 }
 
