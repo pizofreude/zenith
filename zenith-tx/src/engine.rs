@@ -3,7 +3,9 @@
 //! This module is pure: it performs no file I/O and does not mutate the input
 //! document (it works on a clone). Dry-run vs. apply is the caller's concern.
 
-use zenith_core::{Diagnostic, Document, KdlAdapter, KdlSource, Node, Severity, validate};
+use zenith_core::{
+    Diagnostic, Document, KdlAdapter, KdlSource, Node, PropertyValue, Severity, validate,
+};
 
 use crate::op::{Op, Transaction};
 use crate::result::{TxError, TxResult, TxStatus};
@@ -94,6 +96,24 @@ fn apply_op(
         Op::MoveForward { node: node_id } => {
             apply_move_forward(node_id, doc, diagnostics, affected);
         }
+        Op::SetFill {
+            node: node_id,
+            fill,
+        } => {
+            apply_set_fill(node_id, fill, doc, diagnostics, affected);
+        }
+        Op::SetVisible {
+            node: node_id,
+            visible,
+        } => {
+            apply_set_visible(node_id, *visible, doc, diagnostics, affected);
+        }
+        Op::SetLocked {
+            node: node_id,
+            locked,
+        } => {
+            apply_set_locked(node_id, *locked, doc, diagnostics, affected);
+        }
     }
 }
 
@@ -122,8 +142,8 @@ fn apply_set_text_align(
     }
 
     // Walk the tree looking for `node_id`.
-    match find_node_mut(doc, node_id) {
-        FindResult::NotFound => {
+    match find_node_any_mut(doc, node_id) {
+        None => {
             diagnostics.push(Diagnostic::error(
                 "tx.unknown_node",
                 format!("node {:?} not found in document", node_id),
@@ -131,7 +151,12 @@ fn apply_set_text_align(
                 Some(node_id.to_owned()),
             ));
         }
-        FindResult::WrongType { kind } => {
+        Some(Node::Text(text_node)) => {
+            text_node.align = Some(align.to_owned());
+            record_affected(node_id, affected);
+        }
+        Some(other) => {
+            let kind = node_kind_str(other);
             diagnostics.push(Diagnostic::error(
                 "tx.wrong_node_type",
                 format!(
@@ -141,10 +166,6 @@ fn apply_set_text_align(
                 None,
                 Some(node_id.to_owned()),
             ));
-        }
-        FindResult::TextNode(text_node) => {
-            text_node.align = Some(align.to_owned());
-            record_affected(node_id, affected);
         }
     }
 }
@@ -189,13 +210,6 @@ fn apply_move_forward(
 
 // ── Tree walk helpers ─────────────────────────────────────────────────────────
 
-/// Result of a node lookup for mutation.
-enum FindResult<'a> {
-    NotFound,
-    WrongType { kind: &'static str },
-    TextNode(&'a mut zenith_core::TextNode),
-}
-
 /// Returns true if `node` is, or transitively contains, a node with `id`.
 fn subtree_contains(node: &Node, id: &str) -> bool {
     if node_id_of(node) == Some(id) {
@@ -208,96 +222,262 @@ fn subtree_contains(node: &Node, id: &str) -> bool {
     }
 }
 
-/// Walk the document tree and return a mutable reference to a `TextNode` with
-/// the given id, or indicate not-found / wrong-type.
+/// Walk the document tree and return a mutable reference to the node with
+/// the given `id`, or `None` if not found.
 ///
 /// Two-phase approach: shared scan first (to find the page index), then a
 /// single targeted mutable borrow. This pattern avoids the borrow-checker
 /// conflict that would arise if we tried to return a mutable reference from
 /// within an `&mut`-iterating for loop.
-fn find_node_mut<'doc>(doc: &'doc mut Document, id: &str) -> FindResult<'doc> {
+fn find_node_any_mut<'doc>(doc: &'doc mut Document, id: &str) -> Option<&'doc mut Node> {
     // Phase 1: find which page (shared borrow only).
-    // `subtree_contains` recurses into groups at any depth, so a node nested
-    // inside one or more groups is correctly located on its containing page.
     let page_index = doc.body.pages.iter().enumerate().find_map(|(pi, page)| {
         let found = page.children.iter().any(|n| subtree_contains(n, id));
         if found { Some(pi) } else { None }
     });
 
     // Phase 2: act on the found page with an exclusive borrow.
-    // `pi` came from iterating the same `doc.body.pages`; no intervening
-    // mutation, so `.get_mut()` will always be `Some`. We use it instead of
-    // the indexing operator so the engine can never panic.
     match page_index {
-        None => FindResult::NotFound,
+        None => None,
         Some(pi) => match doc.body.pages.get_mut(pi) {
-            None => FindResult::NotFound,
-            Some(page) => {
-                find_in_children_mut(&mut page.children, id).unwrap_or(FindResult::NotFound)
-            }
+            None => None,
+            Some(page) => find_in_children_any_mut(&mut page.children, id),
         },
     }
 }
 
-fn find_in_children_mut<'a>(children: &'a mut [Node], id: &str) -> Option<FindResult<'a>> {
-    // Two-phase: first find the index (shared borrow), then mutate (exclusive
-    // borrow). This avoids a simultaneous shared + mutable borrow of `children`.
-
-    // Phase 1: find the index and record what kind of node it is.
-    // `Descend(i)` means the id is nested inside the group at index `i`.
+/// Descend into a children slice and return a mutable reference to the node
+/// with `id`. Returns `None` if the id is not present in this subtree.
+///
+/// Two-phase: shared scan to find the index, then exclusive borrow to act.
+///
+/// No recursion-depth guard (accepted v0 limit, consistent with
+/// `move_forward_in` and `subtree_contains`).
+fn find_in_children_any_mut<'a>(children: &'a mut [Node], id: &str) -> Option<&'a mut Node> {
+    // Phase 1: find the index and how to reach it.
+    // `Direct(i)` — id matches children[i] itself.
+    // `Descend(i)` — id lives somewhere inside the container at children[i].
     enum Hit {
-        Text(usize),
-        WrongType(&'static str),
+        Direct(usize),
         Descend(usize),
     }
 
-    // The scan checks direct children first. If the id matches a direct child,
-    // we record the node kind. If the id is nested inside a group child, we
-    // record `Descend` so phase 2 can recurse into that group's children vec.
-    let hit = children
-        .iter()
-        .enumerate()
-        .find_map(|(i, node)| match node {
-            Node::Text(t) if t.id == id => Some(Hit::Text(i)),
-            Node::Rect(r) if r.id == id => Some(Hit::WrongType("rect")),
-            Node::Ellipse(e) if e.id == id => Some(Hit::WrongType("ellipse")),
-            Node::Line(l) if l.id == id => Some(Hit::WrongType("line")),
-            Node::Frame(f) if f.id == id => Some(Hit::WrongType("frame")),
+    let hit = children.iter().enumerate().find_map(|(i, node)| {
+        if node_id_of(node) == Some(id) {
+            return Some(Hit::Direct(i));
+        }
+        match node {
             Node::Frame(f) if f.children.iter().any(|c| subtree_contains(c, id)) => {
                 Some(Hit::Descend(i))
             }
-            Node::Group(g) if g.id == id => Some(Hit::WrongType("group")),
             Node::Group(g) if g.children.iter().any(|c| subtree_contains(c, id)) => {
                 Some(Hit::Descend(i))
             }
-            Node::Image(img) if img.id == id => Some(Hit::WrongType("image")),
-            // Polygon and polyline are leaf nodes — no Descend arm.
-            Node::Polygon(p) if p.id == id => Some(Hit::WrongType("polygon")),
-            Node::Polyline(p) if p.id == id => Some(Hit::WrongType("polyline")),
-            // All other variants without a matching id (Unknown): skip.
             _ => None,
-        });
+        }
+    });
 
-    // Phase 2: act on the hit (if any).
+    // Phase 2: take the exclusive borrow we deferred.
     match hit {
         None => None,
-        Some(Hit::WrongType(kind)) => Some(FindResult::WrongType { kind }),
-        Some(Hit::Text(i)) => {
-            // SAFETY: `i` came from the same `children` slice above; it is
-            // within bounds. We replace the shared borrow with an exclusive one.
-            match children.get_mut(i) {
-                Some(Node::Text(t)) => Some(FindResult::TextNode(t)),
-                // Unreachable: we just confirmed it's Text in phase 1.
-                _ => None,
-            }
-        }
+        Some(Hit::Direct(i)) => children.get_mut(i),
         Some(Hit::Descend(i)) => match children.get_mut(i) {
-            Some(Node::Frame(f)) => find_in_children_mut(&mut f.children, id),
-            Some(Node::Group(g)) => find_in_children_mut(&mut g.children, id),
+            Some(Node::Frame(f)) => find_in_children_any_mut(&mut f.children, id),
+            Some(Node::Group(g)) => find_in_children_any_mut(&mut g.children, id),
             _ => None, // unreachable: phase-1 confirmed a container at i
         },
     }
 }
+
+// ── Node-kind string ──────────────────────────────────────────────────────────
+
+/// Return a static string naming the variant kind of a [`Node`].
+fn node_kind_str(node: &Node) -> &'static str {
+    match node {
+        Node::Rect(_) => "rect",
+        Node::Ellipse(_) => "ellipse",
+        Node::Line(_) => "line",
+        Node::Text(_) => "text",
+        Node::Frame(_) => "frame",
+        Node::Group(_) => "group",
+        Node::Image(_) => "image",
+        Node::Polygon(_) => "polygon",
+        Node::Polyline(_) => "polyline",
+        Node::Unknown(_) => "unknown",
+    }
+}
+
+// ── Field accessor helpers ────────────────────────────────────────────────────
+
+/// Return a mutable reference to the `visible` field of a node, or `None`
+/// for `Node::Unknown` which carries no `visible` field.
+fn node_visible_mut(node: &mut Node) -> Option<&mut Option<bool>> {
+    match node {
+        Node::Rect(n) => Some(&mut n.visible),
+        Node::Ellipse(n) => Some(&mut n.visible),
+        Node::Line(n) => Some(&mut n.visible),
+        Node::Text(n) => Some(&mut n.visible),
+        Node::Frame(n) => Some(&mut n.visible),
+        Node::Group(n) => Some(&mut n.visible),
+        Node::Image(n) => Some(&mut n.visible),
+        Node::Polygon(n) => Some(&mut n.visible),
+        Node::Polyline(n) => Some(&mut n.visible),
+        Node::Unknown(_) => None,
+    }
+}
+
+/// Return a mutable reference to the `locked` field of a node, or `None`
+/// for `Node::Unknown` which carries no `locked` field.
+fn node_locked_mut(node: &mut Node) -> Option<&mut Option<bool>> {
+    match node {
+        Node::Rect(n) => Some(&mut n.locked),
+        Node::Ellipse(n) => Some(&mut n.locked),
+        Node::Line(n) => Some(&mut n.locked),
+        Node::Text(n) => Some(&mut n.locked),
+        Node::Frame(n) => Some(&mut n.locked),
+        Node::Group(n) => Some(&mut n.locked),
+        Node::Image(n) => Some(&mut n.locked),
+        Node::Polygon(n) => Some(&mut n.locked),
+        Node::Polyline(n) => Some(&mut n.locked),
+        Node::Unknown(_) => None,
+    }
+}
+
+/// Return a mutable reference to the `fill` field of a node, or `None` for
+/// node variants that do not have a `fill` property
+/// (`Line`, `Frame`, `Group`, `Image`, `Unknown`).
+fn node_fill_mut(node: &mut Node) -> Option<&mut Option<PropertyValue>> {
+    match node {
+        Node::Rect(n) => Some(&mut n.fill),
+        Node::Ellipse(n) => Some(&mut n.fill),
+        Node::Text(n) => Some(&mut n.fill),
+        Node::Polygon(n) => Some(&mut n.fill),
+        Node::Polyline(n) => Some(&mut n.fill),
+        Node::Line(_) | Node::Frame(_) | Node::Group(_) | Node::Image(_) | Node::Unknown(_) => None,
+    }
+}
+
+// ── SetFill ───────────────────────────────────────────────────────────────────
+
+fn apply_set_fill(
+    node_id: &str,
+    fill_token: &str,
+    doc: &mut Document,
+    diagnostics: &mut Vec<Diagnostic>,
+    affected: &mut Vec<String>,
+) {
+    match find_node_any_mut(doc, node_id) {
+        None => {
+            diagnostics.push(Diagnostic::error(
+                "tx.unknown_node",
+                format!("node {:?} not found in document", node_id),
+                None,
+                Some(node_id.to_owned()),
+            ));
+        }
+        Some(node) => {
+            // node_kind_str returns &'static str, so there is no live borrow
+            // of `node` after this let binding — the mutable borrow below is fine.
+            let kind = node_kind_str(node);
+            match node_fill_mut(node) {
+                Some(slot) => {
+                    *slot = Some(PropertyValue::TokenRef(fill_token.to_owned()));
+                    record_affected(node_id, affected);
+                }
+                None => {
+                    diagnostics.push(Diagnostic::error(
+                        "tx.unsupported_property",
+                        format!("set_fill is not supported on a {} node", kind),
+                        None,
+                        Some(node_id.to_owned()),
+                    ));
+                }
+            }
+        }
+    }
+}
+
+// ── SetVisible / SetLocked ────────────────────────────────────────────────────
+
+/// Shared driver for `set_visible` and `set_locked`: finds the node by id,
+/// calls `accessor` to get the `Option<bool>` slot, and sets it to `value`.
+/// Emits `tx.unknown_node` or `tx.unsupported_property` on failure.
+fn apply_set_bool_field(
+    node_id: &str,
+    value: bool,
+    op_label: &str,
+    accessor: fn(&mut Node) -> Option<&mut Option<bool>>,
+    doc: &mut Document,
+    diagnostics: &mut Vec<Diagnostic>,
+    affected: &mut Vec<String>,
+) {
+    match find_node_any_mut(doc, node_id) {
+        None => {
+            diagnostics.push(Diagnostic::error(
+                "tx.unknown_node",
+                format!("node {:?} not found in document", node_id),
+                None,
+                Some(node_id.to_owned()),
+            ));
+        }
+        Some(node) => {
+            // node_kind_str returns &'static str — no live borrow of `node` after this.
+            let kind = node_kind_str(node);
+            match accessor(node) {
+                Some(slot) => {
+                    *slot = Some(value);
+                    record_affected(node_id, affected);
+                }
+                None => {
+                    diagnostics.push(Diagnostic::error(
+                        "tx.unsupported_property",
+                        format!("{} is not supported on a {} node", op_label, kind),
+                        None,
+                        Some(node_id.to_owned()),
+                    ));
+                }
+            }
+        }
+    }
+}
+
+fn apply_set_visible(
+    node_id: &str,
+    visible: bool,
+    doc: &mut Document,
+    diagnostics: &mut Vec<Diagnostic>,
+    affected: &mut Vec<String>,
+) {
+    apply_set_bool_field(
+        node_id,
+        visible,
+        "set_visible",
+        node_visible_mut,
+        doc,
+        diagnostics,
+        affected,
+    );
+}
+
+fn apply_set_locked(
+    node_id: &str,
+    locked: bool,
+    doc: &mut Document,
+    diagnostics: &mut Vec<Diagnostic>,
+    affected: &mut Vec<String>,
+) {
+    apply_set_bool_field(
+        node_id,
+        locked,
+        "set_locked",
+        node_locked_mut,
+        doc,
+        diagnostics,
+        affected,
+    );
+}
+
+// ── MoveForward internals ─────────────────────────────────────────────────────
 
 /// Outcome of attempting to move a node one step forward (up in z-order)
 /// within its parent's children list, searching recursively through groups.
@@ -747,6 +927,255 @@ mod tests {
             .find("id=\"b\"")
             .expect("b in source_before");
         assert!(pb_a < pb_b, "a should appear before b in source_before");
+    }
+
+    // ── SetFill / SetVisible / SetLocked test documents ───────────────────────
+
+    /// Rect with fill token A; token B also declared so post-validate passes.
+    const FILL_DOC: &str = r##"zenith version=1 {
+  project id="proj" name="Test"
+  tokens format="zenith-token-v1" {
+    token id="color.a" type="color" value="#ff0000"
+    token id="color.b" type="color" value="#0000ff"
+  }
+  styles { }
+  document id="doc1" title="T" {
+    page id="pg1" w=(px)400 h=(px)300 {
+      rect id="r1" x=(px)0 y=(px)0 w=(px)100 h=(px)100 fill=(token)"color.a"
+    }
+  }
+}"##;
+
+    /// Line node (no fill field).
+    const LINE_DOC: &str = r##"zenith version=1 {
+  project id="proj" name="Test"
+  tokens format="zenith-token-v1" {
+    token id="color.a" type="color" value="#ff0000"
+  }
+  styles { }
+  document id="doc1" title="T" {
+    page id="pg1" w=(px)400 h=(px)300 {
+      line id="ln1" x1=(px)0 y1=(px)0 x2=(px)100 y2=(px)100 stroke=(token)"color.a"
+    }
+  }
+}"##;
+
+    /// Rect inside a group.
+    const NESTED_RECT_DOC: &str = r##"zenith version=1 {
+  project id="proj" name="Test"
+  tokens format="zenith-token-v1" { }
+  styles { }
+  document id="doc1" title="T" {
+    page id="pg1" w=(px)400 h=(px)300 {
+      group id="grp1" {
+        rect id="inner" x=(px)0 y=(px)0 w=(px)50 h=(px)50
+      }
+    }
+  }
+}"##;
+
+    // ── SetFill tests ─────────────────────────────────────────────────────────
+
+    #[test]
+    fn set_fill_recolors_rect() {
+        let doc = parse(FILL_DOC);
+        let tx = Transaction {
+            ops: vec![Op::SetFill {
+                node: "r1".to_owned(),
+                fill: "color.b".to_owned(),
+            }],
+        };
+        let result = run_transaction(&doc, &tx).expect("run_transaction should not error");
+
+        assert_eq!(result.status, TxStatus::Accepted);
+        assert_eq!(result.affected_node_ids, vec!["r1".to_owned()]);
+        // TokenRef("color.b") serialises as fill=(token)"color.b"
+        assert!(
+            result.source_after.contains("(token)\"color.b\""),
+            "source_after must reference color.b; got:\n{}",
+            result.source_after
+        );
+        assert!(
+            !result.source_after.contains("(token)\"color.a\""),
+            "old token must not appear in source_after"
+        );
+        assert_ne!(result.source_before, result.source_after);
+    }
+
+    #[test]
+    fn set_fill_unsupported_on_line() {
+        let doc = parse(LINE_DOC);
+        let tx = Transaction {
+            ops: vec![Op::SetFill {
+                node: "ln1".to_owned(),
+                fill: "color.a".to_owned(),
+            }],
+        };
+        let result = run_transaction(&doc, &tx).expect("run_transaction should not error");
+
+        assert_eq!(result.status, TxStatus::Rejected);
+        assert!(
+            result
+                .diagnostics
+                .iter()
+                .any(|d| d.code == "tx.unsupported_property" && d.message.contains("line")),
+            "expected tx.unsupported_property mentioning \"line\"; got: {:?}",
+            result.diagnostics
+        );
+        assert_eq!(result.source_after, result.source_before);
+    }
+
+    #[test]
+    fn set_fill_unknown_token_rejected() {
+        // color.nope is not declared → post-validate emits token.unknown_reference → Rejected
+        let doc = parse(FILL_DOC);
+        let tx = Transaction {
+            ops: vec![Op::SetFill {
+                node: "r1".to_owned(),
+                fill: "color.nope".to_owned(),
+            }],
+        };
+        let result = run_transaction(&doc, &tx).expect("run_transaction should not error");
+
+        assert_eq!(result.status, TxStatus::Rejected);
+        assert!(
+            result
+                .diagnostics
+                .iter()
+                .any(|d| d.code == "token.unknown_reference"),
+            "expected token.unknown_reference diagnostic; got: {:?}",
+            result.diagnostics
+        );
+        assert_eq!(result.source_after, result.source_before);
+    }
+
+    // ── SetVisible tests ──────────────────────────────────────────────────────
+
+    #[test]
+    fn set_visible_hides_node() {
+        let doc = parse(TWO_RECT_DOC);
+        let tx = Transaction {
+            ops: vec![Op::SetVisible {
+                node: "a".to_owned(),
+                visible: false,
+            }],
+        };
+        let result = run_transaction(&doc, &tx).expect("run_transaction should not error");
+
+        assert_eq!(result.status, TxStatus::Accepted);
+        assert_eq!(result.affected_node_ids, vec!["a".to_owned()]);
+        assert!(
+            result.source_after.contains("visible=#false"),
+            "source_after must contain visible=#false; got:\n{}",
+            result.source_after
+        );
+        assert_ne!(result.source_before, result.source_after);
+    }
+
+    #[test]
+    fn set_visible_on_nested_node() {
+        let doc = parse(NESTED_RECT_DOC);
+        let tx = Transaction {
+            ops: vec![Op::SetVisible {
+                node: "inner".to_owned(),
+                visible: false,
+            }],
+        };
+        let result = run_transaction(&doc, &tx).expect("run_transaction should not error");
+
+        assert_eq!(result.status, TxStatus::Accepted);
+        assert_eq!(result.affected_node_ids, vec!["inner".to_owned()]);
+        assert!(
+            result.source_after.contains("visible=#false"),
+            "source_after must contain visible=#false for nested node; got:\n{}",
+            result.source_after
+        );
+    }
+
+    // ── SetLocked tests ───────────────────────────────────────────────────────
+
+    #[test]
+    fn set_locked_sets_lock() {
+        let doc = parse(TWO_RECT_DOC);
+        let tx = Transaction {
+            ops: vec![Op::SetLocked {
+                node: "b".to_owned(),
+                locked: true,
+            }],
+        };
+        let result = run_transaction(&doc, &tx).expect("run_transaction should not error");
+
+        assert_eq!(result.status, TxStatus::Accepted);
+        assert_eq!(result.affected_node_ids, vec!["b".to_owned()]);
+        assert!(
+            result.source_after.contains("locked=#true"),
+            "source_after must contain locked=#true; got:\n{}",
+            result.source_after
+        );
+        assert_ne!(result.source_before, result.source_after);
+    }
+
+    // ── Unknown node targeting ────────────────────────────────────────────────
+
+    // `UnknownNode` has no `id` field, so `node_id_of` returns `None` for it.
+    // `subtree_contains` will never match an unknown node by id, and
+    // `find_node_any_mut` returns `None` → tx.unknown_node.
+    // We verify this by targeting a non-existent id that would match an unknown
+    // node if it had an id; since it doesn't, we just get tx.unknown_node.
+    #[test]
+    fn set_visible_on_nonexistent_id_is_unknown_node() {
+        // Using TEXT_DOC — there is no node with id "does_not_exist".
+        // The important thing: we get tx.unknown_node, not a panic or
+        // tx.unsupported_property.
+        let doc = parse(TEXT_DOC);
+        let tx = Transaction {
+            ops: vec![Op::SetVisible {
+                node: "does_not_exist".to_owned(),
+                visible: false,
+            }],
+        };
+        let result = run_transaction(&doc, &tx).expect("run_transaction should not error");
+
+        assert_eq!(result.status, TxStatus::Rejected);
+        assert!(
+            result
+                .diagnostics
+                .iter()
+                .any(|d| d.code == "tx.unknown_node"),
+            "expected tx.unknown_node; got: {:?}",
+            result.diagnostics
+        );
+    }
+
+    // ── from_json round-trip: new op variants ─────────────────────────────────
+
+    #[test]
+    fn from_json_new_ops_round_trip() {
+        let json = r#"{"ops":[
+            {"op":"set_fill","node":"r","fill":"c"},
+            {"op":"set_visible","node":"r","visible":false},
+            {"op":"set_locked","node":"r","locked":true}
+        ]}"#;
+        let tx = Transaction::from_json(json).expect("parse JSON");
+        assert_eq!(
+            tx,
+            Transaction {
+                ops: vec![
+                    Op::SetFill {
+                        node: "r".to_owned(),
+                        fill: "c".to_owned(),
+                    },
+                    Op::SetVisible {
+                        node: "r".to_owned(),
+                        visible: false,
+                    },
+                    Op::SetLocked {
+                        node: "r".to_owned(),
+                        locked: true,
+                    },
+                ],
+            }
+        );
     }
 
     // ── 6. Invalid align value → tx.invalid_value, Rejected ──────────────────
