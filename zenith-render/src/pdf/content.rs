@@ -398,6 +398,10 @@ fn emit_command(
             font_id,
             font_size,
             color,
+            // v0: glyph stroke is fill-only in PDF output; stroke_color/stroke_width
+            // are intentionally ignored here.
+            stroke_color: _,
+            stroke_width: _,
             glyphs,
         } => {
             emit_glyph_run(

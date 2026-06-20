@@ -56,6 +56,7 @@ page id="page.tx1" w=(px)400 h=(px)200 {
             font_size,
             color,
             glyphs,
+            ..
         } => {
             // x is the text-box origin x.
             assert_eq!(*x, 10.0, "x must be text-box origin (10px)");
@@ -1553,5 +1554,91 @@ page id="page.bwf" w=(px)400 h=(px)200 {
             .all(|d| d.code != "text.forced_break"),
         "no forced_break when the content fits; got {:?}",
         fits.diagnostics
+    );
+}
+
+// ── Text node with stroke + stroke-width tokens → DrawGlyphRun carries stroke ─
+
+/// A text node with `stroke=(token)` and `stroke-width=(token)` must compile
+/// to a DrawGlyphRun whose `stroke_color` and `stroke_width` are `Some`.
+/// A text node without stroke attributes must compile to `None` / `None`.
+#[test]
+fn text_stroke_token_threads_to_draw_glyph_run() {
+    let src = r##"zenith version=1 {
+  project id="proj.stroke" name="Stroke"
+  tokens format="zenith-token-v1" {
+token id="color.ink"    type="color"      value="#000000"
+token id="color.outline" type="color"     value="#ff0000"
+token id="font.body"    type="fontFamily" value="Noto Sans"
+token id="size.body"    type="dimension"  value=(px)24
+token id="size.stroke"  type="dimension"  value=(px)2
+  }
+  styles {}
+  document id="doc.stroke" title="Stroke" {
+page id="page.stroke" w=(px)400 h=(px)200 {
+  text id="text.with-stroke" x=(px)10 y=(px)20 w=(px)380 h=(px)40 fill=(token)"color.ink" stroke=(token)"color.outline" stroke-width=(token)"size.stroke" font-family=(token)"font.body" font-size=(token)"size.body" {
+    span "Outlined"
+  }
+  text id="text.no-stroke" x=(px)10 y=(px)80 w=(px)380 h=(px)40 fill=(token)"color.ink" font-family=(token)"font.body" font-size=(token)"size.body" {
+    span "Plain"
+  }
+}
+  }
+}
+"##;
+    let doc = parse(src);
+    let result = compile(&doc, &default_provider());
+
+    let cmds = &result.scene.commands;
+
+    // Find DrawGlyphRun for text.with-stroke (stroke fields must be Some).
+    let with_stroke_run = cmds.iter().find(|c| {
+        matches!(
+            c,
+            SceneCommand::DrawGlyphRun {
+                stroke_color: Some(_),
+                ..
+            }
+        )
+    });
+    assert!(
+        with_stroke_run.is_some(),
+        "text with stroke token must produce a DrawGlyphRun with stroke_color=Some; \
+         commands: {:?}",
+        cmds
+    );
+    if let Some(SceneCommand::DrawGlyphRun {
+        stroke_color,
+        stroke_width,
+        ..
+    }) = with_stroke_run
+    {
+        let sc = stroke_color.unwrap();
+        // color.outline = #ff0000 → r=255, g=0, b=0.
+        assert_eq!(sc.r, 255, "stroke_color.r must be 255 (#ff0000)");
+        assert_eq!(sc.g, 0, "stroke_color.g must be 0");
+        assert_eq!(sc.b, 0, "stroke_color.b must be 0");
+        assert_eq!(
+            *stroke_width,
+            Some(2.0),
+            "stroke_width must be 2.0 px (size.stroke token)"
+        );
+    }
+
+    // Find DrawGlyphRun for text.no-stroke (stroke fields must be None).
+    let no_stroke_run = cmds.iter().find(|c| {
+        matches!(
+            c,
+            SceneCommand::DrawGlyphRun {
+                stroke_color: None,
+                ..
+            }
+        )
+    });
+    assert!(
+        no_stroke_run.is_some(),
+        "text without stroke token must produce a DrawGlyphRun with stroke_color=None; \
+         commands: {:?}",
+        cmds
     );
 }

@@ -477,6 +477,14 @@ pub enum SceneCommand {
         font_size: f32,
         /// Fill color of the glyph run.
         color: Color,
+        /// Optional stroke (outline) color applied after the fill.
+        /// `None` means no outline — byte-identical to a run without stroke.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        stroke_color: Option<Color>,
+        /// Stroke width in pixels. Ignored (and serialized as absent) when
+        /// `stroke_color` is `None` or `stroke_width` is `<= 0`.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        stroke_width: Option<f64>,
         /// Positioned glyphs, baseline-relative.
         glyphs: Vec<SceneGlyph>,
     },

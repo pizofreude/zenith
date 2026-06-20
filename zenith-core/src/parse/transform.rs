@@ -1503,6 +1503,9 @@ const TEXT_KNOWN_PROPS: &[&str] = &[
     "overflow_wrap",
     "style",
     "fill",
+    "stroke",
+    "stroke-width",
+    "stroke_width",
     "contrast-bg",
     "contrast_bg",
     "font-family",
@@ -1564,6 +1567,8 @@ fn transform_text(node: &KdlNode) -> Result<TextNode, ParseError> {
         .or_else(|| optional_dimension_prop(node, "padding_left"));
     let text_indent = optional_dimension_prop(node, "text-indent")
         .or_else(|| optional_dimension_prop(node, "text_indent"));
+    let stroke = optional_property_value(node, "stroke");
+    let stroke_width = optional_property_value_aliased(node, "stroke-width", "stroke_width");
     let bullet = optional_string_prop(node, "bullet").map(str::to_owned);
     let bullet_gap = optional_dimension_prop(node, "bullet-gap")
         .or_else(|| optional_dimension_prop(node, "bullet_gap"));
@@ -1595,6 +1600,8 @@ fn transform_text(node: &KdlNode) -> Result<TextNode, ParseError> {
             .map(str::to_owned),
         style: optional_string_prop(node, "style").map(str::to_owned),
         fill: optional_property_value(node, "fill"),
+        stroke,
+        stroke_width,
         contrast_bg: optional_property_value_aliased(node, "contrast-bg", "contrast_bg"),
         font_family,
         font_size,

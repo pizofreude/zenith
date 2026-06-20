@@ -550,6 +550,8 @@ fn write_text(t: &TextNode, out: &mut String, depth: usize) {
     write_opt_dimension(out, "padding-left", &t.padding_left);
     write_opt_dimension(out, "text-indent", &t.text_indent);
     write_opt_property_value(out, "fill", &t.fill);
+    write_opt_property_value(out, "stroke", &t.stroke);
+    write_opt_property_value(out, "stroke-width", &t.stroke_width);
     write_opt_property_value(out, "contrast-bg", &t.contrast_bg);
     write_opt_property_value(out, "font-family", &t.font_family);
     write_opt_property_value(out, "font-size", &t.font_size);

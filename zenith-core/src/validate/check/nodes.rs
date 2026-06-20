@@ -707,6 +707,24 @@ pub(super) fn walk_node(
             );
             check_visual_prop(
                 &t.id,
+                "stroke",
+                t.stroke.as_ref(),
+                VisualExpect::Color,
+                referenced_token_ids,
+                resolved_tokens,
+                diagnostics,
+            );
+            check_visual_prop(
+                &t.id,
+                "stroke-width",
+                t.stroke_width.as_ref(),
+                VisualExpect::Dimension,
+                referenced_token_ids,
+                resolved_tokens,
+                diagnostics,
+            );
+            check_visual_prop(
+                &t.id,
                 "contrast-bg",
                 t.contrast_bg.as_ref(),
                 VisualExpect::Color,

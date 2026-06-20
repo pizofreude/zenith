@@ -68,6 +68,8 @@ fn render_is_byte_identical_across_runs() {
         font_id,
         font_size: 24.0,
         color: Color::srgb(0, 0, 0, 255),
+        stroke_color: None,
+        stroke_width: None,
         glyphs: vec![
             SceneGlyph {
                 glyph_id: 5,
@@ -186,6 +188,8 @@ fn glyph_run_emits_path_fill_ops() {
         font_id,
         font_size: 32.0,
         color: Color::srgb(0, 0, 0, 255),
+        stroke_color: None,
+        stroke_width: None,
         glyphs: vec![SceneGlyph {
             glyph_id: 36, // 'A' in many fonts; any outlined glyph works
             dx: 0.0,

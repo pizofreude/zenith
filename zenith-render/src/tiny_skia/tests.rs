@@ -236,6 +236,8 @@ fn glyph_run_draws_pixels() {
         font_id: run.font_id.clone(),
         font_size,
         color: ink_color,
+        stroke_color: None,
+        stroke_width: None,
         glyphs,
     });
 
@@ -294,6 +296,8 @@ fn glyph_run_deterministic_png() {
         font_id: run.font_id.clone(),
         font_size,
         color: Color::srgb(10, 10, 10, 255),
+        stroke_color: None,
+        stroke_width: None,
         glyphs,
     });
 
@@ -318,6 +322,8 @@ fn glyph_run_missing_font_id_succeeds_silently() {
         font_id: "nonexistent-font-000-normal".to_string(),
         font_size: 16.0,
         color: Color::srgb(255, 0, 0, 255),
+        stroke_color: None,
+        stroke_width: None,
         glyphs: vec![SceneGlyph {
             glyph_id: 36,
             dx: 0.0,
@@ -867,6 +873,8 @@ fn glyph_run_clipped_to_subpage_clip() {
         font_id: run.font_id.clone(),
         font_size,
         color: Color::srgb(0, 0, 200, 255),
+        stroke_color: None,
+        stroke_width: None,
         glyphs,
     });
     scene.commands.push(SceneCommand::PopClip);
@@ -1773,4 +1781,147 @@ fn no_blur_command_scene_is_byte_identical() {
         img1.rgba, img2.rgba,
         "non-blur scene must be byte-identical"
     );
+}
+
+// ── glyph stroke: renders without panic ───────────────────────────────
+
+/// A DrawGlyphRun with stroke_color+stroke_width set must rasterize without
+/// panic. We also verify that the rendered output DIFFERS from the same run
+/// without stroke (the outline adds extra pixels).
+#[test]
+fn glyph_run_with_stroke_renders_without_panic() {
+    let provider = default_provider();
+    let families = vec!["Noto Sans".to_string()];
+    let font_size = 32.0_f32;
+
+    let req = ShapeRequest {
+        text: "A",
+        families: &families,
+        weight: 400,
+        style: FontStyle::Normal,
+        font_size,
+        direction: TextDirection::Ltr,
+    };
+    let run = RustybuzzEngine::new()
+        .shape(&req, &provider)
+        .expect("shaping must succeed");
+
+    let glyphs: Vec<SceneGlyph> = run
+        .glyphs
+        .iter()
+        .map(|g| SceneGlyph {
+            glyph_id: g.glyph_id,
+            dx: g.x,
+            dy: g.y,
+        })
+        .collect();
+
+    // Scene WITH stroke (red outline, 3 px wide, on a blue fill).
+    let mut scene_with = Scene::new(80.0, 50.0);
+    scene_with.commands.push(SceneCommand::DrawGlyphRun {
+        x: 4.0,
+        y: 38.0,
+        font_id: run.font_id.clone(),
+        font_size,
+        color: Color::srgb(0, 0, 200, 255),
+        stroke_color: Some(Color::srgb(200, 0, 0, 255)),
+        stroke_width: Some(3.0),
+        glyphs: glyphs.clone(),
+    });
+
+    // Scene WITHOUT stroke (fill only, same geometry — byte-identical to prior).
+    let mut scene_without = Scene::new(80.0, 50.0);
+    scene_without.commands.push(SceneCommand::DrawGlyphRun {
+        x: 4.0,
+        y: 38.0,
+        font_id: run.font_id.clone(),
+        font_size,
+        color: Color::srgb(0, 0, 200, 255),
+        stroke_color: None,
+        stroke_width: None,
+        glyphs,
+    });
+
+    let backend = TinySkiaBackend;
+    let img_with = backend
+        .rasterize(&scene_with, &provider, &no_assets())
+        .expect("stroke render must succeed without panic");
+    let img_without = backend
+        .rasterize(&scene_without, &provider, &no_assets())
+        .expect("no-stroke render must succeed");
+
+    // The stroke adds a red outline: at least one pixel differs.
+    assert_ne!(
+        img_with.rgba, img_without.rgba,
+        "a 3px red stroke must alter at least one pixel vs. fill-only"
+    );
+}
+
+/// A DrawGlyphRun with stroke_color=None renders byte-identically to
+/// the same run with stroke_width=None (default-off / byte-identical guarantee).
+#[test]
+fn glyph_run_without_stroke_is_byte_identical() {
+    let provider = default_provider();
+    let families = vec!["Noto Sans".to_string()];
+    let font_size = 24.0_f32;
+
+    let req = ShapeRequest {
+        text: "Z",
+        families: &families,
+        weight: 400,
+        style: FontStyle::Normal,
+        font_size,
+        direction: TextDirection::Ltr,
+    };
+    let run = RustybuzzEngine::new()
+        .shape(&req, &provider)
+        .expect("shaping must succeed");
+
+    let glyphs: Vec<SceneGlyph> = run
+        .glyphs
+        .iter()
+        .map(|g| SceneGlyph {
+            glyph_id: g.glyph_id,
+            dx: g.x,
+            dy: g.y,
+        })
+        .collect();
+
+    let make = |sc: Option<Color>, sw: Option<f64>| {
+        let mut scene = Scene::new(60.0, 40.0);
+        scene.commands.push(SceneCommand::DrawGlyphRun {
+            x: 4.0,
+            y: 30.0,
+            font_id: run.font_id.clone(),
+            font_size,
+            color: Color::srgb(10, 10, 10, 255),
+            stroke_color: sc,
+            stroke_width: sw,
+            glyphs: glyphs.clone(),
+        });
+        scene
+    };
+
+    // Both None → must be byte-identical.
+    let img_a = backend_render(&make(None, None), &provider);
+    let img_b = backend_render(&make(None, None), &provider);
+    assert_eq!(img_a, img_b, "two no-stroke renders must be byte-identical");
+
+    // stroke_width=0 with a color → treated as no stroke (≤0 filtered out).
+    let img_zero = backend_render(
+        &make(Some(Color::srgb(255, 0, 0, 255)), Some(0.0)),
+        &provider,
+    );
+    assert_eq!(
+        img_a, img_zero,
+        "stroke_width=0 must produce byte-identical output to no stroke"
+    );
+}
+
+fn backend_render(scene: &Scene, provider: &zenith_core::BytesFontProvider) -> Vec<u8> {
+    let backend = TinySkiaBackend;
+    backend
+        .rasterize(scene, provider, &no_assets())
+        .expect("rasterize must succeed")
+        .rgba
 }

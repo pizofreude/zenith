@@ -118,6 +118,8 @@ pub(super) fn resolve_field_to_text(field: &FieldNode, ctx: &FieldCtx) -> Option
         overflow_wrap: None,
         style: field.style.clone(),
         fill: field.fill.clone(),
+        stroke: None,
+        stroke_width: None,
         contrast_bg: None,
         font_family: field.font_family.clone(),
         font_size: field.font_size.clone(),

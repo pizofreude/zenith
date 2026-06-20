@@ -292,6 +292,15 @@ pub struct TextNode {
     pub overflow_wrap: Option<String>,
     pub style: Option<String>,
     pub fill: Option<PropertyValue>,
+    /// Glyph outline (stroke) color. Token-required (like `fill`). When `Some`,
+    /// each glyph path is filled then stroked with this color. `None` → no
+    /// outline; byte-identical to a node without `stroke`. KDL:
+    /// `stroke=(token)"color.ink.outline"`.
+    pub stroke: Option<PropertyValue>,
+    /// Glyph outline width in pixels. Token-required (like `font-size`). Only
+    /// effective when `stroke` is also set. `None` / 0 → no outline.
+    /// KDL: `stroke-width=(token)"size.stroke.hairline"`.
+    pub stroke_width: Option<PropertyValue>,
     /// WCAG contrast hint: an explicit background color (token ref) the text
     /// visually sits ON, for nodes placed over an `image` or other non-fillable
     /// backdrop the validator cannot sample. When set, the contrast check uses

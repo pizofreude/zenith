@@ -850,6 +850,7 @@ pub(super) fn emit_lines(
     justify_final_line: bool,
     direction: TextDirection,
     commands: &mut Vec<SceneCommand>,
+    glyph_stroke: (Option<Color>, Option<f64>),
 ) {
     // Uniform geometry: every line shares `text_x`/`box_w`. Delegates to the
     // profiled emit with a constant per-line geometry so the two paths are one
@@ -865,6 +866,7 @@ pub(super) fn emit_lines(
         justify_final_line,
         direction,
         commands,
+        glyph_stroke,
     );
 }
 
@@ -888,6 +890,7 @@ pub(super) fn emit_lines_profiled<F>(
     justify_final_line: bool,
     direction: TextDirection,
     commands: &mut Vec<SceneCommand>,
+    glyph_stroke: (Option<Color>, Option<f64>),
 ) where
     F: Fn(usize) -> (f64, f64),
 {
@@ -1026,6 +1029,8 @@ pub(super) fn emit_lines_profiled<F>(
                     font_id: run.font_id.clone(),
                     font_size: run.font_size,
                     color: word.color,
+                    stroke_color: glyph_stroke.0,
+                    stroke_width: glyph_stroke.1,
                     glyphs: run_to_scene_glyphs(run),
                 });
                 run_x += run.advance_width as f64;
@@ -1067,6 +1072,7 @@ fn render_chain_member(
     resolved: &BTreeMap<String, ResolvedToken>,
     commands: &mut Vec<SceneCommand>,
     diagnostics: &mut Vec<Diagnostic>,
+    glyph_stroke: (Option<Color>, Option<f64>),
 ) -> f64 {
     // Box width is required to position lines; height/align are optional.
     let box_w = match text.w.as_ref().and_then(|d| dim_to_px(d.value, &d.unit)) {
@@ -1213,6 +1219,7 @@ fn render_chain_member(
         !assignment.is_last_member,
         chain_direction,
         commands,
+        glyph_stroke,
     );
 
     if has_shadow {
@@ -1539,6 +1546,7 @@ fn emit_tab_leader_runs(
     start_x: f64,
     y: f64,
     color: Color,
+    glyph_stroke: (Option<Color>, Option<f64>),
     commands: &mut Vec<SceneCommand>,
 ) {
     let mut x = start_x;
@@ -1549,6 +1557,8 @@ fn emit_tab_leader_runs(
             font_id: run.font_id.clone(),
             font_size: run.font_size,
             color,
+            stroke_color: glyph_stroke.0,
+            stroke_width: glyph_stroke.1,
             glyphs: run_to_scene_glyphs(run),
         });
         x += run.advance_width as f64;
@@ -1592,6 +1602,7 @@ fn compile_tab_leader(
     text_x: f64,
     text_y: f64,
     ctx: RenderCtx,
+    glyph_stroke: (Option<Color>, Option<f64>),
 ) -> f64 {
     // Combined source text across all spans (tab-leader mode treats the node as
     // one verbatim block, like a code node, so `\t`/`\n` keep their meaning).
@@ -1681,7 +1692,14 @@ fn compile_tab_leader(
         let baseline_y = text_y + ascent + (i as f64) * line_height;
 
         // LEFT segment at the box left edge.
-        emit_tab_leader_runs(&row.left_runs, text_x, baseline_y, color, commands);
+        emit_tab_leader_runs(
+            &row.left_runs,
+            text_x,
+            baseline_y,
+            color,
+            glyph_stroke,
+            commands,
+        );
 
         if !row.has_tab {
             // No tab → left-aligned row, no right segment, no leader.
@@ -1690,7 +1708,14 @@ fn compile_tab_leader(
 
         // RIGHT segment right-aligned: its right edge = box right edge.
         let right_x = box_right - row.right_advance;
-        emit_tab_leader_runs(&row.right_runs, right_x, baseline_y, color, commands);
+        emit_tab_leader_runs(
+            &row.right_runs,
+            right_x,
+            baseline_y,
+            color,
+            glyph_stroke,
+            commands,
+        );
 
         // Fill the gap between LEFT and RIGHT with leader glyphs. The usable gap
         // leaves a small breathing pad on each side.
@@ -1725,6 +1750,8 @@ fn compile_tab_leader(
                     font_id: run.font_id.clone(),
                     font_size: run.font_size,
                     color,
+                    stroke_color: glyph_stroke.0,
+                    stroke_width: glyph_stroke.1,
                     glyphs: run_to_scene_glyphs(run),
                 });
                 x += leader_advance;
@@ -2000,6 +2027,19 @@ pub(super) fn compile_text_sized(
     let text_x = text_x_raw + ctx.dx;
     let text_y = text_y_raw + ctx.dy;
 
+    // Resolve glyph stroke early (before chain early-return) so it can be
+    // threaded to render_chain_member as well. Both fields are None when the
+    // node carries no stroke/stroke-width → byte-identical to before.
+    let early_stroke_color: Option<Color> = text
+        .stroke
+        .as_ref()
+        .and_then(|p| resolve_property_color(p, resolved, diagnostics, &text.id));
+    let early_stroke_width: Option<f64> = {
+        let w = resolve_property_dimension_px(&text.stroke_width, resolved, -1.0);
+        if w > 0.0 { Some(w) } else { None }
+    };
+    let early_glyph_stroke: (Option<Color>, Option<f64>) = (early_stroke_color, early_stroke_width);
+
     // ── Threaded-text chain member ───────────────────────────────────
     // If this node belongs to a text chain, its content was shaped and
     // distributed once by the page-level chain pre-pass; render the lines
@@ -2020,6 +2060,7 @@ pub(super) fn compile_text_sized(
             resolved,
             commands,
             diagnostics,
+            early_glyph_stroke,
         );
     }
 
@@ -2131,6 +2172,10 @@ pub(super) fn compile_text_sized(
         .as_ref()
         .or_else(|| style_prop(&text.style, style_map, "font-weight"));
 
+    // Glyph stroke (outline). Resolved earlier (before chain early-return) and
+    // re-bound here for use in the text emit paths below.
+    let glyph_stroke = early_glyph_stroke;
+
     // ── Tab-leader mode (table-of-contents rows) ──────────────────────────
     // A self-contained render branch taken ONLY when `tab-leader` is set to a
     // non-empty string. The normal fast/wrap paths below are untouched (and so
@@ -2163,6 +2208,7 @@ pub(super) fn compile_text_sized(
                 text_x,
                 text_y,
                 inner_ctx,
+                glyph_stroke,
             );
             commands.push(SceneCommand::PopLayer);
             return h;
@@ -2183,6 +2229,7 @@ pub(super) fn compile_text_sized(
             text_x,
             text_y,
             ctx,
+            glyph_stroke,
         );
     }
 
@@ -2508,6 +2555,8 @@ pub(super) fn compile_text_sized(
                 font_id: shaped.run.font_id,
                 font_size: shaped.run.font_size,
                 color: shaped.color,
+                stroke_color: glyph_stroke.0,
+                stroke_width: glyph_stroke.1,
                 glyphs,
             });
 
@@ -2656,6 +2705,8 @@ pub(super) fn compile_text_sized(
                 font_id: cap.run.font_id.clone(),
                 font_size: cap.run.font_size,
                 color: cap.color,
+                stroke_color: glyph_stroke.0,
+                stroke_width: glyph_stroke.1,
                 glyphs: run_to_scene_glyphs(&cap.run),
             });
 
@@ -2680,6 +2731,7 @@ pub(super) fn compile_text_sized(
                 // a documented follow-up.
                 TextDirection::Ltr,
                 commands,
+                glyph_stroke,
             );
         } else if let Some((ex, ey, ew, eh)) = exclusion {
             // ── TEXT RUNAROUND (largest-area / jump) ──────────────────────
@@ -2746,6 +2798,7 @@ pub(super) fn compile_text_sized(
                 false,
                 node_direction,
                 commands,
+                glyph_stroke,
             );
         } else {
             // Opt-in hyphenation and/or break-word: build a context when EITHER
@@ -2939,6 +2992,8 @@ pub(super) fn compile_text_sized(
                     font_id: marker_run.font_id,
                     font_size: marker_run.font_size,
                     color: marker_color,
+                    stroke_color: glyph_stroke.0,
+                    stroke_width: glyph_stroke.1,
                     glyphs,
                 });
             }
@@ -2960,6 +3015,7 @@ pub(super) fn compile_text_sized(
                     false,
                     node_direction,
                     commands,
+                    glyph_stroke,
                 );
             } else {
                 // Per-line geometry mirrors the packing widths: line 0 starts at
@@ -2982,6 +3038,7 @@ pub(super) fn compile_text_sized(
                     false,
                     node_direction,
                     commands,
+                    glyph_stroke,
                 );
             }
         }
@@ -3386,6 +3443,8 @@ pub(super) fn compile_code(
                         font_id: run.font_id,
                         font_size: run.font_size,
                         color: seg_color,
+                        stroke_color: None,
+                        stroke_width: None,
                         glyphs,
                     });
                     x_cursor += advance;
@@ -3429,6 +3488,8 @@ pub(super) fn compile_code(
                         font_id: run.font_id,
                         font_size: run.font_size,
                         color,
+                        stroke_color: None,
+                        stroke_width: None,
                         glyphs,
                     });
                 }
@@ -3527,6 +3588,7 @@ mod rtl_tests {
             false,
             direction,
             &mut commands,
+            (None, None),
         );
         run_xs(&commands)
     }
@@ -4008,6 +4070,7 @@ mod indent_tests {
                 false,
                 TextDirection::Ltr,
                 &mut commands,
+                (None, None),
             );
         } else {
             emit_lines_profiled(
@@ -4027,6 +4090,7 @@ mod indent_tests {
                 false,
                 TextDirection::Ltr,
                 &mut commands,
+                (None, None),
             );
         }
         commands

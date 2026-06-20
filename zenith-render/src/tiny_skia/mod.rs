@@ -587,6 +587,8 @@ impl RasterBackend for TinySkiaBackend {
                     font_id,
                     font_size,
                     color,
+                    stroke_color,
+                    stroke_width,
                     glyphs,
                 } => {
                     // ── 1. Resolve font bytes ─────────────────────────────────
@@ -701,6 +703,21 @@ impl RasterBackend for TinySkiaBackend {
                             current_ts,
                             mask.as_ref(),
                         );
+
+                        // Stroke pass — outline on top of fill. Skipped when no
+                        // stroke_color/stroke_width is set (byte-identical to before).
+                        if let (Some(sc), Some(sw)) = (stroke_color, stroke_width)
+                            && *sw > 0.0
+                        {
+                            let mut spaint = Paint::default();
+                            spaint.set_color_rgba8(sc.r, sc.g, sc.b, sc.a);
+                            spaint.anti_alias = true;
+                            let sstroke = Stroke {
+                                width: *sw as f32,
+                                ..Default::default()
+                            };
+                            target.stroke_path(&path, &spaint, &sstroke, current_ts, mask.as_ref());
+                        }
                     }
                 }
 

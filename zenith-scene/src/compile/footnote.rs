@@ -114,6 +114,8 @@ fn synth_footnote_text(fnote: &FootnoteNode, marker: &str, x: f64, y: f64, w: f6
         overflow_wrap: None,
         style: fnote.style.clone(),
         fill: fnote.fill.clone(),
+        stroke: None,
+        stroke_width: None,
         contrast_bg: None,
         font_family: fnote.font_family.clone(),
         font_size: fnote.font_size.clone(),
