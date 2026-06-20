@@ -35,8 +35,11 @@ pub fn render_png(
 /// Rasterize two scenes (`left`, `right`), composite them SIDE BY SIDE via
 /// [`composite_spread`], and encode the result as deterministic PNG bytes.
 ///
-/// `left` is blitted at `x = 0` and `right` at `x = left.width`. The shared
-/// `fonts`/`assets` providers resolve glyph runs and images for both scenes.
+/// `left` is blitted at `x = 0` and `right` at `x = left.width + gutter_px`.
+/// `gutter_px` transparent columns are inserted between the two pages. When
+/// `gutter_px = 0` the output is byte-identical to the pre-gutter behavior.
+/// The shared `fonts`/`assets` providers resolve glyph runs and images for
+/// both scenes.
 ///
 /// # Errors
 ///
@@ -45,24 +48,30 @@ pub fn render_png(
 pub fn render_spread_png(
     left: &Scene,
     right: &Scene,
+    gutter_px: u32,
     fonts: &dyn FontProvider,
     assets: &dyn AssetProvider,
 ) -> Result<Vec<u8>, RenderError> {
     let backend = TinySkiaBackend;
     let left_img = backend.rasterize(left, fonts, assets)?;
     let right_img = backend.rasterize(right, fonts, assets)?;
-    let spread = composite_spread(&left_img, &right_img)?;
+    let spread = composite_spread(&left_img, &right_img, gutter_px)?;
     backend.encode_png(&spread)
 }
 
-/// Composite two rasterized pages SIDE BY SIDE into one image: `left` blitted at
-/// `x = 0` and `right` blitted at `x = left.width`, both at `y = 0`.
+/// Composite two rasterized pages SIDE BY SIDE into one image with an optional
+/// transparent gutter between them.
 ///
-/// The output canvas is `width = left.width + right.width` and
-/// `height = max(left.height, right.height)`. It starts fully transparent
-/// (matching the renderer's default background), so any vertical gap below the
-/// shorter page is transparent. Pixels are copied verbatim (straight-alpha
-/// RGBA8) — there is no blending, so the result is deterministic.
+/// `left` is blitted at `x = 0`, `right` at `x = left.width + gutter_px`,
+/// both at `y = 0`. The `gutter_px` columns between the two pages remain fully
+/// transparent (the canvas is initialised to straight-alpha `0,0,0,0`; no
+/// special fill is required). When `gutter_px = 0` the output is byte-identical
+/// to the pre-gutter behavior.
+///
+/// The output canvas is `width = left.width + gutter_px + right.width` and
+/// `height = max(left.height, right.height)`. Pixels are copied verbatim
+/// (straight-alpha RGBA8) — there is no blending, so the result is
+/// deterministic.
 ///
 /// # Errors
 ///
@@ -70,13 +79,18 @@ pub fn render_spread_png(
 pub fn composite_spread(
     left: &RasterImage,
     right: &RasterImage,
+    gutter_px: u32,
 ) -> Result<RasterImage, RenderError> {
-    let width = left.width.checked_add(right.width).ok_or_else(|| {
-        RenderError::new(format!(
-            "spread width overflow: {} + {} exceeds u32",
-            left.width, right.width
-        ))
-    })?;
+    let width = left
+        .width
+        .checked_add(gutter_px)
+        .and_then(|w| w.checked_add(right.width))
+        .ok_or_else(|| {
+            RenderError::new(format!(
+                "spread width overflow: {} + {} + {} exceeds u32",
+                left.width, gutter_px, right.width
+            ))
+        })?;
     let height = left.height.max(right.height);
 
     let stride = (width as usize)
@@ -86,11 +100,12 @@ pub fn composite_spread(
         RenderError::new(format!("spread buffer size overflow ({width}×{height})"))
     })?;
 
-    // Fully transparent canvas (straight-alpha 0,0,0,0).
+    // Fully transparent canvas (straight-alpha 0,0,0,0). The gutter columns
+    // are never written, so they remain transparent automatically.
     let mut rgba = vec![0u8; total];
 
     blit(&mut rgba, stride, left, 0);
-    blit(&mut rgba, stride, right, left.width as usize);
+    blit(&mut rgba, stride, right, (left.width + gutter_px) as usize);
 
     Ok(RasterImage {
         width,
@@ -162,7 +177,7 @@ mod tests {
     fn composite_spread_width_is_sum() {
         let left = solid(30, 20, [255, 0, 0, 255]);
         let right = solid(40, 20, [0, 0, 255, 255]);
-        let out = composite_spread(&left, &right).expect("composite");
+        let out = composite_spread(&left, &right, 0).expect("composite");
         assert_eq!(out.width, 70, "spread width must be wA + wB");
         assert_eq!(out.height, 20, "spread height must be max(hA, hB)");
         assert_eq!(out.rgba.len(), (70 * 20 * 4) as usize);
@@ -172,7 +187,7 @@ mod tests {
     fn composite_spread_height_is_max() {
         let left = solid(10, 50, [1, 2, 3, 255]);
         let right = solid(10, 30, [4, 5, 6, 255]);
-        let out = composite_spread(&left, &right).expect("composite");
+        let out = composite_spread(&left, &right, 0).expect("composite");
         assert_eq!(out.height, 50, "height must be the taller of the two");
     }
 
@@ -180,7 +195,7 @@ mod tests {
     fn composite_spread_places_pages_side_by_side() {
         let left = solid(2, 1, [10, 20, 30, 255]);
         let right = solid(3, 1, [40, 50, 60, 255]);
-        let out = composite_spread(&left, &right).expect("composite");
+        let out = composite_spread(&left, &right, 0).expect("composite");
         // Row 0: two left pixels, then three right pixels.
         assert_eq!(&out.rgba[0..4], &[10, 20, 30, 255], "x=0 is left page");
         assert_eq!(&out.rgba[4..8], &[10, 20, 30, 255], "x=1 is left page");
@@ -194,7 +209,7 @@ mod tests {
         // Left is taller; the right page's bottom rows stay transparent.
         let left = solid(1, 2, [9, 9, 9, 255]);
         let right = solid(1, 1, [8, 8, 8, 255]);
-        let out = composite_spread(&left, &right).expect("composite");
+        let out = composite_spread(&left, &right, 0).expect("composite");
         assert_eq!(out.width, 2);
         assert_eq!(out.height, 2);
         // Row 1 (second row), right column (x=1) was never written → transparent.
@@ -204,6 +219,69 @@ mod tests {
             row1_right,
             &[0, 0, 0, 0],
             "gap below short page is transparent"
+        );
+    }
+
+    /// gutter=0 must produce output byte-identical to the pre-gutter behavior:
+    /// width = left.width + right.width, right page starts at x = left.width.
+    #[test]
+    fn composite_spread_gutter_zero_is_byte_identical_to_no_gutter() {
+        let left = solid(5, 3, [1, 2, 3, 255]);
+        let right = solid(7, 3, [4, 5, 6, 255]);
+        // Build what the "no gutter" path would produce manually.
+        let width = (left.width + right.width) as usize;
+        let height = left.height.max(right.height) as usize;
+        let mut expected = vec![0u8; width * height * 4];
+        let stride = width * 4;
+        for row in 0..left.height as usize {
+            for col in 0..left.width as usize {
+                let dst = row * stride + col * 4;
+                expected[dst..dst + 4].copy_from_slice(&[1, 2, 3, 255]);
+            }
+        }
+        for row in 0..right.height as usize {
+            for col in 0..right.width as usize {
+                let dst = row * stride + (left.width as usize + col) * 4;
+                expected[dst..dst + 4].copy_from_slice(&[4, 5, 6, 255]);
+            }
+        }
+        let out = composite_spread(&left, &right, 0).expect("composite gutter=0");
+        assert_eq!(out.width as usize, width, "width with gutter=0");
+        assert_eq!(
+            out.rgba, expected,
+            "gutter=0 output must be byte-identical to no-gutter"
+        );
+    }
+
+    /// gutter=40 must produce width = left+40+right, with the right page shifted
+    /// by 40 columns and the 40 gutter columns staying fully transparent.
+    #[test]
+    fn composite_spread_gutter_shifts_right_page_and_leaves_transparent_columns() {
+        let left = solid(10, 1, [11, 22, 33, 255]);
+        let right = solid(20, 1, [44, 55, 66, 255]);
+        let gutter: u32 = 40;
+        let out = composite_spread(&left, &right, gutter).expect("composite gutter=40");
+        assert_eq!(out.width, 10 + 40 + 20, "width = left + gutter + right");
+        // The last pixel of the left page (x=9) is left-colored.
+        assert_eq!(
+            &out.rgba[9 * 4..10 * 4],
+            &[11, 22, 33, 255],
+            "x=9 is left page"
+        );
+        // x=10..x=49 are the gutter — must be fully transparent.
+        for x in 10usize..50 {
+            let pixel = &out.rgba[x * 4..(x + 1) * 4];
+            assert_eq!(
+                pixel,
+                &[0, 0, 0, 0],
+                "gutter column {x} must be transparent"
+            );
+        }
+        // The first pixel of the right page (x=50) is right-colored.
+        assert_eq!(
+            &out.rgba[50 * 4..51 * 4],
+            &[44, 55, 66, 255],
+            "x=50 is right page"
         );
     }
 }

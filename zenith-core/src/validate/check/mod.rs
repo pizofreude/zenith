@@ -148,6 +148,34 @@ pub fn validate(doc: &Document) -> ValidationReport {
         ));
     }
 
+    // ── Document spread-gutter ────────────────────────────────────────────
+    // `spread_gutter` must resolve to a finite non-negative px value when
+    // present. An unresolvable unit (pct/deg/unknown) or a negative value is a
+    // Warning; the spread simply renders with no gutter. Never a hard error.
+    if let Some(gutter) = &doc.spread_gutter {
+        match dim_to_px(gutter.value, &gutter.unit) {
+            None => {
+                diagnostics.push(Diagnostic::warning(
+                    "document.invalid_spread_gutter",
+                    "document spread-gutter uses an unresolvable unit; \
+                     allowed units are px and pt (spread renders with no gutter)",
+                    None,
+                    None,
+                ));
+            }
+            Some(px) if px < 0.0 => {
+                diagnostics.push(Diagnostic::warning(
+                    "document.invalid_spread_gutter",
+                    "document spread-gutter must be non-negative \
+                     (spread renders with no gutter)",
+                    None,
+                    None,
+                ));
+            }
+            Some(_) => {}
+        }
+    }
+
     // ── Step 2: collect all IDs and gather referenced token ids ──────────
     // `seen_ids` accumulates every id encountered across the whole document.
     // When we encounter a duplicate we push `id.duplicate`.

@@ -367,6 +367,18 @@ pub fn transform(doc: &KdlDocument) -> Result<Document, ParseError> {
         .or_else(|| optional_string_prop(zenith_node, "page_parity_start"))
         .map(str::to_owned);
 
+    // Optional facing-pages toggle (`facing-pages=#true`). Forward-compat:
+    // both the hyphenated and underscored spellings are accepted. This is
+    // informational metadata only; pages still render independently.
+    let facing_pages = optional_bool_prop(zenith_node, "facing-pages")
+        .or_else(|| optional_bool_prop(zenith_node, "facing_pages"));
+
+    // Optional spread-gutter dimension (`spread-gutter=(px)40`). Drives the
+    // transparent gap between the two pages of a `--spread` composite.
+    // Both hyphenated and underscored spellings are accepted for forward-compat.
+    let spread_gutter = optional_dimension_prop(zenith_node, "spread-gutter")
+        .or_else(|| optional_dimension_prop(zenith_node, "spread_gutter"));
+
     // Optional DOCUMENT-LEVEL default book live-area margins. Same KDL syntax as
     // on a page (`margin-inner=(px)225`); a page that omits its own margin
     // inherits these via `Document::effective_margins`. Both hyphenated and
@@ -439,6 +451,8 @@ pub fn transform(doc: &KdlDocument) -> Result<Document, ParseError> {
         version,
         colorspace,
         mirror_margins,
+        facing_pages,
+        spread_gutter,
         page_progression,
         page_parity_start,
         margin_inner,

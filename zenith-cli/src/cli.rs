@@ -155,6 +155,11 @@ pub struct RenderArgs {
     #[arg(long, value_name = "A-B")]
     pub spread: Option<String>,
 
+    /// Override the spread gutter in pixels (default: the document's spread-gutter, or 0).
+    /// Only used when `--spread` is set.
+    #[arg(long, value_name = "PX")]
+    pub gutter: Option<u32>,
+
     /// Verify each image asset's bytes against its declared `sha256` and fail on mismatch.
     #[arg(long)]
     pub locked: bool,

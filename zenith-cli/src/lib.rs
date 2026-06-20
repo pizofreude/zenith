@@ -144,6 +144,7 @@ pub fn run() -> ExitCode {
                     args.path.parent(),
                     page_a,
                     page_b,
+                    args.gutter,
                     args.locked,
                 ) {
                     Ok(artifact) => {

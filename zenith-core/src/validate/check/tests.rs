@@ -236,6 +236,8 @@ fn doc_with(tokens: Vec<Token>, pages: Vec<Page>) -> Document {
         version: 1,
         colorspace: None,
         mirror_margins: None,
+        facing_pages: None,
+        spread_gutter: None,
         page_progression: None,
         page_parity_start: None,
         margin_inner: None,
@@ -1765,6 +1767,8 @@ fn doc_with_assets(assets: Vec<AssetDecl>) -> Document {
         version: 1,
         colorspace: None,
         mirror_margins: None,
+        facing_pages: None,
+        spread_gutter: None,
         page_progression: None,
         page_parity_start: None,
         margin_inner: None,
@@ -2441,6 +2445,8 @@ fn doc_with_styles(tokens: Vec<Token>, styles: Vec<Style>, pages: Vec<Page>) -> 
         version: 1,
         colorspace: None,
         mirror_margins: None,
+        facing_pages: None,
+        spread_gutter: None,
         page_progression: None,
         page_parity_start: None,
         margin_inner: None,
@@ -4860,4 +4866,122 @@ fn section_valid_folio_styles_produce_no_warning() {
             codes(&report)
         );
     }
+}
+
+// ── facing-pages / spread-gutter ─────────────────────────────────────────────
+
+/// Parse + round-trip test: `facing-pages` and `spread-gutter` survive a
+/// parse → format → parse cycle unchanged.
+#[test]
+fn facing_pages_and_spread_gutter_parse_and_round_trip() {
+    use crate::format::format_document;
+    use crate::parse::{KdlAdapter, KdlSource};
+
+    let src = r#"zenith version=1 facing-pages=#true spread-gutter=(px)40 {
+  tokens format="zenith-token-v1" {}
+  styles {}
+  document id="d" {
+    page id="p1" w=(px)400 h=(px)600 {}
+  }
+}
+"#;
+    let doc1 = KdlAdapter.parse(src.as_bytes()).expect("must parse");
+    assert_eq!(
+        doc1.facing_pages,
+        Some(true),
+        "facing-pages must parse to Some(true)"
+    );
+    assert_eq!(
+        doc1.spread_gutter,
+        Some(Dimension {
+            value: 40.0,
+            unit: Unit::Px
+        }),
+        "spread-gutter must parse to (px)40"
+    );
+
+    // Round-trip: format → re-parse, fields must survive unchanged.
+    let formatted = format_document(&doc1).expect("format must succeed");
+    let formatted_str = String::from_utf8(formatted).expect("utf-8");
+    let doc2 = KdlAdapter
+        .parse(formatted_str.as_bytes())
+        .expect("re-parse must succeed");
+    assert_eq!(
+        doc2.facing_pages, doc1.facing_pages,
+        "facing-pages must round-trip"
+    );
+    assert_eq!(
+        doc2.spread_gutter, doc1.spread_gutter,
+        "spread-gutter must round-trip"
+    );
+}
+
+/// A `spread-gutter` with a non-px/pt unit (pct) → `document.invalid_spread_gutter` Warning.
+#[test]
+fn spread_gutter_pct_emits_invalid_spread_gutter_warning() {
+    let mut doc = doc_with(vec![], vec![minimal_page("p1", vec![])]);
+    doc.spread_gutter = Some(Dimension {
+        value: 10.0,
+        unit: Unit::Pct,
+    });
+    let report = validate(&doc);
+    assert!(
+        has_code(&report, "document.invalid_spread_gutter"),
+        "pct spread-gutter must warn with document.invalid_spread_gutter; got {:?}",
+        codes(&report)
+    );
+    assert!(
+        !report.has_errors(),
+        "document.invalid_spread_gutter must not be a hard error; got {:?}",
+        codes(&report)
+    );
+}
+
+/// A negative `spread-gutter` → `document.invalid_spread_gutter` Warning.
+#[test]
+fn spread_gutter_negative_emits_invalid_spread_gutter_warning() {
+    let mut doc = doc_with(vec![], vec![minimal_page("p1", vec![])]);
+    doc.spread_gutter = Some(Dimension {
+        value: -5.0,
+        unit: Unit::Px,
+    });
+    let report = validate(&doc);
+    assert!(
+        has_code(&report, "document.invalid_spread_gutter"),
+        "negative spread-gutter must warn; got {:?}",
+        codes(&report)
+    );
+    assert!(
+        !report.has_errors(),
+        "document.invalid_spread_gutter must not be a hard error; got {:?}",
+        codes(&report)
+    );
+}
+
+/// A valid (px, non-negative) `spread-gutter` → no diagnostic.
+#[test]
+fn spread_gutter_valid_px_no_warning() {
+    let mut doc = doc_with(vec![], vec![minimal_page("p1", vec![])]);
+    doc.spread_gutter = Some(Dimension {
+        value: 40.0,
+        unit: Unit::Px,
+    });
+    let report = validate(&doc);
+    assert!(
+        !has_code(&report, "document.invalid_spread_gutter"),
+        "valid px spread-gutter must not warn; got {:?}",
+        codes(&report)
+    );
+}
+
+/// When `spread_gutter` is `None` (absent), no diagnostic should be emitted.
+#[test]
+fn spread_gutter_absent_no_warning() {
+    let doc = doc_with(vec![], vec![minimal_page("p1", vec![])]);
+    let report = validate(&doc);
+    assert!(
+        !has_code(&report, "document.invalid_spread_gutter"),
+        "absent spread-gutter must not warn; got {:?}",
+        codes(&report)
+    );
 }

@@ -237,6 +237,11 @@ fn write_document(doc: &Document, out: &mut String) {
     // canonical form round-trips (parse → format → parse is byte-stable).
     write_opt_str(out, "colorspace", &doc.colorspace);
     write_opt_bool(out, "mirror-margins", &doc.mirror_margins);
+    // Facing-pages and spread-gutter are emitted right after mirror-margins (the
+    // spread-layout metadata group). Both are omitted when None so a document
+    // without these attrs round-trips byte-identically.
+    write_opt_bool(out, "facing-pages", &doc.facing_pages);
+    write_opt_dimension(out, "spread-gutter", &doc.spread_gutter);
     // Document-level default margins, grouped right after `mirror-margins` (the
     // other margin doc attr). Canonical order: inner, outer, top, bottom — same
     // order and spelling as on a page. Emitted only when set, so a document with

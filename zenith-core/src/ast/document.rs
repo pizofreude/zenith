@@ -245,6 +245,13 @@ pub struct Document {
     /// mirrored-margin binding side and the master/field running-head recto/verso
     /// selection via [`Document::page_is_recto`].
     pub page_parity_start: Option<String>,
+    /// When `true`, the document is designed as facing-page spreads (recto/verso
+    /// pairs viewed together). Informational metadata; pages still render
+    /// independently. Parsed from `facing-pages=#true` on the document node.
+    pub facing_pages: Option<bool>,
+    /// The gutter (gap) between the two pages of a spread composite, e.g.
+    /// `spread-gutter=(px)40`. Used by the `--spread` render path. `None` = no gap.
+    pub spread_gutter: Option<Dimension>,
     /// Document-level DEFAULT book live-area inner (gutter/binding) margin. When
     /// a [`Page`] omits its own [`Page::margin_inner`], it inherits this value.
     /// `None` (default) → no document default; the page's own value (possibly
@@ -387,6 +394,8 @@ mod parity_tests {
             version: 1,
             colorspace: None,
             mirror_margins: None,
+            facing_pages: None,
+            spread_gutter: None,
             page_progression: None,
             page_parity_start: start.map(str::to_owned),
             margin_inner: None,
