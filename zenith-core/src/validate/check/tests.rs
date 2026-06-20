@@ -4446,6 +4446,8 @@ fn field_node(id: &str, field_type: &str) -> FieldNode {
         recto: None,
         verso: None,
         target: None,
+        folio_style: None,
+        suppress_first: None,
         x: None,
         y: Some(px(80.0)),
         h: Some(px(40.0)),

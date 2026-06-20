@@ -2026,6 +2026,10 @@ const FIELD_KNOWN_PROPS: &[&str] = &[
     "recto",
     "verso",
     "target",
+    "folio-style",
+    "folio_style",
+    "suppress-first",
+    "suppress_first",
     "x",
     "y",
     "w",
@@ -2054,6 +2058,10 @@ fn transform_field(node: &KdlNode) -> Result<FieldNode, ParseError> {
 
     let font_family = optional_property_value_aliased(node, "font-family", "font_family");
     let font_size = optional_property_value_aliased(node, "font-size", "font_size");
+    let folio_style =
+        optional_string_prop_aliased(node, "folio-style", "folio_style").map(str::to_owned);
+    let suppress_first = optional_bool_prop(node, "suppress-first")
+        .or_else(|| optional_bool_prop(node, "suppress_first"));
 
     let unknown_props = collect_unknown_props(node, FIELD_KNOWN_PROPS);
 
@@ -2065,6 +2073,8 @@ fn transform_field(node: &KdlNode) -> Result<FieldNode, ParseError> {
         recto: optional_string_prop(node, "recto").map(str::to_owned),
         verso: optional_string_prop(node, "verso").map(str::to_owned),
         target: optional_string_prop(node, "target").map(str::to_owned),
+        folio_style,
+        suppress_first,
         x: optional_dimension_prop(node, "x"),
         y: optional_dimension_prop(node, "y"),
         w: optional_dimension_prop(node, "w"),

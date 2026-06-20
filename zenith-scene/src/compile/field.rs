@@ -68,6 +68,17 @@ pub(super) fn resolve_field_to_text(field: &FieldNode, ctx: &FieldCtx) -> Option
         return None;
     }
 
+    // Suppress numeric fields on the first page when requested.
+    let is_numeric_type = matches!(
+        field.field_type.as_str(),
+        "page-number" | "page-count" | "page-ref"
+    );
+    if field.suppress_first.is_some_and(|v| v) && ctx.page_index_1based == 1 && is_numeric_type {
+        return None;
+    }
+
+    let style = field.folio_style.as_deref();
+
     let (text, default_align) = match field.field_type.as_str() {
         "running-head" => {
             let side = if ctx.is_recto {
@@ -82,13 +93,13 @@ pub(super) fn resolve_field_to_text(field: &FieldNode, ctx: &FieldCtx) -> Option
             }
             (s.to_owned(), "center")
         }
-        "page-number" => (ctx.page_index_1based.to_string(), "center"),
-        "page-count" => (ctx.total_pages.to_string(), "center"),
+        "page-number" => (format_folio(ctx.page_index_1based, style), "center"),
+        "page-count" => (format_folio(ctx.total_pages, style), "center"),
         "page-ref" => {
             // Resolve the 1-based index of the page that contains `target`.
             let target = field.target.as_deref()?;
             let idx = ctx.page_index_by_node_id.get(target)?;
-            (idx.to_string(), "start")
+            (format_folio(*idx, style), "start")
         }
         // Unknown field type → render nothing (the validator warns separately).
         _ => return None,
@@ -375,6 +386,55 @@ pub(super) fn compute_live_area(
     ))
 }
 
+/// Format a folio number according to the requested style.
+///
+/// `"lower-roman"` → standard subtractive lower-case Roman numerals.
+/// `"upper-roman"` → same, upper-cased.
+/// `"decimal"`, `None`, or any unrecognised value → decimal string.
+fn format_folio(n: usize, style: Option<&str>) -> String {
+    match style {
+        Some("lower-roman") => to_roman(n, false),
+        Some("upper-roman") => to_roman(n, true),
+        // "decimal", None, or any unknown style → decimal
+        _ => n.to_string(),
+    }
+}
+
+/// Convert a positive integer to a Roman numeral string.
+///
+/// Uses the standard subtractive-pairs table (i, iv, v, ix, x, xl, l, xc,
+/// c, cd, d, cm, m). `upper` controls whether the result is upper- or
+/// lower-case. For `n == 0` (not a valid folio but defensive), returns `"0"`.
+fn to_roman(n: usize, upper: bool) -> String {
+    if n == 0 {
+        return "0".to_owned();
+    }
+    const PAIRS: &[(usize, &str)] = &[
+        (1000, "m"),
+        (900, "cm"),
+        (500, "d"),
+        (400, "cd"),
+        (100, "c"),
+        (90, "xc"),
+        (50, "l"),
+        (40, "xl"),
+        (10, "x"),
+        (9, "ix"),
+        (5, "v"),
+        (4, "iv"),
+        (1, "i"),
+    ];
+    let mut result = String::new();
+    let mut remaining = n;
+    for &(value, symbol) in PAIRS {
+        while remaining >= value {
+            result.push_str(symbol);
+            remaining -= value;
+        }
+    }
+    if upper { result.to_uppercase() } else { result }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -434,6 +494,8 @@ mod tests {
             recto: None,
             verso: None,
             target: None,
+            folio_style: None,
+            suppress_first: None,
             x: None,
             y: None,
             w: None,
@@ -603,5 +665,230 @@ mod tests {
         let la = compute_live_area(&doc, &page, 1200.0, 1900.0, true, true, false);
         // left inset = page inner = 200; width = 1200 - 200 - 100 = 900.
         assert_eq!(la, Some((200.0, 80.0, 900.0, 1740.0)));
+    }
+
+    // ── to_roman ───────────────────────────────────────────────────────────────
+
+    #[test]
+    fn to_roman_table() {
+        let cases: &[(usize, &str)] = &[
+            (1, "i"),
+            (3, "iii"),
+            (4, "iv"),
+            (9, "ix"),
+            (14, "xiv"),
+            (40, "xl"),
+            (49, "xlix"),
+            (90, "xc"),
+            (2024, "mmxxiv"),
+        ];
+        for &(n, expected) in cases {
+            assert_eq!(
+                to_roman(n, false),
+                expected,
+                "to_roman({n}, false) should be {expected:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn to_roman_upper_case() {
+        assert_eq!(
+            to_roman(4, true),
+            "IV",
+            "upper=true must upper-case the result"
+        );
+    }
+
+    #[test]
+    fn to_roman_zero_returns_decimal_zero() {
+        assert_eq!(
+            to_roman(0, false),
+            "0",
+            "n=0 must return \"0\" (no Roman zero)"
+        );
+    }
+
+    // ── format_folio ───────────────────────────────────────────────────────────
+
+    #[test]
+    fn format_folio_decimal_default() {
+        assert_eq!(format_folio(5, None), "5");
+        assert_eq!(format_folio(5, Some("decimal")), "5");
+    }
+
+    #[test]
+    fn format_folio_lower_roman() {
+        assert_eq!(format_folio(3, Some("lower-roman")), "iii");
+    }
+
+    #[test]
+    fn format_folio_upper_roman() {
+        assert_eq!(format_folio(4, Some("upper-roman")), "IV");
+    }
+
+    #[test]
+    fn format_folio_unknown_style_falls_back_to_decimal() {
+        assert_eq!(format_folio(7, Some("klingon")), "7");
+    }
+
+    // ── resolve_field_to_text: folio_style ────────────────────────────────────
+
+    fn make_ctx() -> (
+        BTreeMap<String, usize>,
+        BTreeMap<String, String>,
+        BTreeMap<String, (f64, f64, f64, f64)>,
+    ) {
+        (BTreeMap::new(), BTreeMap::new(), BTreeMap::new())
+    }
+
+    fn field_ctx<'a>(
+        page: usize,
+        total: usize,
+        by_id: &'a BTreeMap<String, usize>,
+        markers: &'a BTreeMap<String, String>,
+        boxes: &'a BTreeMap<String, (f64, f64, f64, f64)>,
+    ) -> FieldCtx<'a> {
+        FieldCtx {
+            page_index_1based: page,
+            is_recto: page % 2 == 1,
+            live_area: None,
+            page_index_by_node_id: by_id,
+            footnote_markers: markers,
+            node_boxes: boxes,
+            total_pages: total,
+        }
+    }
+
+    fn page_number_field(folio_style: Option<&str>, suppress_first: Option<bool>) -> FieldNode {
+        FieldNode {
+            id: "pn".to_owned(),
+            name: None,
+            role: None,
+            field_type: "page-number".to_owned(),
+            recto: None,
+            verso: None,
+            target: None,
+            folio_style: folio_style.map(str::to_owned),
+            suppress_first,
+            x: None,
+            y: None,
+            w: None,
+            h: None,
+            style: None,
+            fill: None,
+            font_family: None,
+            font_size: None,
+            opacity: None,
+            visible: None,
+            locked: None,
+            source_span: None,
+            unknown_props: BTreeMap::new(),
+        }
+    }
+
+    fn running_head_field(suppress_first: Option<bool>) -> FieldNode {
+        FieldNode {
+            id: "rh".to_owned(),
+            name: None,
+            role: None,
+            field_type: "running-head".to_owned(),
+            recto: Some("Chapter One".to_owned()),
+            verso: Some("My Book".to_owned()),
+            target: None,
+            folio_style: None,
+            suppress_first,
+            x: None,
+            y: None,
+            w: None,
+            h: None,
+            style: None,
+            fill: None,
+            font_family: None,
+            font_size: None,
+            opacity: None,
+            visible: None,
+            locked: None,
+            source_span: None,
+            unknown_props: BTreeMap::new(),
+        }
+    }
+
+    fn span_text(node: &TextNode) -> &str {
+        node.spans.first().map(|s| s.text.as_str()).unwrap_or("")
+    }
+
+    #[test]
+    fn page_number_lower_roman_on_page_3() {
+        let (by_id, markers, boxes) = make_ctx();
+        let ctx = field_ctx(3, 10, &by_id, &markers, &boxes);
+        let field = page_number_field(Some("lower-roman"), None);
+        let text =
+            resolve_field_to_text(&field, &ctx).expect("page-number with lower-roman must resolve");
+        assert_eq!(span_text(&text), "iii");
+    }
+
+    #[test]
+    fn page_number_upper_roman_on_page_4() {
+        let (by_id, markers, boxes) = make_ctx();
+        let ctx = field_ctx(4, 10, &by_id, &markers, &boxes);
+        let field = page_number_field(Some("upper-roman"), None);
+        let text =
+            resolve_field_to_text(&field, &ctx).expect("page-number with upper-roman must resolve");
+        assert_eq!(span_text(&text), "IV");
+    }
+
+    #[test]
+    fn page_number_no_folio_style_is_decimal() {
+        let (by_id, markers, boxes) = make_ctx();
+        let ctx = field_ctx(5, 10, &by_id, &markers, &boxes);
+        let field = page_number_field(None, None);
+        let text = resolve_field_to_text(&field, &ctx)
+            .expect("page-number without folio-style must resolve");
+        assert_eq!(span_text(&text), "5");
+    }
+
+    #[test]
+    fn page_number_unknown_folio_style_falls_back_to_decimal() {
+        let (by_id, markers, boxes) = make_ctx();
+        let ctx = field_ctx(7, 10, &by_id, &markers, &boxes);
+        let field = page_number_field(Some("klingon"), None);
+        let text = resolve_field_to_text(&field, &ctx)
+            .expect("page-number with unknown folio-style must resolve (decimal fallback)");
+        assert_eq!(span_text(&text), "7");
+    }
+
+    // ── resolve_field_to_text: suppress_first ─────────────────────────────────
+
+    #[test]
+    fn suppress_first_hides_numeric_field_on_page_1() {
+        let (by_id, markers, boxes) = make_ctx();
+        let ctx = field_ctx(1, 10, &by_id, &markers, &boxes);
+        let field = page_number_field(None, Some(true));
+        assert!(
+            resolve_field_to_text(&field, &ctx).is_none(),
+            "suppress-first=true on page 1 must return None"
+        );
+    }
+
+    #[test]
+    fn suppress_first_allows_numeric_field_on_page_2() {
+        let (by_id, markers, boxes) = make_ctx();
+        let ctx = field_ctx(2, 10, &by_id, &markers, &boxes);
+        let field = page_number_field(None, Some(true));
+        let text = resolve_field_to_text(&field, &ctx)
+            .expect("suppress-first=true on page 2 must resolve normally");
+        assert_eq!(span_text(&text), "2");
+    }
+
+    #[test]
+    fn suppress_first_does_not_suppress_running_head_on_page_1() {
+        let (by_id, markers, boxes) = make_ctx();
+        let ctx = field_ctx(1, 10, &by_id, &markers, &boxes);
+        let field = running_head_field(Some(true));
+        // running-head is not a numeric type; suppress_first must be ignored.
+        let text = resolve_field_to_text(&field, &ctx)
+            .expect("suppress-first must NOT suppress running-head on page 1");
+        assert_eq!(span_text(&text), "Chapter One");
     }
 }

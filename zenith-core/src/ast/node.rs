@@ -781,6 +781,13 @@ pub struct FieldNode {
     pub verso: Option<String>,
     /// Target node id for a `page-ref` field.
     pub target: Option<String>,
+    /// Folio numbering style for numeric fields (`page-number`, `page-count`,
+    /// `page-ref`): `"decimal"` (default), `"lower-roman"`, or `"upper-roman"`.
+    /// Ignored by `running-head`. Unknown values fall back to decimal.
+    pub folio_style: Option<String>,
+    /// When `true`, a numeric field renders nothing on document page 1 (the
+    /// title page). Used to suppress the folio on the first page.
+    pub suppress_first: Option<bool>,
     pub x: Option<Dimension>,
     pub y: Option<Dimension>,
     pub w: Option<Dimension>,
