@@ -669,6 +669,48 @@ fn test_text_hyphenate_widow_orphan_round_trip() {
     }
 }
 
+/// **tab-leader round-trip**: a text node carrying `tab-leader="."` must survive
+/// parse→format→parse, with the attr emitted and re-parsed into its field.
+#[test]
+fn test_text_tab_leader_round_trip() {
+    use crate::ast::Node;
+    let src = r##"zenith version=1 {
+  project id="proj.tl" name="TL"
+  tokens format="zenith-token-v1" {
+  }
+  styles {
+  }
+  document id="doc.tl" title="TL" {
+    page id="p" w=(px)100 h=(px)100 {
+      text id="t1" x=(px)0 y=(px)0 w=(px)80 h=(px)40 tab-leader="." {
+        span "Chapter One\t1"
+      }
+    }
+  }
+}
+"##;
+    let adapter = KdlAdapter;
+    let doc = adapter.parse(src.as_bytes()).expect("parse");
+    let out = format_document(&doc).expect("format");
+    let text = String::from_utf8(out).unwrap();
+
+    assert!(
+        text.contains(" tab-leader=\".\""),
+        "tab-leader attr must be emitted; got:\n{text}"
+    );
+
+    let doc2 = adapter.parse(text.as_bytes()).expect("re-parse");
+    let page = &doc2.body.pages[0];
+    match &page.children[0] {
+        Node::Text(t) => assert_eq!(
+            t.tab_leader.as_deref(),
+            Some("."),
+            "tab-leader must survive the format round-trip"
+        ),
+        other => panic!("expected Text, got {other:?}"),
+    }
+}
+
 /// **Gradient round-trip**: a gradient token (angle + 2 stops) must
 /// parse→format→parse byte-stably, emit the `stop` brace block, and a page
 /// background referencing it must NOT flag the stop colors as `token.unused`.

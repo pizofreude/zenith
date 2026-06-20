@@ -528,6 +528,7 @@ fn write_text(t: &TextNode, out: &mut String, depth: usize) {
     if let Some(n) = t.widow_orphan {
         let _ = write!(out, " widow-orphan={n}");
     }
+    write_opt_str(out, "tab-leader", &t.tab_leader);
 
     // Unknown properties in sorted key order.
     for (key, prop) in &t.unknown_props {

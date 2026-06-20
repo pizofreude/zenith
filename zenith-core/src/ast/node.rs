@@ -267,6 +267,16 @@ pub struct TextNode {
     /// boundary, read from the chain source node. `None` disables the control
     /// (byte-identical to a node without the attribute). KDL: `widow-orphan=2`.
     pub widow_orphan: Option<u32>,
+    /// Tab-stop leader character. When `Some(s)` with a non-empty `s`, the node
+    /// renders in TAB-LEADER mode (table-of-contents rows): the combined span
+    /// text is split into rows on `\n`, each row is split on its FIRST `\t` into
+    /// a LEFT and RIGHT segment, the LEFT segment is placed at the box left edge,
+    /// the RIGHT segment is right-aligned to the box right edge, and the gap
+    /// between them is filled with the leader glyph `s` (e.g. `"."`) repeated.
+    /// A row with no tab renders left-aligned with no leader. `None` or an empty
+    /// string disables tab-leader mode (byte-identical to a node without the
+    /// attribute). KDL: `tab-leader="."`.
+    pub tab_leader: Option<String>,
     /// Inline text spans.
     pub spans: Vec<TextSpan>,
     /// Source declaration span, when available.

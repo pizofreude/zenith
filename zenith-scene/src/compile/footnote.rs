@@ -133,6 +133,7 @@ fn synth_footnote_text(fnote: &FootnoteNode, marker: &str, x: f64, y: f64, w: f6
         drop_cap_lines: None,
         hyphenate: None,
         widow_orphan: None,
+        tab_leader: None,
         spans,
         source_span: fnote.source_span,
         unknown_props: BTreeMap::new(),
