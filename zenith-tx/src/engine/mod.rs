@@ -10,11 +10,13 @@ use zenith_core::{
 use crate::op::{Op, Transaction};
 use crate::result::{TxError, TxResult, TxStatus};
 
+mod asset;
 mod flags;
 mod geometry;
 mod structure;
 mod style;
 
+use asset::{apply_add_asset, apply_set_asset};
 use flags::{apply_set_locked, apply_set_points, apply_set_visible};
 use geometry::{apply_align_nodes, apply_distribute_nodes, apply_set_geometry};
 use structure::{
@@ -275,6 +277,17 @@ fn apply_op(
         Op::ReorderPages { order } => {
             apply_reorder_pages(order, doc, diagnostics, affected);
         }
+        Op::AddAsset {
+            id,
+            kind,
+            src,
+            sha256,
+        } => {
+            apply_add_asset(id, kind, src, sha256.as_deref(), doc, diagnostics, affected);
+        }
+        Op::SetAsset { node_id, asset_id } => {
+            apply_set_asset(node_id, asset_id, doc, diagnostics, affected);
+        }
     }
 }
 
@@ -310,6 +323,7 @@ fn op_lock_targets(op: &Op) -> Vec<&str> {
         Op::AlignNodes { node_ids, .. } | Op::DistributeNodes { node_ids, .. } => {
             node_ids.iter().map(String::as_str).collect()
         }
+        Op::SetAsset { node_id, .. } => vec![node_id.as_str()],
         Op::SetLocked { .. }
         | Op::SetVisible { .. }
         | Op::AddNode { .. }
@@ -322,7 +336,9 @@ fn op_lock_targets(op: &Op) -> Vec<&str> {
         // lock target to enforce here, so these are exempt (empty).
         | Op::AddPage { .. }
         | Op::DeletePage { .. }
-        | Op::ReorderPages { .. } => Vec::new(),
+        | Op::ReorderPages { .. }
+        // AddAsset creates new content and never mutates a node; exempt like AddNode.
+        | Op::AddAsset { .. } => Vec::new(),
     }
 }
 

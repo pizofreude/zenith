@@ -578,6 +578,50 @@ pub enum Op {
         /// The new full ordering of page ids (a permutation of the existing set).
         order: Vec<String>,
     },
+    /// Declare a new asset in the document's `assets` block.
+    ///
+    /// `kind` must be one of `"image"`, `"svg"`, or `"font"`. `src` is a relative
+    /// path to the asset file. `sha256` is an optional content-integrity digest.
+    ///
+    /// Rejected immediately with `tx.duplicate_id` if an asset with `id` already
+    /// exists. Post-validation catches `asset.invalid_src` (absolute paths, `../`
+    /// components, URLs) and `asset.invalid_kind` (unrecognized kinds).
+    ///
+    /// JSON example:
+    /// ```json
+    /// {"op":"add_asset","id":"asset.logo","kind":"image","src":"images/logo.png","sha256":"abc123"}
+    /// ```
+    AddAsset {
+        /// Globally unique asset id (e.g. `"asset.logo"`).
+        id: String,
+        /// Asset kind string: `"image"`, `"svg"`, or `"font"`.
+        kind: String,
+        /// Relative path to the asset file.
+        src: String,
+        /// Optional SHA-256 hex digest for content integrity.
+        #[serde(default)]
+        sha256: Option<String>,
+    },
+    /// Set the asset reference on an `image` node.
+    ///
+    /// The `asset_id` must reference a declared asset. An unknown `asset_id` is
+    /// permitted here (post-validation catches it via `asset.unknown_reference`).
+    /// An asset of kind `font` is eagerly rejected with `tx.invalid_value` because
+    /// image nodes require an `image` or `svg` asset.
+    ///
+    /// Rejected with `tx.unknown_node` if `node_id` is not found.
+    /// Rejected with `tx.wrong_node_type` if `node_id` is not an `image` node.
+    ///
+    /// JSON example:
+    /// ```json
+    /// {"op":"set_asset","node_id":"pic","asset_id":"asset.hero"}
+    /// ```
+    SetAsset {
+        /// The stable `id` of the image node to update.
+        node_id: String,
+        /// The asset id to assign to the image node's `asset` field.
+        asset_id: String,
+    },
     /// Evenly distribute a set of nodes along one axis so the gaps between
     /// consecutive nodes are equal, keeping the first and last node's outer
     /// edges fixed (standard "distribute spacing" semantics).
