@@ -2279,8 +2279,18 @@ pub(super) fn compile_text_sized(
     // fits within it. Shaping a span whole differs glyph-for-glyph from
     // shaping its words separately, so the fast path is preserved exactly
     // to keep every fitting example byte-identical.
+    //
+    // EXCEPTION: a `bullet`, `padding-left`, or `text-indent` lives ONLY on the
+    // wrapping path (it draws the marker and applies the per-line hanging-indent
+    // geometry there). A node carrying any of them must take the wrapping path
+    // even when its text fits one line, else a single-line bullet/indented node
+    // would render with no marker and no indent. None present → unchanged
+    // (byte-identical fast path for every node without these attributes).
+    let has_hanging = text.bullet.as_deref().is_some_and(|s| !s.is_empty())
+        || text.padding_left.is_some()
+        || text.text_indent.is_some();
     let needs_wrap = match box_w_opt {
-        Some(box_w) => total_advance > box_w,
+        Some(box_w) => total_advance > box_w || has_hanging,
         None => false,
     };
 

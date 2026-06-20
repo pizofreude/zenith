@@ -7856,6 +7856,57 @@ page id="page.bi" w=(px)1280 h=(px)720 {
     );
 }
 
+/// Regression: a SINGLE-LINE bullet (text that fits one line) must STILL draw
+/// the marker and indent the text — it must not slip onto the fast single-line
+/// path that has no bullet handling. (The fix forces the wrapping/indent path
+/// whenever a bullet/padding-left/text-indent is present.)
+#[test]
+fn single_line_bullet_draws_marker_and_indents() {
+    let src = r#"zenith version=1 {
+  project id="proj.sb" name="SB"
+  tokens format="zenith-token-v1" {}
+  styles {}
+  document id="doc.sb" title="SB" {
+page id="page.sb" w=(px)1280 h=(px)720 {
+  text id="t.sb" x=(px)160 y=(px)200 w=(px)900 h=(px)80 overflow="clip" align="start" bullet="•" {
+    span "Short item"
+  }
+}
+  }
+}
+"#;
+    let text_x = 160.0_f64;
+    let result = compile(&parse(src), &default_provider());
+    let glyph_runs: Vec<f64> = result
+        .scene
+        .commands
+        .iter()
+        .filter_map(|c| match c {
+            SceneCommand::DrawGlyphRun { x, .. } => Some(*x),
+            _ => None,
+        })
+        .collect();
+    // Marker + at least one body run.
+    assert!(
+        glyph_runs.len() >= 2,
+        "single-line bullet must emit a marker run plus body run(s); got {}",
+        glyph_runs.len()
+    );
+    // (a) marker at x ≈ text_x.
+    assert!(
+        (glyph_runs[0] - text_x).abs() < 1.0,
+        "marker must be at x ≈ text_x ({text_x}), got {}",
+        glyph_runs[0]
+    );
+    // (b) body indented past text_x (single line still gets the hanging column).
+    for &bx in &glyph_runs[1..] {
+        assert!(
+            bx > text_x + 0.5,
+            "single-line bullet body run at x={bx} must be indented past text_x={text_x}"
+        );
+    }
+}
+
 /// A larger `bullet-gap` pushes the text column further right than the default.
 #[test]
 fn bullet_gap_widens_the_column() {
