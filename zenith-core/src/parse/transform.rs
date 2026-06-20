@@ -12,7 +12,7 @@ use crate::ast::{
     asset::{AssetBlock, AssetDecl, AssetKind},
     document::{
         ComponentDef, Document, DocumentBody, Fold, MasterDef, Page, Project, SafeZone,
-        SafeZoneType,
+        SafeZoneType, SectionDef,
     },
     node::{
         CodeNode, EllipseNode, FieldNode, FootnoteNode, FrameNode, GroupNode, ImageNode,
@@ -280,6 +280,19 @@ fn optional_string_prop_aliased<'a>(
     optional_string_prop(node, primary_key).or_else(|| optional_string_prop(node, alias_key))
 }
 
+/// Like [`required_string_prop`] but tries `primary_key` first, then
+/// `alias_key`. Used for hyphenated/underscored prop aliases.
+fn required_string_prop_aliased<'a>(
+    node: &'a KdlNode,
+    primary_key: &str,
+    alias_key: &str,
+) -> Result<&'a str, ParseError> {
+    if let Some(v) = optional_string_prop(node, primary_key) {
+        return Ok(v);
+    }
+    required_string_prop(node, alias_key)
+}
+
 /// Map a `KdlValue` to its `UnknownValue` counterpart, preserving type.
 fn kdl_value_to_unknown_value(v: &KdlValue) -> UnknownValue {
     match v {
@@ -380,6 +393,7 @@ pub fn transform(doc: &KdlDocument) -> Result<Document, ParseError> {
     let mut styles = StyleBlock::default();
     let mut components: Vec<ComponentDef> = Vec::new();
     let mut masters: Vec<MasterDef> = Vec::new();
+    let mut sections: Vec<SectionDef> = Vec::new();
     let mut body: Option<DocumentBody> = None;
 
     for child in children_doc.nodes() {
@@ -401,6 +415,9 @@ pub fn transform(doc: &KdlDocument) -> Result<Document, ParseError> {
             }
             "masters" => {
                 masters = transform_masters(child)?;
+            }
+            "sections" => {
+                sections = transform_sections(child)?;
             }
             "document" => {
                 body = Some(transform_document_body(child)?);
@@ -434,6 +451,7 @@ pub fn transform(doc: &KdlDocument) -> Result<Document, ParseError> {
         styles,
         components,
         masters,
+        sections,
         body,
     })
 }
@@ -465,6 +483,53 @@ fn transform_master_def(node: &KdlNode) -> Result<MasterDef, ParseError> {
     Ok(MasterDef {
         id,
         children,
+        source_span: node_span(node),
+    })
+}
+
+// ---------------------------------------------------------------------------
+// Sections
+// ---------------------------------------------------------------------------
+
+/// Transform the document-level `sections { … }` block into a list of
+/// [`SectionDef`]. Each `section id="…" name="…" start-page="…" …` is a leaf
+/// marker (it takes no children); non-`section` children inside the block are
+/// silently ignored (forward-compat). Mirrors [`transform_masters`].
+fn transform_sections(node: &KdlNode) -> Result<Vec<SectionDef>, ParseError> {
+    let mut defs: Vec<SectionDef> = Vec::new();
+    if let Some(children) = node.children() {
+        for child in children.nodes() {
+            if child.name().value() == "section" {
+                defs.push(transform_section_def(child)?);
+            }
+        }
+    }
+    Ok(defs)
+}
+
+fn transform_section_def(node: &KdlNode) -> Result<SectionDef, ParseError> {
+    let id = required_string_prop(node, "id")?.to_owned();
+    let name = required_string_prop(node, "name")?.to_owned();
+    let start_page = required_string_prop_aliased(node, "start-page", "start_page")?.to_owned();
+
+    // `folio-start` / `folio_start`: optional non-negative integer.
+    // `optional_u32_prop` silently drops negative or non-integer values, which
+    // is the same forward-compat posture used for other optional integer props
+    // (e.g. `tab-width`, `page-parity-start`).
+    let folio_start = optional_u32_prop(node, "folio-start")
+        .or_else(|| optional_u32_prop(node, "folio_start"))
+        .map(|n| n as usize);
+
+    // `folio-style` / `folio_style`: optional string.
+    let folio_style =
+        optional_string_prop_aliased(node, "folio-style", "folio_style").map(str::to_owned);
+
+    Ok(SectionDef {
+        id,
+        name,
+        folio_start,
+        folio_style,
+        start_page,
         source_span: node_span(node),
     })
 }

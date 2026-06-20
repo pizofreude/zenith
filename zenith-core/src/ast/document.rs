@@ -185,6 +185,32 @@ pub struct MasterDef {
     pub source_span: Option<Span>,
 }
 
+/// A `section` — a named, contiguous range of pages with its own folio
+/// numbering, used for front-matter / chapters / appendices. A section LABELS
+/// pages (like PDF page labels); it does not contain them. The range runs from
+/// `start_page` until the next section's `start_page` (or the document end).
+///
+/// Declared in the document-level `sections` block as a leaf entry:
+/// `section id="sec.front" name="Front Matter" start-page="page.cover"`.
+/// The `section` id itself participates in the global id-uniqueness set.
+#[derive(Debug, Clone, PartialEq)]
+pub struct SectionDef {
+    /// Globally-unique section id.
+    pub id: String,
+    /// Human-readable section name (e.g. "Front Matter", "Chapter 1"). Usable
+    /// as section-aware running-head text in a later unit.
+    pub name: String,
+    /// First folio number for this section (1-based). `None` defaults to 1.
+    pub folio_start: Option<usize>,
+    /// Folio numbering style for this section: `"decimal"` (default),
+    /// `"lower-roman"`, `"upper-roman"`. `None` defaults to decimal.
+    pub folio_style: Option<String>,
+    /// Id of the page that begins this section.
+    pub start_page: String,
+    /// Source declaration span, when available.
+    pub source_span: Option<Span>,
+}
+
 /// The root `zenith` node — the complete parsed `.zen` document.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Document {
@@ -246,6 +272,13 @@ pub struct Document {
     /// Reusable master-page definitions; empty when the `masters` block is
     /// absent. Projected onto pages via [`Page::master`].
     pub masters: Vec<MasterDef>,
+    /// Section label ranges; empty when the `sections` block is absent. Each
+    /// entry labels a contiguous run of pages starting at [`SectionDef::start_page`]
+    /// and running to the next section's start page (or document end). Sections
+    /// do NOT contain pages; they are metadata ranges over the flat page list,
+    /// analogous to PDF PageLabels. Declaration order is preserved; range
+    /// computation (sorting by page index) is deferred to the field-resolution unit.
+    pub sections: Vec<SectionDef>,
     pub body: DocumentBody,
 }
 
@@ -366,6 +399,7 @@ mod parity_tests {
             styles: StyleBlock::default(),
             components: Vec::new(),
             masters: Vec::new(),
+            sections: Vec::new(),
             body: DocumentBody {
                 id: "body".to_owned(),
                 title: None,

@@ -312,6 +312,10 @@ fn strip_spans(mut doc: crate::ast::Document) -> crate::ast::Document {
             strip_node_span(node);
         }
     }
+    // Sections
+    for section in &mut doc.sections {
+        section.source_span = None;
+    }
     // Pages and nodes
     for page in &mut doc.body.pages {
         page.source_span = None;
@@ -2812,5 +2816,104 @@ fn test_image_src_rect_round_trip() {
         strip_spans(doc),
         strip_spans(reparsed),
         "src-rect image must round-trip identically"
+    );
+}
+
+// ── sections: parse, serialize, and round-trip ────────────────────────
+
+/// **Parse test**: a `sections { section … }` block round-trips into
+/// `Document.sections` with correct field values (including folio-start,
+/// folio-style, and underscore aliases for both).
+#[test]
+fn test_sections_parse_fields() {
+    let src = r##"zenith version=1 {
+  project id="proj.s" name="S"
+  tokens format="zenith-token-v1" {
+  }
+  styles {
+  }
+  sections {
+    section id="sec.front" name="Front Matter" folio-start=1 folio-style="lower-roman" start-page="page.cover"
+    section id="sec.body" name="Body" folio_start=10 folio_style="decimal" start_page="page.body"
+  }
+  document id="doc.s" title="S" {
+    page id="page.cover" w=(px)640 h=(px)360 {
+      rect id="r1" x=(px)0 y=(px)0 w=(px)640 h=(px)360 fill=(token)"c"
+    }
+    page id="page.body" w=(px)640 h=(px)360 {
+      rect id="r2" x=(px)0 y=(px)0 w=(px)640 h=(px)360 fill=(token)"c"
+    }
+  }
+}
+"##;
+    let adapter = KdlAdapter;
+    let doc = adapter.parse(src.as_bytes()).expect("parse sections doc");
+
+    assert_eq!(doc.sections.len(), 2, "expected 2 sections");
+
+    let front = &doc.sections[0];
+    assert_eq!(front.id, "sec.front");
+    assert_eq!(front.name, "Front Matter");
+    assert_eq!(front.folio_start, Some(1));
+    assert_eq!(front.folio_style.as_deref(), Some("lower-roman"));
+    assert_eq!(front.start_page, "page.cover");
+
+    let body = &doc.sections[1];
+    assert_eq!(body.id, "sec.body");
+    assert_eq!(body.name, "Body");
+    assert_eq!(body.folio_start, Some(10));
+    assert_eq!(body.folio_style.as_deref(), Some("decimal"));
+    assert_eq!(body.start_page, "page.body");
+}
+
+/// **Serialize round-trip**: parse a doc with sections → format → re-parse →
+/// sections identical (spans stripped). Also assert the formatted output
+/// contains the `section id=..` line.
+#[test]
+fn test_sections_round_trip() {
+    let src = r##"zenith version=1 {
+  project id="proj.rt" name="RT"
+  tokens format="zenith-token-v1" {
+  }
+  styles {
+  }
+  sections {
+    section id="sec.intro" name="Introduction" folio-start=1 folio-style="lower-roman" start-page="pg1"
+    section id="sec.main" name="Main" start-page="pg2"
+  }
+  document id="doc.rt" title="RT" {
+    page id="pg1" w=(px)640 h=(px)360 {
+      rect id="r1" x=(px)0 y=(px)0 w=(px)10 h=(px)10 fill=(token)"c"
+    }
+    page id="pg2" w=(px)640 h=(px)360 {
+      rect id="r2" x=(px)0 y=(px)0 w=(px)10 h=(px)10 fill=(token)"c"
+    }
+  }
+}
+"##;
+    let adapter = KdlAdapter;
+    let doc = adapter.parse(src.as_bytes()).expect("parse");
+
+    let formatted = format_document(&doc).expect("format");
+    let formatted_str = String::from_utf8(formatted.clone()).expect("utf8");
+
+    assert!(
+        formatted_str.contains(r#"section id="sec.intro""#),
+        "formatted output must contain section id; got:\n{formatted_str}"
+    );
+    assert!(
+        formatted_str.contains("folio-start=1"),
+        "formatted output must contain folio-start; got:\n{formatted_str}"
+    );
+    assert!(
+        formatted_str.contains(r#"folio-style="lower-roman""#),
+        "formatted output must contain folio-style; got:\n{formatted_str}"
+    );
+
+    let reparsed = adapter.parse(&formatted).expect("re-parse");
+    assert_eq!(
+        strip_spans(doc).sections,
+        strip_spans(reparsed).sections,
+        "sections must survive a parse → format → parse round-trip"
     );
 }

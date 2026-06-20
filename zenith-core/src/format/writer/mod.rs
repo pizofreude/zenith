@@ -30,7 +30,7 @@ use std::fmt::Write as _;
 
 use crate::ast::{
     AssetBlock, AssetDecl, ComponentDef, Dimension, Document, MasterDef, ObjectPosition, Project,
-    PropertyValue, Unit, UnknownValue,
+    PropertyValue, SectionDef, Unit, UnknownValue,
 };
 use crate::error::FormatError;
 
@@ -258,6 +258,7 @@ fn write_document(doc: &Document, out: &mut String) {
     write_style_block(&doc.styles, out, 1);
     write_component_block(&doc.components, out, 1);
     write_master_block(&doc.masters, out, 1);
+    write_section_block(&doc.sections, out, 1);
     write_document_body(&doc.body, out, 1);
 
     out.push('}');
@@ -287,6 +288,46 @@ fn write_master_block(masters: &[MasterDef], out: &mut String, depth: usize) {
         write_component_children(&def.children, out, depth + 1);
         indent(out, depth + 1);
         out.push_str("}\n");
+    }
+    indent(out, depth);
+    out.push_str("}\n");
+}
+
+// ---------------------------------------------------------------------------
+// Sections
+// ---------------------------------------------------------------------------
+
+/// Emit the `sections { … }` block.
+///
+/// Stable position: after `masters`, before `document`. Emitted ONLY when at
+/// least one section is declared, so documents without sections keep their
+/// existing canonical form (and round-trip) unchanged. Each section emits a
+/// single leaf line: `section id="…" name="…" folio-start=N folio-style="…"
+/// start-page="…"`. Optional attributes are omitted when `None`. Mirrors
+/// [`write_master_block`].
+fn write_section_block(sections: &[SectionDef], out: &mut String, depth: usize) {
+    if sections.is_empty() {
+        return;
+    }
+    indent(out, depth);
+    out.push_str("sections {\n");
+    for def in sections {
+        indent(out, depth + 1);
+        out.push_str("section id=\"");
+        out.push_str(&def.id);
+        out.push_str("\" name=\"");
+        out.push_str(&escape_kdl_string(&def.name));
+        out.push('"');
+        if let Some(fs) = def.folio_start {
+            out.push_str(" folio-start=");
+            // Writing to a String via fmt::Write is infallible; the Err variant
+            // is unreachable but we must handle it.
+            let _ = write!(out, "{fs}");
+        }
+        write_opt_str(out, "folio-style", &def.folio_style);
+        out.push_str(" start-page=\"");
+        out.push_str(&def.start_page);
+        out.push_str("\"\n");
     }
     indent(out, depth);
     out.push_str("}\n");

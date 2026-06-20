@@ -40,7 +40,7 @@ mod visual;
 #[cfg(test)]
 mod tests;
 
-use std::collections::{BTreeMap, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashSet};
 
 use crate::ast::asset::{AssetDecl, AssetKind};
 use crate::ast::document::Document;
@@ -289,6 +289,67 @@ pub fn validate(doc: &Document) -> ValidationReport {
                 None,
                 &mut diagnostics,
             );
+        }
+    }
+
+    // ── Section definitions ───────────────────────────────────────────────
+    // Collect the full set of page ids once (needed for start_page reference
+    // checking). A BTreeSet gives deterministic iteration if we ever need it.
+    let page_ids: BTreeSet<&str> = doc.body.pages.iter().map(|p| p.id.as_str()).collect();
+
+    // Track start_page values seen so far: duplicate start_page on a second
+    // section → `section.duplicate_start_page`.
+    let mut seen_section_start_pages: BTreeSet<&str> = BTreeSet::new();
+
+    for section in &doc.sections {
+        // Section id participates in the GLOBAL id-uniqueness set so a section
+        // id colliding with a page / token / master / component id → `id.duplicate`.
+        register_id(&section.id, &mut seen_ids, &mut diagnostics);
+
+        // `start_page` must name an existing page id → hard error if not.
+        if !page_ids.contains(section.start_page.as_str()) {
+            diagnostics.push(Diagnostic::error(
+                "section.unknown_start_page",
+                format!(
+                    "section '{}': start-page '{}' does not reference a declared page",
+                    section.id, section.start_page
+                ),
+                section.source_span,
+                Some(section.id.clone()),
+            ));
+        }
+
+        // No two sections may share the same start_page → hard error on second.
+        if !seen_section_start_pages.insert(section.start_page.as_str()) {
+            diagnostics.push(Diagnostic::error(
+                "section.duplicate_start_page",
+                format!(
+                    "section '{}': start-page '{}' is already used by an earlier section",
+                    section.id, section.start_page
+                ),
+                section.source_span,
+                Some(section.id.clone()),
+            ));
+        }
+
+        // `folio_style`, if present, must be one of the recognized styles →
+        // Warning (forward-compat: an unknown style value is preserved verbatim
+        // rather than rejected, so future styles don't break old validators).
+        if let Some(style) = &section.folio_style
+            && style != "decimal"
+            && style != "lower-roman"
+            && style != "upper-roman"
+        {
+            diagnostics.push(Diagnostic::warning(
+                "section.invalid_folio_style",
+                format!(
+                    "section '{}': folio-style '{}' is unrecognized; \
+                     expected \"decimal\", \"lower-roman\", or \"upper-roman\"",
+                    section.id, style
+                ),
+                section.source_span,
+                Some(section.id.clone()),
+            ));
         }
     }
 

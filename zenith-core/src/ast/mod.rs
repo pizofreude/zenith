@@ -12,6 +12,7 @@ pub mod value;
 pub use asset::{AssetBlock, AssetDecl, AssetKind};
 pub use document::{
     ComponentDef, Document, DocumentBody, Fold, MasterDef, Page, Project, SafeZone, SafeZoneType,
+    SectionDef,
 };
 pub use node::{
     CodeNode, EllipseNode, FieldNode, FootnoteNode, FrameNode, GroupNode, ImageNode, InstanceNode,

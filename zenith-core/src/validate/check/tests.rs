@@ -8,7 +8,9 @@ use std::collections::BTreeMap;
 
 use super::*;
 use crate::ast::asset::{AssetBlock, AssetDecl, AssetKind};
-use crate::ast::document::{Document, DocumentBody, Fold, MasterDef, Page, SafeZone, SafeZoneType};
+use crate::ast::document::{
+    Document, DocumentBody, Fold, MasterDef, Page, SafeZone, SafeZoneType, SectionDef,
+};
 use crate::ast::node::ImageNode;
 use crate::ast::node::{
     CodeNode, EllipseNode, FieldNode, FrameNode, GroupNode, LineNode, Node, RectNode, TextNode,
@@ -249,6 +251,7 @@ fn doc_with(tokens: Vec<Token>, pages: Vec<Page>) -> Document {
         styles: StyleBlock::default(),
         components: Vec::new(),
         masters: Vec::new(),
+        sections: Vec::new(),
         body: DocumentBody {
             id: "doc.main".to_owned(),
             title: None,
@@ -1780,6 +1783,7 @@ fn doc_with_assets(assets: Vec<AssetDecl>) -> Document {
         styles: StyleBlock::default(),
         components: Vec::new(),
         masters: Vec::new(),
+        sections: Vec::new(),
         body: DocumentBody {
             id: "doc.asset-test".to_owned(),
             title: None,
@@ -2455,6 +2459,7 @@ fn doc_with_styles(tokens: Vec<Token>, styles: Vec<Style>, pages: Vec<Page>) -> 
         },
         components: Vec::new(),
         masters: Vec::new(),
+        sections: Vec::new(),
         body: DocumentBody {
             id: "doc.main".to_owned(),
             title: None,
@@ -4739,4 +4744,120 @@ fn master_local_ids_are_scoped_per_master() {
         "the same local id in two masters must not collide; got {:?}",
         codes(&report)
     );
+}
+
+// ══════════════════════════════════════════════════════════════════════
+// Section validation tests
+// ══════════════════════════════════════════════════════════════════════
+
+/// Helper: build a document with the given sections appended to a
+/// single-page doc.
+fn doc_with_sections(sections: Vec<SectionDef>, pages: Vec<Page>) -> Document {
+    let mut doc = doc_with(vec![], pages);
+    doc.sections = sections;
+    doc
+}
+
+fn minimal_section(id: &str, start_page: &str) -> SectionDef {
+    SectionDef {
+        id: id.to_owned(),
+        name: id.to_owned(),
+        folio_start: None,
+        folio_style: None,
+        start_page: start_page.to_owned(),
+        source_span: None,
+    }
+}
+
+#[test]
+fn clean_sections_block_no_diagnostics() {
+    let page = minimal_page("p1", vec![]);
+    let sec = minimal_section("sec.front", "p1");
+    let doc = doc_with_sections(vec![sec], vec![page]);
+    let report = validate(&doc);
+    assert!(
+        report.diagnostics.is_empty(),
+        "a clean sections block must produce no diagnostics; got: {:?}",
+        codes(&report)
+    );
+}
+
+#[test]
+fn section_unknown_start_page_is_error() {
+    let page = minimal_page("p1", vec![]);
+    let sec = minimal_section("sec.x", "page.does.not.exist");
+    let doc = doc_with_sections(vec![sec], vec![page]);
+    let report = validate(&doc);
+    assert!(
+        has_code(&report, "section.unknown_start_page"),
+        "an unknown start-page reference must be a hard error; got {:?}",
+        codes(&report)
+    );
+    assert!(report.has_errors());
+}
+
+#[test]
+fn section_duplicate_start_page_is_error() {
+    let p1 = minimal_page("p1", vec![]);
+    let p2 = minimal_page("p2", vec![]);
+    let sec_a = minimal_section("sec.a", "p1");
+    let sec_b = minimal_section("sec.b", "p1"); // same start_page
+    let doc = doc_with_sections(vec![sec_a, sec_b], vec![p1, p2]);
+    let report = validate(&doc);
+    assert!(
+        has_code(&report, "section.duplicate_start_page"),
+        "two sections sharing a start-page must be a hard error; got {:?}",
+        codes(&report)
+    );
+    assert!(report.has_errors());
+}
+
+#[test]
+fn section_invalid_folio_style_is_warning() {
+    let page = minimal_page("p1", vec![]);
+    let mut sec = minimal_section("sec.bad", "p1");
+    sec.folio_style = Some("arabic".to_owned()); // unrecognized
+    let doc = doc_with_sections(vec![sec], vec![page]);
+    let report = validate(&doc);
+    assert!(
+        has_code(&report, "section.invalid_folio_style"),
+        "an unknown folio-style must be a Warning; got {:?}",
+        codes(&report)
+    );
+    // A Warning must NOT be counted as an error.
+    assert!(
+        !report.has_errors(),
+        "section.invalid_folio_style must not be a hard error; got {:?}",
+        codes(&report)
+    );
+}
+
+#[test]
+fn section_id_colliding_with_page_id_is_duplicate() {
+    let page = minimal_page("shared", vec![]);
+    let sec = minimal_section("shared", "shared"); // id == page id
+    let doc = doc_with_sections(vec![sec], vec![page]);
+    let report = validate(&doc);
+    assert!(
+        has_code(&report, "id.duplicate"),
+        "a section id colliding with a page id must be an id.duplicate error; got {:?}",
+        codes(&report)
+    );
+    assert!(report.has_errors());
+}
+
+#[test]
+fn section_valid_folio_styles_produce_no_warning() {
+    for style in ["decimal", "lower-roman", "upper-roman"] {
+        let page = minimal_page("p1", vec![]);
+        let mut sec = minimal_section("sec.ok", "p1");
+        sec.folio_style = Some(style.to_owned());
+        let doc = doc_with_sections(vec![sec], vec![page]);
+        let report = validate(&doc);
+        assert!(
+            !has_code(&report, "section.invalid_folio_style"),
+            "folio-style \"{style}\" must not warn; got {:?}",
+            codes(&report)
+        );
+    }
 }
