@@ -368,6 +368,27 @@ pub struct SceneGlyph {
     pub dy: f32,
 }
 
+// ── Trim rect ───────────────────────────────────────────────────────────────
+
+/// An axis-aligned rectangle in scene (top-left origin, y-down) coordinates,
+/// in pixels.
+///
+/// Used to carry the print **trim box** on a [`Scene`] when a page declares a
+/// positive `bleed` margin. The scene canvas (`width`/`height`) is the full
+/// media box *including* the bleed; the trim rect is the inner rectangle the
+/// finished piece is cut down to.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize)]
+pub struct Rect {
+    /// Left edge in pixels (scene coordinates).
+    pub x: f64,
+    /// Top edge in pixels (scene coordinates).
+    pub y: f64,
+    /// Width in pixels.
+    pub w: f64,
+    /// Height in pixels.
+    pub h: f64,
+}
+
 // ── Scene ─────────────────────────────────────────────────────────────────────
 
 /// A fully resolved, backend-neutral display list.
@@ -385,6 +406,15 @@ pub struct Scene {
     pub height: f64,
     /// Ordered display list.  Paint order: index 0 is painted first (bottom).
     pub commands: Vec<SceneCommand>,
+    /// Print **trim box** in scene (top-left origin, y-down) pixel coordinates.
+    ///
+    /// `Some` only when the page declared a positive `bleed` margin: then
+    /// `width`/`height` are the full media box (including bleed) and `trim` is
+    /// the inner page rectangle `[b, b, page_w, page_h]`. `None` when there is
+    /// no bleed (trim == media box). Skipped in JSON when absent so existing
+    /// non-bleed scenes serialize byte-identically.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub trim: Option<Rect>,
 }
 
 impl Scene {
@@ -397,6 +427,7 @@ impl Scene {
             width,
             height,
             commands: Vec::new(),
+            trim: None,
         }
     }
 

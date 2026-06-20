@@ -487,6 +487,18 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "020fce77c2e30e036689c8cdc31d80aeb7cad6cbc989595c128118cd743b3367"
 
 [[package]]
+name = "pdf-writer"
+version = "0.14.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "92a79477295a713c2ed425aa82a8b5d20cec3fdee203706cbe6f3854880c1c81"
+dependencies = [
+ "bitflags 2.13.0",
+ "itoa",
+ "memchr",
+ "ryu",
+]
+
+[[package]]
 name = "pico-args"
 version = "0.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -642,6 +654,12 @@ dependencies = [
  "unicode-properties",
  "unicode-script",
 ]
+
+[[package]]
+name = "ryu"
+version = "1.0.23"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9774ba4a74de5f7b1c1451ed6cd5285a32eddb5cccb8cc655a4e50009e06477f"
 
 [[package]]
 name = "serde"
@@ -1056,6 +1074,8 @@ name = "zenith-render"
 version = "0.0.0"
 dependencies = [
  "jpeg-decoder",
+ "miniz_oxide",
+ "pdf-writer",
  "resvg",
  "tiny-skia",
  "ttf-parser 0.25.1",

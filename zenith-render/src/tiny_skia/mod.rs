@@ -31,6 +31,8 @@ mod shadow;
 #[cfg(test)]
 mod tests;
 
+pub(crate) use raster::decode_raster_image as decode_raster_to_pixmap;
+
 use gradient::gradient_shader;
 use paths::{
     GlyphOutlinePen, build_poly_path, build_rounded_rect_path, clip_mask, intersect_rects,

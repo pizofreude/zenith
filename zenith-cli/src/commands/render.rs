@@ -16,7 +16,7 @@ use zenith_core::{
     AssetKind, BytesAssetProvider, BytesFontProvider, Diagnostic, Document, KdlAdapter, KdlSource,
     default_provider, validate,
 };
-use zenith_render::render_png;
+use zenith_render::{render_pdf, render_png};
 use zenith_scene::compile_page;
 
 // ── Error type ────────────────────────────────────────────────────────────────
@@ -55,6 +55,16 @@ pub struct SceneArtifact {
 pub struct PngArtifact {
     /// The encoded PNG bytes.
     pub png: Vec<u8>,
+    /// Compile-stage diagnostics (advisories/warnings surfaced by `compile`).
+    pub diagnostics: Vec<Diagnostic>,
+}
+
+/// Rendered vector PDF bytes plus the compile-stage diagnostics that produced
+/// them.
+#[derive(Debug)]
+pub struct PdfArtifact {
+    /// The encoded PDF bytes.
+    pub pdf: Vec<u8>,
     /// Compile-stage diagnostics (advisories/warnings surfaced by `compile`).
     pub diagnostics: Vec<Diagnostic>,
 }
@@ -151,6 +161,36 @@ pub fn to_png_with_dir(
     };
     diagnostics.extend(compile_result.diagnostics);
     Ok(PngArtifact { png, diagnostics })
+}
+
+/// Parse `src`, validate it, compile the requested `page`, and render a vector
+/// PDF, sourcing image/SVG and font asset bytes from `project_dir` when
+/// provided (exactly like [`to_png_with_dir`]).
+///
+/// The PDF carries print box metadata (MediaBox / TrimBox / BleedBox /
+/// CropBox) and native DeviceCMYK for CMYK-origin colors. Output is
+/// deterministic. `page` is the 1-based page number.
+pub fn to_pdf_with_dir(
+    src: &str,
+    project_dir: Option<&Path>,
+    page: usize,
+    locked: bool,
+) -> Result<PdfArtifact, RenderCmdErr> {
+    let doc = parse_validate(src)?;
+    let fonts = build_font_provider(&doc, project_dir, locked)?;
+    let page_index = resolve_page_index(&doc, page)?;
+    let assets = match project_dir {
+        Some(dir) => build_asset_provider(&doc, dir, locked)?,
+        None => BytesAssetProvider::new(),
+    };
+    let compile_result = compile_page(&doc, &fonts, page_index);
+    let pdf = render_pdf(&compile_result.scene, &fonts, &assets);
+    let mut diagnostics = match project_dir {
+        Some(dir) => collect_missing_asset_diagnostics(&doc, dir),
+        None => Vec::new(),
+    };
+    diagnostics.extend(compile_result.diagnostics);
+    Ok(PdfArtifact { pdf, diagnostics })
 }
 
 /// Parse `src`, validate it, and render EVERY page to PNG, returning one

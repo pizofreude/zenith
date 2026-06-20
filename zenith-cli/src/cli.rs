@@ -117,6 +117,10 @@ pub struct RenderArgs {
     #[arg(long, value_name = "OUT")]
     pub png: Option<PathBuf>,
 
+    /// Write a vector PDF (with print boxes + DeviceCMYK) to this path.
+    #[arg(long, value_name = "OUT")]
+    pub pdf: Option<PathBuf>,
+
     /// 1-based page number to render (default: 1).
     #[arg(long, value_name = "N", default_value_t = 1)]
     pub page: usize,

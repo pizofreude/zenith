@@ -35,7 +35,7 @@ use zenith_core::{
 };
 use zenith_layout::RustybuzzEngine;
 
-use crate::ir::{Scene, SceneCommand};
+use crate::ir::{Rect, Scene, SceneCommand};
 
 use chain::{ChainAssignments, resolve_chains};
 use container::{compile_frame, compile_group, compile_instance};
@@ -339,6 +339,21 @@ pub fn compile_page(doc: &Document, fonts: &dyn FontProvider, page_index: usize)
     // live entirely in the bleed margin at the four trim corners.
     if bleed > 0.0 {
         crop::emit_crop_marks(&mut scene.commands, bleed, page_w, page_h);
+    }
+
+    // ── Step 10: print trim box ──────────────────────────────────────────
+    // When a bleed is active the media box (`scene.width`/`height`) includes
+    // the bleed on all four sides; the trim box is the inner page rectangle
+    // `[b, b, page_w, page_h]` that the finished piece is cut to. Backends that
+    // care about print boxes (PDF) read this; raster backends ignore it. With
+    // bleed = 0 the trim box equals the media box, so we leave `trim` as `None`.
+    if bleed > 0.0 {
+        scene.trim = Some(Rect {
+            x: bleed,
+            y: bleed,
+            w: page_w,
+            h: page_h,
+        });
     }
 
     CompileResult { scene, diagnostics }

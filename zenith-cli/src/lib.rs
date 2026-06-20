@@ -96,9 +96,13 @@ pub fn run() -> ExitCode {
 
         Command::Render(args) => {
             // Require at least one output flag.
-            if args.scene.is_none() && args.png.is_none() && args.all_pages.is_none() {
+            if args.scene.is_none()
+                && args.png.is_none()
+                && args.pdf.is_none()
+                && args.all_pages.is_none()
+            {
                 eprintln!(
-                    "error: at least one of --scene <OUT>, --png <OUT>, or --all-pages <DIR> is required"
+                    "error: at least one of --scene <OUT>, --png <OUT>, --pdf <OUT>, or --all-pages <DIR> is required"
                 );
                 return ExitCode::from(2);
             }
@@ -174,6 +178,44 @@ pub fn run() -> ExitCode {
                             println!("{}", serialize_pretty(&out));
                         } else {
                             println!("PNG written to '{}'", png_out.display());
+                            print_diagnostics_stderr(&artifact.diagnostics);
+                        }
+                    }
+                    Err(e) => {
+                        eprintln!("{}", e.message);
+                        return ExitCode::from(e.exit_code);
+                    }
+                }
+            }
+
+            // --pdf ───────────────────────────────────────────────────────────
+            if let Some(pdf_out) = &args.pdf {
+                match commands::render::to_pdf_with_dir(
+                    &src,
+                    args.path.parent(),
+                    args.page,
+                    args.locked,
+                ) {
+                    Ok(artifact) => {
+                        // Block on hard (Error-severity) compile diagnostics.
+                        let n_hard = count_hard_diagnostics(&artifact.diagnostics);
+                        if n_hard > 0 {
+                            print_diagnostics_stderr(&artifact.diagnostics);
+                            eprintln!("render blocked by {} hard diagnostic(s)", n_hard);
+                            return ExitCode::from(2);
+                        }
+                        if let Err(e) = write_bytes(pdf_out, &artifact.pdf) {
+                            eprintln!("error writing PDF to '{}': {}", pdf_out.display(), e);
+                            return ExitCode::from(2);
+                        }
+                        if args.json {
+                            let out = RenderOutput {
+                                schema: "zenith-render-v1",
+                                diagnostics: artifact.diagnostics.iter().map(Into::into).collect(),
+                            };
+                            println!("{}", serialize_pretty(&out));
+                        } else {
+                            println!("PDF written to '{}'", pdf_out.display());
                             print_diagnostics_stderr(&artifact.diagnostics);
                         }
                     }

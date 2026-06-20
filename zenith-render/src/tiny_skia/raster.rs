@@ -8,7 +8,7 @@ use tiny_skia::Pixmap;
 /// JPEG (via `jpeg-decoder`). Returns `None` for unsupported formats or
 /// malformed data, in which case the caller skips drawing the asset.
 /// Deterministic: pixel output depends only on the input bytes.
-pub(super) fn decode_raster_image(bytes: &[u8]) -> Option<Pixmap> {
+pub(crate) fn decode_raster_image(bytes: &[u8]) -> Option<Pixmap> {
     // PNG signature.
     if bytes.starts_with(&[0x89, 0x50, 0x4E, 0x47]) {
         return Pixmap::decode_png(bytes).ok();

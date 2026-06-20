@@ -7,9 +7,11 @@
 
 mod backend;
 mod error;
+mod pdf;
 mod render;
 mod tiny_skia;
 
 pub use backend::{RasterBackend, RasterImage};
 pub use error::RenderError;
+pub use pdf::render_pdf;
 pub use render::{render_image, render_png};
