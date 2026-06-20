@@ -722,6 +722,39 @@ pub enum Op {
         /// Token id to store as `PropertyValue::TokenRef` (e.g. `"font.body"`).
         value: String,
     },
+    /// Set the `direction` property on a text node. Valid values: `"ltr"`, `"rtl"`.
+    /// Any other value is rejected with `tx.invalid_value`. A missing node yields
+    /// `tx.unknown_node`; a non-text node yields `tx.wrong_node_type`.
+    SetTextDirection {
+        /// The stable node `id` to target.
+        node: String,
+        /// The new direction value: `"ltr"` or `"rtl"`.
+        direction: String,
+    },
+    /// Literal find-and-replace across text node spans, preserving per-span
+    /// formatting. `find` is a literal substring (NOT a regex); all occurrences
+    /// within each span's text are replaced. When `node` is given, only that text
+    /// node is scoped; when omitted, ALL text nodes in the document are scanned.
+    ///
+    /// `find` must be non-empty (`tx.invalid_value` otherwise). A scoped `node`
+    /// that is missing yields `tx.unknown_node`; a scoped non-text node yields
+    /// `tx.wrong_node_type`. If no occurrence is found anywhere in scope, an
+    /// advisory `tx.noop` is emitted and no node is recorded as affected.
+    ///
+    /// **Locked nodes:** a scoped locked node is guarded by the normal lock check
+    /// (rejected unless `allow_locked`). In document-wide mode, locked text nodes
+    /// are SKIPPED and reported via an advisory `tx.locked_skipped` (warning) that
+    /// names them — they are never silently mutated.
+    FindReplaceText {
+        /// The literal substring to search for (not a regex). Must be non-empty.
+        find: String,
+        /// The replacement string (may be empty to delete occurrences).
+        replace: String,
+        /// When `Some(id)`, only the named text node is scoped.
+        /// When `None`, all text nodes in the document are scanned.
+        #[serde(default)]
+        node: Option<String>,
+    },
 }
 
 fn default_anchor() -> String {

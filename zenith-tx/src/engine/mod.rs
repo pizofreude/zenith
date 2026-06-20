@@ -26,9 +26,9 @@ use structure::{
     apply_reparent, apply_ungroup,
 };
 use style::{
-    apply_replace_text, apply_set_fill, apply_set_opacity, apply_set_stroke,
-    apply_set_stroke_width, apply_set_style_property, apply_set_text_align,
-    apply_set_text_overflow,
+    apply_find_replace_text, apply_replace_text, apply_set_fill, apply_set_opacity,
+    apply_set_stroke, apply_set_stroke_width, apply_set_style_property, apply_set_text_align,
+    apply_set_text_direction, apply_set_text_overflow,
 };
 use token::{apply_create_token, apply_update_token_value};
 
@@ -321,6 +321,16 @@ fn apply_op(
         } => {
             apply_set_style_property(style_id, property, value, doc, diagnostics, affected);
         }
+        Op::SetTextDirection { node, direction } => {
+            apply_set_text_direction(node, direction, doc, diagnostics, affected);
+        }
+        Op::FindReplaceText {
+            find,
+            replace,
+            node,
+        } => {
+            apply_find_replace_text(find, replace, node.as_deref(), doc, diagnostics, affected);
+        }
     }
 }
 
@@ -352,7 +362,13 @@ fn op_lock_targets(op: &Op) -> Vec<&str> {
         | Op::MoveToFront { node }
         | Op::MoveToBack { node }
         | Op::Reparent { node, .. }
-        | Op::SetTextOverflow { node_id: node, .. } => vec![node.as_str()],
+        | Op::SetTextOverflow { node_id: node, .. }
+        | Op::SetTextDirection { node, .. } => vec![node.as_str()],
+        // Doc-wide mode returns empty (lock handling is inside apply_find_replace_text).
+        // Scoped mode: guard the named node.
+        Op::FindReplaceText { node, .. } => {
+            node.as_deref().map(|n| vec![n]).unwrap_or_default()
+        }
         Op::AlignNodes { node_ids, .. } | Op::DistributeNodes { node_ids, .. } => {
             node_ids.iter().map(String::as_str).collect()
         }

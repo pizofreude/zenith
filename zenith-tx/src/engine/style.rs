@@ -1,8 +1,10 @@
 //! Style and text op application: fill, stroke, stroke-width, opacity,
-//! text-align, and text-replacement setters, plus the property accessors
-//! they use.
+//! text-align, text-direction, find-replace-text, and text-replacement setters,
+//! plus the property accessors they use.
 
-use zenith_core::{Diagnostic, Document, Node, PropertyValue, TextSpan, canonicalize_style_key};
+use zenith_core::{
+    Diagnostic, Document, Node, PropertyValue, TextNode, TextSpan, canonicalize_style_key,
+};
 
 use crate::op::OpSpan;
 
@@ -422,6 +424,231 @@ pub(super) fn apply_set_style_property(
                 PropertyValue::TokenRef(value.to_owned()),
             );
             record_affected(style_id, affected);
+        }
+    }
+}
+
+// ── SetTextDirection ──────────────────────────────────────────────────────────
+
+const VALID_DIRECTIONS: &[&str] = &["ltr", "rtl"];
+
+/// Set the `direction` property on a text node.
+///
+/// Mirrors [`apply_set_text_align`] exactly: eager value validation, then a
+/// three-arm match over the found node.
+pub(super) fn apply_set_text_direction(
+    node_id: &str,
+    direction: &str,
+    doc: &mut Document,
+    diagnostics: &mut Vec<Diagnostic>,
+    affected: &mut Vec<String>,
+) {
+    // Validate direction value before touching the tree.
+    if !VALID_DIRECTIONS.contains(&direction) {
+        diagnostics.push(Diagnostic::error(
+            "tx.invalid_value",
+            format!(
+                "invalid direction value {:?}; must be one of: {}",
+                direction,
+                VALID_DIRECTIONS.join(", ")
+            ),
+            None,
+            Some(node_id.to_owned()),
+        ));
+        return;
+    }
+
+    // Walk the tree looking for `node_id`.
+    match find_node_any_mut(doc, node_id) {
+        None => {
+            diagnostics.push(Diagnostic::error(
+                "tx.unknown_node",
+                format!("node {:?} not found in document", node_id),
+                None,
+                Some(node_id.to_owned()),
+            ));
+        }
+        Some(Node::Text(text_node)) => {
+            text_node.direction = Some(direction.to_owned());
+            record_affected(node_id, affected);
+        }
+        Some(other) => {
+            let kind = node_kind_str(other);
+            diagnostics.push(Diagnostic::error(
+                "tx.wrong_node_type",
+                format!(
+                    "set_text_direction requires a text node but {:?} is a {}",
+                    node_id, kind
+                ),
+                None,
+                Some(node_id.to_owned()),
+            ));
+        }
+    }
+}
+
+// ── FindReplaceText ───────────────────────────────────────────────────────────
+
+/// Replace all occurrences of `find` in every span's text of `text_node`,
+/// returning `true` if any span was modified.
+///
+/// Only `TextSpan::text` is mutated; all formatting fields are preserved.
+fn replace_in_text_node(text_node: &mut TextNode, find: &str, replace: &str) -> bool {
+    let mut changed = false;
+    for span in &mut text_node.spans {
+        if span.text.contains(find) {
+            span.text = span.text.replace(find, replace);
+            changed = true;
+        }
+    }
+    changed
+}
+
+/// Collect `(id, is_locked)` pairs for every `TextNode` reachable in
+/// `children`, in document order, recursing into `Frame` and `Group`
+/// containers. Capturing the locked flag here avoids a second O(n) tree walk
+/// per node in the doc-wide find-replace loop. Exhaustive over all `Node`
+/// variants — no wildcard.
+fn collect_text_entries(children: &[Node], out: &mut Vec<(String, bool)>) {
+    for node in children {
+        match node {
+            Node::Text(t) => out.push((t.id.clone(), t.locked == Some(true))),
+            Node::Frame(f) => collect_text_entries(&f.children, out),
+            Node::Group(g) => collect_text_entries(&g.children, out),
+            Node::Rect(_)
+            | Node::Ellipse(_)
+            | Node::Line(_)
+            | Node::Code(_)
+            | Node::Image(_)
+            | Node::Polygon(_)
+            | Node::Polyline(_)
+            | Node::Instance(_)
+            | Node::Field(_)
+            | Node::Footnote(_)
+            | Node::Unknown(_) => {}
+        }
+    }
+}
+
+/// Apply a literal find-and-replace across one or all text nodes in `doc`.
+///
+/// See [`Op::FindReplaceText`] for the full specification.
+pub(super) fn apply_find_replace_text(
+    find: &str,
+    replace: &str,
+    node: Option<&str>,
+    doc: &mut Document,
+    diagnostics: &mut Vec<Diagnostic>,
+    affected: &mut Vec<String>,
+) {
+    // Eager: empty find string is invalid.
+    if find.is_empty() {
+        diagnostics.push(Diagnostic::error(
+            "tx.invalid_value",
+            "find string must be non-empty",
+            None,
+            None,
+        ));
+        return;
+    }
+
+    match node {
+        // ── Scoped mode: one named text node ─────────────────────────────────
+        Some(node_id) => match find_node_any_mut(doc, node_id) {
+            None => {
+                diagnostics.push(Diagnostic::error(
+                    "tx.unknown_node",
+                    format!("node {:?} not found in document", node_id),
+                    None,
+                    Some(node_id.to_owned()),
+                ));
+            }
+            Some(Node::Text(text_node)) => {
+                if replace_in_text_node(text_node, find, replace) {
+                    record_affected(node_id, affected);
+                } else {
+                    diagnostics.push(Diagnostic::advisory(
+                        "tx.noop",
+                        format!(
+                            "find_replace_text: {:?} not found in node {:?}; document is unchanged",
+                            find, node_id
+                        ),
+                        None,
+                        Some(node_id.to_owned()),
+                    ));
+                }
+            }
+            Some(other) => {
+                let kind = node_kind_str(other);
+                diagnostics.push(Diagnostic::error(
+                    "tx.wrong_node_type",
+                    format!(
+                        "find_replace_text requires a text node but {:?} is a {}",
+                        node_id, kind
+                    ),
+                    None,
+                    Some(node_id.to_owned()),
+                ));
+            }
+        },
+
+        // ── Doc-wide mode: all text nodes ─────────────────────────────────────
+        None => {
+            // Phase 1: collect (id, is_locked) for every text node in the
+            // document in one shared pass — avoids a second O(n) tree walk
+            // per node in Phase 2.
+            let mut all_text_entries: Vec<(String, bool)> = Vec::new();
+            for page in &doc.body.pages {
+                collect_text_entries(&page.children, &mut all_text_entries);
+            }
+
+            let mut skipped: Vec<String> = Vec::new();
+            // Track whether this op changed anything (independent of prior ops
+            // in the same transaction that may have already populated `affected`).
+            let mut this_op_changed = false;
+
+            // Phase 2: for each text node, skip locked ones then mutate.
+            for (id, is_locked) in &all_text_entries {
+                if *is_locked {
+                    skipped.push(id.clone());
+                    continue;
+                }
+
+                // Mutate via find_node_any_mut.
+                if let Some(Node::Text(text_node)) = find_node_any_mut(doc, id)
+                    && replace_in_text_node(text_node, find, replace)
+                {
+                    record_affected(id, affected);
+                    this_op_changed = true;
+                }
+            }
+
+            // Sort skipped list for determinism, then emit advisory if any.
+            skipped.sort();
+            if !skipped.is_empty() {
+                diagnostics.push(Diagnostic::warning(
+                    "tx.locked_skipped",
+                    format!(
+                        "find_replace_text: skipped locked text node(s): {}",
+                        skipped.join(", ")
+                    ),
+                    None,
+                    None,
+                ));
+            }
+
+            // If this op changed nothing AND nothing was skipped, emit noop advisory.
+            if !this_op_changed && skipped.is_empty() {
+                diagnostics.push(Diagnostic::advisory(
+                    "tx.noop",
+                    format!(
+                        "find_replace_text: {:?} not found in any text node; document is unchanged",
+                        find
+                    ),
+                    None,
+                    None,
+                ));
+            }
         }
     }
 }
