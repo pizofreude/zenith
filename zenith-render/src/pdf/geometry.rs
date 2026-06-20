@@ -13,38 +13,88 @@ use pdf_writer::Content;
 /// backend's `build_rounded_rect_path`).
 const KAPPA: f64 = 0.552_284_8;
 
-/// Append a rounded-rectangle subpath (uniform corner radius `r`, clamped to
-/// `min(w, h) / 2`) to `content`. Does nothing for a degenerate box.
-pub(super) fn rounded_rect_path(content: &mut Content, x: f64, y: f64, w: f64, h: f64, r: f64) {
-    if !(w > 0.0 && h > 0.0 && r.is_finite()) {
-        return;
-    }
-    let r = r.max(0.0).min(w / 2.0).min(h / 2.0);
-    let k = KAPPA * r;
-    let (x, y, w, h) = (x as f32, y as f32, w as f32, h as f32);
-    let (r, k) = (r as f32, k as f32);
-    content.move_to(x + r, y);
-    content.line_to(x + w - r, y);
-    content.cubic_to(x + w - r + k, y, x + w, y + r - k, x + w, y + r); // top-right
-    content.line_to(x + w, y + h - r);
-    content.cubic_to(x + w, y + h - r + k, x + w - r + k, y + h, x + w - r, y + h); // bottom-right
-    content.line_to(x + r, y + h);
-    content.cubic_to(x + r - k, y + h, x, y + h - r + k, x, y + h - r); // bottom-left
-    content.line_to(x, y + r);
-    content.cubic_to(x, y + r - k, x + r - k, y, x + r, y); // top-left
-    content.close_path();
-}
-
-/// Append a full ellipse subpath inscribed in the box `[x, y, w, h]` to
-/// `content`, as four cubic bezier arcs. Does nothing for a degenerate box.
-pub(super) fn ellipse_path(content: &mut Content, x: f64, y: f64, w: f64, h: f64) {
+/// Append a rounded-rectangle subpath with per-corner radii `[tl, tr, br, bl]`
+/// (index 0=top-left, 1=top-right, 2=bottom-right, 3=bottom-left) to `content`.
+/// Each corner radius is clamped independently to `min(w, h) / 2`. A radius of 0
+/// produces a sharp corner. Does nothing for a degenerate box.
+///
+/// Path order matches the raster backend: move-to top-left-start → right along
+/// top → top-right arc → down right → bottom-right arc → left along bottom →
+/// bottom-left arc → up left → top-left arc → close.
+pub(super) fn rounded_rect_path(
+    content: &mut Content,
+    x: f64,
+    y: f64,
+    w: f64,
+    h: f64,
+    radii: [f64; 4],
+) {
     if !(w > 0.0 && h > 0.0) {
         return;
     }
+    let half_min = (w / 2.0).min(h / 2.0);
+    let tl = radii[0].max(0.0).min(half_min);
+    let tr = radii[1].max(0.0).min(half_min);
+    let br = radii[2].max(0.0).min(half_min);
+    let bl = radii[3].max(0.0).min(half_min);
+
+    let ktl = (KAPPA * tl) as f32;
+    let ktr = (KAPPA * tr) as f32;
+    let kbr = (KAPPA * br) as f32;
+    let kbl = (KAPPA * bl) as f32;
+    let (tl, tr, br, bl) = (tl as f32, tr as f32, br as f32, bl as f32);
+    let (x, y, w, h) = (x as f32, y as f32, w as f32, h as f32);
+
+    content.move_to(x + tl, y);
+    content.line_to(x + w - tr, y);
+    if tr > 0.0 {
+        content.cubic_to(x + w - tr + ktr, y, x + w, y + tr - ktr, x + w, y + tr);
+    }
+    content.line_to(x + w, y + h - br);
+    if br > 0.0 {
+        content.cubic_to(
+            x + w,
+            y + h - br + kbr,
+            x + w - br + kbr,
+            y + h,
+            x + w - br,
+            y + h,
+        );
+    }
+    content.line_to(x + bl, y + h);
+    if bl > 0.0 {
+        content.cubic_to(x + bl - kbl, y + h, x, y + h - bl + kbl, x, y + h - bl);
+    }
+    content.line_to(x, y + tl);
+    if tl > 0.0 {
+        content.cubic_to(x, y + tl - ktl, x + tl - ktl, y, x + tl, y);
+    }
+    content.close_path();
+}
+
+/// Append a full ellipse subpath to `content` as four cubic bezier arcs.
+///
+/// `rx_override`/`ry_override`: when `Some`, use the given semi-axis length;
+/// when `None`, the semi-axis is derived from `w`/`h` (inscribed ellipse,
+/// byte-identical to the prior behavior). The oval is centered in the node
+/// bbox `[x, y, w, h]`. Does nothing for a degenerate box.
+pub(super) fn ellipse_path(
+    content: &mut Content,
+    x: f64,
+    y: f64,
+    w: f64,
+    h: f64,
+    rx_override: Option<f64>,
+    ry_override: Option<f64>,
+) {
+    if !(w > 0.0 && h > 0.0) {
+        return;
+    }
+    let rx = rx_override.unwrap_or(w / 2.0);
+    let ry = ry_override.unwrap_or(h / 2.0);
+    // Center the oval in the node bbox.
     let cx = x + w / 2.0;
     let cy = y + h / 2.0;
-    let rx = w / 2.0;
-    let ry = h / 2.0;
     let kx = (KAPPA * rx) as f32;
     let ky = (KAPPA * ry) as f32;
     let (cx, cy, rx, ry) = (cx as f32, cy as f32, rx as f32, ry as f32);

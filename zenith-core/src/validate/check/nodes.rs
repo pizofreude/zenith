@@ -266,6 +266,33 @@ pub(super) fn walk_node(
                 resolved_tokens,
                 diagnostics,
             );
+            // Per-corner radius overrides: same validation pattern as uniform radius.
+            for (prop_name, prop_val) in [
+                ("radius-tl", r.radius_tl.as_ref()),
+                ("radius-tr", r.radius_tr.as_ref()),
+                ("radius-br", r.radius_br.as_ref()),
+                ("radius-bl", r.radius_bl.as_ref()),
+            ] {
+                check_visual_prop(
+                    &r.id,
+                    prop_name,
+                    prop_val,
+                    VisualExpect::Dimension,
+                    referenced_token_ids,
+                    resolved_tokens,
+                    diagnostics,
+                );
+                if let Some(PropertyValue::Dimension(d)) = prop_val
+                    && d.value < 0.0
+                {
+                    diagnostics.push(Diagnostic::error(
+                        "node.invalid_geometry",
+                        format!("rect '{}': {} must be >= 0", r.id, prop_name),
+                        r.source_span,
+                        Some(r.id.clone()),
+                    ));
+                }
+            }
             check_visual_prop(
                 &r.id,
                 "shadow",
@@ -413,6 +440,28 @@ pub(super) fn walk_node(
                     e.source_span,
                     Some(e.id.clone()),
                 ));
+            }
+            // Independent axis radii: same validation as dimension props.
+            for (prop_name, prop_val) in [("rx", e.rx.as_ref()), ("ry", e.ry.as_ref())] {
+                check_visual_prop(
+                    &e.id,
+                    prop_name,
+                    prop_val,
+                    VisualExpect::Dimension,
+                    referenced_token_ids,
+                    resolved_tokens,
+                    diagnostics,
+                );
+                if let Some(PropertyValue::Dimension(d)) = prop_val
+                    && d.value < 0.0
+                {
+                    diagnostics.push(Diagnostic::error(
+                        "node.invalid_geometry",
+                        format!("ellipse '{}': {} must be >= 0", e.id, prop_name),
+                        e.source_span,
+                        Some(e.id.clone()),
+                    ));
+                }
             }
             check_visual_prop(
                 &e.id,

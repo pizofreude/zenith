@@ -225,7 +225,7 @@ pub enum SceneCommand {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         stroke_linecap: Option<LineCap>,
     },
-    /// Fill a rectangle with uniform corner radius.
+    /// Fill a rectangle with uniform corner radius (and optional per-corner overrides).
     FillRoundedRect {
         x: f64,
         y: f64,
@@ -233,8 +233,12 @@ pub enum SceneCommand {
         h: f64,
         radius: f64,
         color: Color,
+        /// Per-corner radii `[tl, tr, br, bl]`. `None` = use uniform `radius` for all
+        /// corners (byte-identical to prior IR when absent).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        radii: Option<[f64; 4]>,
     },
-    /// Stroke a rectangle with uniform corner radius.
+    /// Stroke a rectangle with uniform corner radius (and optional per-corner overrides).
     StrokeRoundedRect {
         x: f64,
         y: f64,
@@ -252,6 +256,10 @@ pub enum SceneCommand {
         /// Dash end-cap style. `None` = Butt (default, byte-identical to prior IR).
         #[serde(default, skip_serializing_if = "Option::is_none")]
         stroke_linecap: Option<LineCap>,
+        /// Per-corner radii `[tl, tr, br, bl]`. `None` = use uniform `radius` for all
+        /// corners (byte-identical to prior IR when absent).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        radii: Option<[f64; 4]>,
     },
     /// Fill an axis-aligned ellipse.
     FillEllipse {
@@ -260,6 +268,12 @@ pub enum SceneCommand {
         w: f64,
         h: f64,
         color: Color,
+        /// Explicit x-radius (overrides w/2). `None` = inscribed ellipse (byte-identical).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        rx: Option<f64>,
+        /// Explicit y-radius (overrides h/2). `None` = inscribed ellipse (byte-identical).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        ry: Option<f64>,
     },
     /// Fill an axis-aligned rectangle with a linear gradient.
     FillRectGradient {
@@ -277,6 +291,10 @@ pub enum SceneCommand {
         h: f64,
         radius: f64,
         gradient: GradientPaint,
+        /// Per-corner radii `[tl, tr, br, bl]`. `None` = use uniform `radius` for all
+        /// corners (byte-identical to prior IR when absent).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        radii: Option<[f64; 4]>,
     },
     /// Fill an axis-aligned ellipse with a linear gradient.
     FillEllipseGradient {
@@ -285,6 +303,12 @@ pub enum SceneCommand {
         w: f64,
         h: f64,
         gradient: GradientPaint,
+        /// Explicit x-radius (overrides w/2). `None` = inscribed ellipse (byte-identical).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        rx: Option<f64>,
+        /// Explicit y-radius (overrides h/2). `None` = inscribed ellipse (byte-identical).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        ry: Option<f64>,
     },
     /// Stroke an axis-aligned ellipse (centered on the ellipse path; no
     /// stroke-alignment in v0).
@@ -304,6 +328,12 @@ pub enum SceneCommand {
         /// Dash end-cap style. `None` = Butt (default, byte-identical to prior IR).
         #[serde(default, skip_serializing_if = "Option::is_none")]
         stroke_linecap: Option<LineCap>,
+        /// Explicit x-radius (overrides w/2). `None` = inscribed ellipse (byte-identical).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        rx: Option<f64>,
+        /// Explicit y-radius (overrides h/2). `None` = inscribed ellipse (byte-identical).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        ry: Option<f64>,
     },
     /// Stroke a line segment.
     StrokeLine {

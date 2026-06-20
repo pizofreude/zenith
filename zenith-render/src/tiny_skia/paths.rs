@@ -81,25 +81,74 @@ pub(super) fn build_poly_path(points: &[f64], closed: bool) -> Option<Path> {
     pb.finish()
 }
 
-/// Build a closed rounded-rectangle path with uniform corner radius `r`
-/// (clamped by the caller to `min(w, h) / 2`). Corners are cubic Béziers using
-/// the standard circle-approximation constant κ ≈ 0.5522848.
-pub(super) fn build_rounded_rect_path(x: f32, y: f32, w: f32, h: f32, r: f32) -> Option<Path> {
-    if !w.is_finite() || !h.is_finite() || w <= 0.0 || h <= 0.0 || r < 0.0 {
+/// Build a closed rounded-rectangle path with per-corner radii
+/// `[tl, tr, br, bl]` (index 0=top-left, 1=top-right, 2=bottom-right,
+/// 3=bottom-left). Each corner radius is clamped independently to
+/// `min(w, h) / 2`. A radius of 0 produces a sharp corner (no cubic arc).
+/// Corners with radius > 0 use cubic Béziers with κ ≈ 0.5522848.
+///
+/// Path order (same as the former uniform variant):
+/// move-to top-left-start → right along top → top-right arc →
+/// down right side → bottom-right arc → left along bottom →
+/// bottom-left arc → up left side → top-left arc → close.
+pub(super) fn build_rounded_rect_path(
+    x: f32,
+    y: f32,
+    w: f32,
+    h: f32,
+    radii: [f32; 4],
+) -> Option<Path> {
+    if !w.is_finite() || !h.is_finite() || w <= 0.0 || h <= 0.0 {
         return None;
     }
-    let r = r.min(w / 2.0).min(h / 2.0);
-    let k = 0.552_284_8_f32 * r; // κ·r control-point offset for a 90° cubic arc
+    // Clamp each corner independently.
+    let half_min = (w / 2.0).min(h / 2.0);
+    let tl = radii[0].max(0.0).min(half_min);
+    let tr = radii[1].max(0.0).min(half_min);
+    let br = radii[2].max(0.0).min(half_min);
+    let bl = radii[3].max(0.0).min(half_min);
+
+    const K: f32 = 0.552_284_8_f32; // κ: cubic control-point ratio for 90° arc
+    let ktl = K * tl;
+    let ktr = K * tr;
+    let kbr = K * br;
+    let kbl = K * bl;
+
     let mut pb = PathBuilder::new();
-    pb.move_to(x + r, y);
-    pb.line_to(x + w - r, y);
-    pb.cubic_to(x + w - r + k, y, x + w, y + r - k, x + w, y + r); // top-right
-    pb.line_to(x + w, y + h - r);
-    pb.cubic_to(x + w, y + h - r + k, x + w - r + k, y + h, x + w - r, y + h); // bottom-right
-    pb.line_to(x + r, y + h);
-    pb.cubic_to(x + r - k, y + h, x, y + h - r + k, x, y + h - r); // bottom-left
-    pb.line_to(x, y + r);
-    pb.cubic_to(x, y + r - k, x + r - k, y, x + r, y); // top-left
+
+    // Start at the top-left corner's top-edge departure point.
+    pb.move_to(x + tl, y);
+    // → top edge to top-right corner
+    pb.line_to(x + w - tr, y);
+    // top-right arc
+    if tr > 0.0 {
+        pb.cubic_to(x + w - tr + ktr, y, x + w, y + tr - ktr, x + w, y + tr);
+    }
+    // → right edge down to bottom-right corner
+    pb.line_to(x + w, y + h - br);
+    // bottom-right arc
+    if br > 0.0 {
+        pb.cubic_to(
+            x + w,
+            y + h - br + kbr,
+            x + w - br + kbr,
+            y + h,
+            x + w - br,
+            y + h,
+        );
+    }
+    // → bottom edge to bottom-left corner
+    pb.line_to(x + bl, y + h);
+    // bottom-left arc
+    if bl > 0.0 {
+        pb.cubic_to(x + bl - kbl, y + h, x, y + h - bl + kbl, x, y + h - bl);
+    }
+    // → left edge up to top-left corner
+    pb.line_to(x, y + tl);
+    // top-left arc
+    if tl > 0.0 {
+        pb.cubic_to(x, y + tl - ktl, x + tl - ktl, y, x + tl, y);
+    }
     pb.close();
     pb.finish()
 }

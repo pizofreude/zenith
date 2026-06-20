@@ -235,14 +235,15 @@ impl RasterBackend for TinySkiaBackend {
                     }
                 }
 
-                SceneCommand::FillEllipse { x, y, w, h, color } => {
-                    let effective_clip = *clip_stack.last().unwrap_or(&page_clip);
-
-                    // Early-out: skip if the ellipse bbox is entirely outside the clip.
-                    if intersect_rects((*x, *y, x + w, y + h), effective_clip).is_none() {
-                        continue;
-                    }
-
+                SceneCommand::FillEllipse {
+                    x,
+                    y,
+                    w,
+                    h,
+                    rx,
+                    ry,
+                    color,
+                } => {
                     // Guard against non-finite or degenerate dimensions.
                     if !x.is_finite()
                         || !y.is_finite()
@@ -254,11 +255,25 @@ impl RasterBackend for TinySkiaBackend {
                         continue;
                     }
 
+                    // Compute oval bounding box: rx/ry override the semi-axes.
+                    // When absent, the oval is inscribed in the node bbox.
+                    let ow = rx.map_or(*w, |r| r * 2.0);
+                    let oh = ry.map_or(*h, |r| r * 2.0);
+                    let ox = x + (w - ow) / 2.0;
+                    let oy = y + (h - oh) / 2.0;
+
+                    let effective_clip = *clip_stack.last().unwrap_or(&page_clip);
+
+                    // Early-out: skip if the ellipse bbox is entirely outside the clip.
+                    if intersect_rects((ox, oy, ox + ow, oy + oh), effective_clip).is_none() {
+                        continue;
+                    }
+
                     // Build the oval at its TRUE bounding box — NOT the intersected box.
                     // Intersecting the bbox before building the oval would reshape (squish)
                     // the ellipse under partial clip; instead we draw the full ellipse and
                     // let the clip mask truncate it.
-                    let Some(rect) = Rect::from_xywh(*x as f32, *y as f32, *w as f32, *h as f32)
+                    let Some(rect) = Rect::from_xywh(ox as f32, oy as f32, ow as f32, oh as f32)
                     else {
                         continue;
                     };
@@ -285,6 +300,8 @@ impl RasterBackend for TinySkiaBackend {
                     y,
                     w,
                     h,
+                    rx,
+                    ry,
                     color,
                     stroke_width,
                     stroke_dash,
@@ -303,13 +320,24 @@ impl RasterBackend for TinySkiaBackend {
                         continue;
                     }
 
+                    // Compute oval bounding box from rx/ry semi-axes (or node bbox).
+                    let ow = rx.map_or(*w, |r| r * 2.0);
+                    let oh = ry.map_or(*h, |r| r * 2.0);
+                    let ox = x + (w - ow) / 2.0;
+                    let oy = y + (h - oh) / 2.0;
+
                     let effective_clip = *clip_stack.last().unwrap_or(&page_clip);
 
                     // Ink-bbox early-out: the stroke extends half its width beyond
                     // the ellipse edge on all sides.
                     let half_sw = stroke_width / 2.0;
                     if intersect_rects(
-                        (x - half_sw, y - half_sw, x + w + half_sw, y + h + half_sw),
+                        (
+                            ox - half_sw,
+                            oy - half_sw,
+                            ox + ow + half_sw,
+                            oy + oh + half_sw,
+                        ),
                         effective_clip,
                     )
                     .is_none()
@@ -319,7 +347,7 @@ impl RasterBackend for TinySkiaBackend {
 
                     // Build the oval path at its TRUE bounding box — NOT the
                     // intersected box. The clip mask truncates without reshaping.
-                    let Some(rect) = Rect::from_xywh(*x as f32, *y as f32, *w as f32, *h as f32)
+                    let Some(rect) = Rect::from_xywh(ox as f32, oy as f32, ow as f32, oh as f32)
                     else {
                         continue;
                     };
@@ -723,7 +751,7 @@ impl RasterBackend for TinySkiaBackend {
                                     *y as f32,
                                     *w as f32,
                                     *h as f32,
-                                    *radius as f32,
+                                    [*radius as f32; 4],
                                 ),
                             };
                             let Some(path) = path else {
@@ -912,6 +940,7 @@ impl RasterBackend for TinySkiaBackend {
                     w,
                     h,
                     radius,
+                    radii,
                     color,
                 } => {
                     if !x.is_finite()
@@ -930,12 +959,14 @@ impl RasterBackend for TinySkiaBackend {
                         continue;
                     }
 
+                    // Per-corner radii override uniform radius when present.
+                    let corner_radii = radii.map_or([*radius as f32; 4], |a| a.map(|v| v as f32));
                     let Some(path) = build_rounded_rect_path(
                         *x as f32,
                         *y as f32,
                         *w as f32,
                         *h as f32,
-                        *radius as f32,
+                        corner_radii,
                     ) else {
                         continue;
                     };
@@ -958,6 +989,7 @@ impl RasterBackend for TinySkiaBackend {
                     w,
                     h,
                     radius,
+                    radii,
                     color,
                     stroke_width,
                     stroke_dash,
@@ -989,12 +1021,14 @@ impl RasterBackend for TinySkiaBackend {
                         continue;
                     }
 
+                    // Per-corner radii override uniform radius when present.
+                    let corner_radii = radii.map_or([*radius as f32; 4], |a| a.map(|v| v as f32));
                     let Some(path) = build_rounded_rect_path(
                         *x as f32,
                         *y as f32,
                         *w as f32,
                         *h as f32,
-                        *radius as f32,
+                        corner_radii,
                     ) else {
                         continue;
                     };
@@ -1071,6 +1105,7 @@ impl RasterBackend for TinySkiaBackend {
                     w,
                     h,
                     radius,
+                    radii,
                     gradient,
                 } => {
                     if !x.is_finite()
@@ -1089,12 +1124,14 @@ impl RasterBackend for TinySkiaBackend {
                         continue;
                     }
 
+                    // Per-corner radii override uniform radius when present.
+                    let corner_radii = radii.map_or([*radius as f32; 4], |a| a.map(|v| v as f32));
                     let Some(path) = build_rounded_rect_path(
                         *x as f32,
                         *y as f32,
                         *w as f32,
                         *h as f32,
-                        *radius as f32,
+                        corner_radii,
                     ) else {
                         continue;
                     };
@@ -1121,15 +1158,10 @@ impl RasterBackend for TinySkiaBackend {
                     y,
                     w,
                     h,
+                    rx,
+                    ry,
                     gradient,
                 } => {
-                    let effective_clip = *clip_stack.last().unwrap_or(&page_clip);
-
-                    // Early-out: skip if the ellipse bbox is entirely outside the clip.
-                    if intersect_rects((*x, *y, x + w, y + h), effective_clip).is_none() {
-                        continue;
-                    }
-
                     if !x.is_finite()
                         || !y.is_finite()
                         || !w.is_finite()
@@ -1140,7 +1172,20 @@ impl RasterBackend for TinySkiaBackend {
                         continue;
                     }
 
-                    let Some(rect) = Rect::from_xywh(*x as f32, *y as f32, *w as f32, *h as f32)
+                    // Compute oval bounding box from rx/ry semi-axes (or node bbox).
+                    let ow = rx.map_or(*w, |r| r * 2.0);
+                    let oh = ry.map_or(*h, |r| r * 2.0);
+                    let ox = x + (w - ow) / 2.0;
+                    let oy = y + (h - oh) / 2.0;
+
+                    let effective_clip = *clip_stack.last().unwrap_or(&page_clip);
+
+                    // Early-out: skip if the ellipse bbox is entirely outside the clip.
+                    if intersect_rects((ox, oy, ox + ow, oy + oh), effective_clip).is_none() {
+                        continue;
+                    }
+
+                    let Some(rect) = Rect::from_xywh(ox as f32, oy as f32, ow as f32, oh as f32)
                     else {
                         continue;
                     };

@@ -141,6 +141,13 @@ pub struct RectNode {
     pub w: Option<Dimension>,
     pub h: Option<Dimension>,
     pub radius: Option<PropertyValue>,
+    /// Per-corner radius overrides (top-left, top-right, bottom-right, bottom-left).
+    /// When `Some`, the value overrides the uniform `radius` for that corner only.
+    /// When `None`, the uniform `radius` applies. All four are `None` for existing docs.
+    pub radius_tl: Option<PropertyValue>,
+    pub radius_tr: Option<PropertyValue>,
+    pub radius_br: Option<PropertyValue>,
+    pub radius_bl: Option<PropertyValue>,
     pub style: Option<String>,
     pub fill: Option<PropertyValue>,
     pub stroke: Option<PropertyValue>,
@@ -210,6 +217,14 @@ pub struct EllipseNode {
     pub y: Option<Dimension>,
     pub w: Option<Dimension>,
     pub h: Option<Dimension>,
+    /// Explicit x-radius override (half-width of the ellipse). When absent, the
+    /// ellipse is inscribed in the bounding box (w/2). Backward-compatible: None
+    /// leaves all existing ellipses byte-identical.
+    pub rx: Option<PropertyValue>,
+    /// Explicit y-radius override (half-height of the ellipse). When absent, the
+    /// ellipse is inscribed in the bounding box (h/2). Backward-compatible: None
+    /// leaves all existing ellipses byte-identical.
+    pub ry: Option<PropertyValue>,
     pub style: Option<String>,
     pub fill: Option<PropertyValue>,
     pub stroke: Option<PropertyValue>,

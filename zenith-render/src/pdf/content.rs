@@ -132,15 +132,17 @@ fn emit_command(
             w,
             h,
             radius,
+            radii,
             color,
         } => {
             if !rect_ok(*x, *y, *w, *h) || !finite(*radius) {
                 return;
             }
+            let corner_radii = radii.unwrap_or([*radius; 4]);
             content.save_state();
             apply_alpha(content, res, color);
             color::set_fill(content, color);
-            rounded_rect_path(content, *x, *y, *w, *h, *radius);
+            rounded_rect_path(content, *x, *y, *w, *h, corner_radii);
             content.fill_nonzero();
             content.restore_state();
         }
@@ -151,6 +153,7 @@ fn emit_command(
             w,
             h,
             radius,
+            radii,
             color,
             stroke_width,
             // PDF v0 renders solid strokes only; dash params are intentionally ignored here.
@@ -159,23 +162,32 @@ fn emit_command(
             if !rect_ok(*x, *y, *w, *h) || !finite(*radius) || !finite(*stroke_width) {
                 return;
             }
+            let corner_radii = radii.unwrap_or([*radius; 4]);
             content.save_state();
             apply_alpha(content, res, color);
             color::set_stroke(content, color);
             content.set_line_width(*stroke_width as f32);
-            rounded_rect_path(content, *x, *y, *w, *h, *radius);
+            rounded_rect_path(content, *x, *y, *w, *h, corner_radii);
             content.stroke();
             content.restore_state();
         }
 
-        SceneCommand::FillEllipse { x, y, w, h, color } => {
+        SceneCommand::FillEllipse {
+            x,
+            y,
+            w,
+            h,
+            rx,
+            ry,
+            color,
+        } => {
             if !rect_ok(*x, *y, *w, *h) {
                 return;
             }
             content.save_state();
             apply_alpha(content, res, color);
             color::set_fill(content, color);
-            ellipse_path(content, *x, *y, *w, *h);
+            ellipse_path(content, *x, *y, *w, *h, *rx, *ry);
             content.fill_nonzero();
             content.restore_state();
         }
@@ -185,6 +197,8 @@ fn emit_command(
             y,
             w,
             h,
+            rx,
+            ry,
             color,
             stroke_width,
             // PDF v0 renders solid strokes only; dash params are intentionally ignored here.
@@ -197,7 +211,7 @@ fn emit_command(
             apply_alpha(content, res, color);
             color::set_stroke(content, color);
             content.set_line_width(*stroke_width as f32);
-            ellipse_path(content, *x, *y, *w, *h);
+            ellipse_path(content, *x, *y, *w, *h, *rx, *ry);
             content.stroke();
             content.restore_state();
         }
@@ -302,15 +316,17 @@ fn emit_command(
             w,
             h,
             radius,
+            radii,
             gradient,
         } => {
             if !rect_ok(*x, *y, *w, *h) || !finite(*radius) {
                 return;
             }
+            let corner_radii = radii.unwrap_or([*radius; 4]);
             if let Some(g) = resolve_gradient(*x, *y, *w, *h, gradient) {
                 let id = push_gradient(res, g);
                 content.save_state();
-                rounded_rect_path(content, *x, *y, *w, *h, *radius);
+                rounded_rect_path(content, *x, *y, *w, *h, corner_radii);
                 content.clip_nonzero();
                 content.end_path();
                 content.shading(name(SHADING_PREFIX, id).as_name());
@@ -323,6 +339,8 @@ fn emit_command(
             y,
             w,
             h,
+            rx,
+            ry,
             gradient,
         } => {
             if !rect_ok(*x, *y, *w, *h) {
@@ -331,7 +349,7 @@ fn emit_command(
             if let Some(g) = resolve_gradient(*x, *y, *w, *h, gradient) {
                 let id = push_gradient(res, g);
                 content.save_state();
-                ellipse_path(content, *x, *y, *w, *h);
+                ellipse_path(content, *x, *y, *w, *h, *rx, *ry);
                 content.clip_nonzero();
                 content.end_path();
                 content.shading(name(SHADING_PREFIX, id).as_name());
@@ -590,12 +608,12 @@ fn emit_image(
             content.end_path();
         }
         Some(ImageClip::Ellipse) => {
-            ellipse_path(content, x, y, w, h);
+            ellipse_path(content, x, y, w, h, None, None);
             content.clip_nonzero();
             content.end_path();
         }
         Some(ImageClip::RoundedRect { radius }) => {
-            rounded_rect_path(content, x, y, w, h, *radius);
+            rounded_rect_path(content, x, y, w, h, [*radius; 4]);
             content.clip_nonzero();
             content.end_path();
         }

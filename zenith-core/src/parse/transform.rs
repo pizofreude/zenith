@@ -1151,6 +1151,14 @@ const RECT_KNOWN_PROPS: &[&str] = &[
     "w",
     "h",
     "radius",
+    "radius-tl",
+    "radius_tl",
+    "radius-tr",
+    "radius_tr",
+    "radius-br",
+    "radius_br",
+    "radius-bl",
+    "radius_bl",
     "style",
     "fill",
     "stroke",
@@ -1184,6 +1192,12 @@ fn transform_rect(node: &KdlNode) -> Result<RectNode, ParseError> {
     let stroke_linecap =
         optional_string_prop_aliased(node, "stroke-linecap", "stroke_linecap").map(str::to_owned);
 
+    // Per-corner radius overrides: accept both hyphenated and underscored spellings.
+    let radius_tl = optional_property_value_aliased(node, "radius-tl", "radius_tl");
+    let radius_tr = optional_property_value_aliased(node, "radius-tr", "radius_tr");
+    let radius_br = optional_property_value_aliased(node, "radius-br", "radius_br");
+    let radius_bl = optional_property_value_aliased(node, "radius-bl", "radius_bl");
+
     let unknown_props = collect_unknown_props(node, RECT_KNOWN_PROPS);
 
     Ok(RectNode {
@@ -1195,6 +1209,10 @@ fn transform_rect(node: &KdlNode) -> Result<RectNode, ParseError> {
         w: optional_dimension_prop(node, "w"),
         h: optional_dimension_prop(node, "h"),
         radius: optional_property_value(node, "radius"),
+        radius_tl,
+        radius_tr,
+        radius_br,
+        radius_bl,
         style: optional_string_prop(node, "style").map(str::to_owned),
         fill: optional_property_value(node, "fill"),
         stroke: optional_property_value(node, "stroke"),
@@ -1305,6 +1323,8 @@ const ELLIPSE_KNOWN_PROPS: &[&str] = &[
     "y",
     "w",
     "h",
+    "rx",
+    "ry",
     "style",
     "fill",
     "stroke",
@@ -1333,6 +1353,10 @@ fn transform_ellipse(node: &KdlNode) -> Result<EllipseNode, ParseError> {
     let stroke_linecap =
         optional_string_prop_aliased(node, "stroke-linecap", "stroke_linecap").map(str::to_owned);
 
+    // Independent axis radii (override inscribed-ellipse default).
+    let rx = optional_property_value(node, "rx");
+    let ry = optional_property_value(node, "ry");
+
     let unknown_props = collect_unknown_props(node, ELLIPSE_KNOWN_PROPS);
 
     Ok(EllipseNode {
@@ -1343,6 +1367,8 @@ fn transform_ellipse(node: &KdlNode) -> Result<EllipseNode, ParseError> {
         y: optional_dimension_prop(node, "y"),
         w: optional_dimension_prop(node, "w"),
         h: optional_dimension_prop(node, "h"),
+        rx,
+        ry,
         style: optional_string_prop(node, "style").map(str::to_owned),
         fill: optional_property_value(node, "fill"),
         stroke: optional_property_value(node, "stroke"),

@@ -286,6 +286,10 @@ fn write_rect(r: &RectNode, out: &mut String, depth: usize) {
     write_opt_dimension(out, "w", &r.w);
     write_opt_dimension(out, "h", &r.h);
     write_opt_property_value(out, "radius", &r.radius);
+    write_opt_property_value(out, "radius-tl", &r.radius_tl);
+    write_opt_property_value(out, "radius-tr", &r.radius_tr);
+    write_opt_property_value(out, "radius-br", &r.radius_br);
+    write_opt_property_value(out, "radius-bl", &r.radius_bl);
     write_opt_property_value(out, "fill", &r.fill);
     write_opt_property_value(out, "stroke", &r.stroke);
     write_opt_property_value(out, "stroke-width", &r.stroke_width);
@@ -374,6 +378,8 @@ fn write_ellipse(e: &EllipseNode, out: &mut String, depth: usize) {
     write_opt_dimension(out, "y", &e.y);
     write_opt_dimension(out, "w", &e.w);
     write_opt_dimension(out, "h", &e.h);
+    write_opt_property_value(out, "rx", &e.rx);
+    write_opt_property_value(out, "ry", &e.ry);
     write_opt_property_value(out, "fill", &e.fill);
     write_opt_property_value(out, "stroke", &e.stroke);
     write_opt_property_value(out, "stroke-width", &e.stroke_width);

@@ -342,11 +342,21 @@ page id="page.e1" w=(px)640 h=(px)360 {
     );
 
     match &cmds[1] {
-        SceneCommand::FillEllipse { x, y, w, h, color } => {
+        SceneCommand::FillEllipse {
+            x,
+            y,
+            w,
+            h,
+            rx,
+            ry,
+            color,
+        } => {
             assert_eq!(*x, 0.0);
             assert_eq!(*y, 0.0);
             assert_eq!(*w, 640.0);
             assert_eq!(*h, 360.0);
+            assert!(rx.is_none(), "expected rx=None for inscribed ellipse");
+            assert!(ry.is_none(), "expected ry=None for inscribed ellipse");
             // #f8fafc → r=0xf8=248, g=0xfa=250, b=0xfc=252, a=255
             assert_eq!(color.r, 0xf8);
             assert_eq!(color.g, 0xfa);
@@ -438,11 +448,21 @@ page id="page.e3" w=(px)200 h=(px)200 {
     );
 
     match &cmds[1] {
-        SceneCommand::FillEllipse { x, y, w, h, color } => {
+        SceneCommand::FillEllipse {
+            x,
+            y,
+            w,
+            h,
+            rx,
+            ry,
+            color,
+        } => {
             assert_eq!(*x, 10.0);
             assert_eq!(*y, 10.0);
             assert_eq!(*w, 180.0);
             assert_eq!(*h, 180.0);
+            assert!(rx.is_none(), "expected rx=None for inscribed ellipse");
+            assert!(ry.is_none(), "expected ry=None for inscribed ellipse");
             // #1e293b → r=0x1e=30, g=0x29=41, b=0x3b=59, a=255
             assert_eq!(color.r, 0x1e);
             assert_eq!(color.g, 0x29);

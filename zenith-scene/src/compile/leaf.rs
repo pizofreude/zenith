@@ -134,6 +134,34 @@ pub(super) fn compile_rect(
         .or_else(|| style_prop(&rect.style, style_map, "radius").cloned());
     let radius = resolve_property_dimension_px(&radius_prop, resolved, 0.0);
 
+    // Per-corner radius overrides. When any corner prop is present, build the
+    // `radii` array (each corner falls back to uniform `radius`). When NO
+    // corner prop is present, `radii` stays `None` → byte-identical to before.
+    let has_corner_props = rect.radius_tl.is_some()
+        || rect.radius_tr.is_some()
+        || rect.radius_br.is_some()
+        || rect.radius_bl.is_some();
+    let radii: Option<[f64; 4]> = if has_corner_props {
+        let tl = rect.radius_tl.as_ref().map_or(radius, |p| {
+            resolve_property_dimension_px(&Some(p.clone()), resolved, radius)
+        });
+        let tr = rect.radius_tr.as_ref().map_or(radius, |p| {
+            resolve_property_dimension_px(&Some(p.clone()), resolved, radius)
+        });
+        let br = rect.radius_br.as_ref().map_or(radius, |p| {
+            resolve_property_dimension_px(&Some(p.clone()), resolved, radius)
+        });
+        let bl = rect.radius_bl.as_ref().map_or(radius, |p| {
+            resolve_property_dimension_px(&Some(p.clone()), resolved, radius)
+        });
+        Some([tl, tr, br, bl])
+    } else {
+        None
+    };
+
+    // A rect is "rounded" when the uniform radius or any per-corner override > 0.
+    let is_rounded = radius > 0.0 || radii.as_ref().is_some_and(|a| a.iter().any(|&v| v > 0.0));
+
     // Rotation bracket (outermost). PushTransform is only emitted when
     // rotate is non-zero; unrotated rects are byte-identical to before.
     let rot = rotation_degrees(rect.rotate.as_ref());
@@ -171,13 +199,14 @@ pub(super) fn compile_rect(
     if let Some(fill_prop) = fill_prop {
         if let Some(mut gradient) = resolve_property_gradient(fill_prop, resolved, &rect.id) {
             apply_gradient_opacity(&mut gradient, node_opacity, ctx.opacity);
-            if radius > 0.0 {
+            if is_rounded {
                 commands.push(SceneCommand::FillRoundedRectGradient {
                     x,
                     y,
                     w,
                     h,
                     radius,
+                    radii,
                     gradient,
                 });
             } else {
@@ -193,13 +222,14 @@ pub(super) fn compile_rect(
             resolve_property_color(fill_prop, resolved, diagnostics, &rect.id)
         {
             color.a = (color.a as f64 * node_opacity * ctx.opacity).round() as u8;
-            if radius > 0.0 {
+            if is_rounded {
                 commands.push(SceneCommand::FillRoundedRect {
                     x,
                     y,
                     w,
                     h,
                     radius,
+                    radii,
                     color,
                 });
             } else {
@@ -238,41 +268,62 @@ pub(super) fn compile_rect(
         // edge; `inside`/`outside` shift the whole stroked rectangle in or
         // out. The fill geometry above is unaffected.
         let half = stroke_width / 2.0;
-        let (sx, sy, sw_geom, sh_geom, sradius) = match rect.stroke_alignment.as_deref() {
-            // The corner radius only shifts for an already-rounded rect;
-            // a sharp rect (radius 0) must stay sharp.
+
+        // Helper: adjust a single corner radius for stroke alignment. A
+        // corner with radius 0 stays sharp (no adjustment).
+        let adjust_inside = |v: f64| if v > 0.0 { (v - half).max(0.0) } else { 0.0 };
+        let adjust_outside = |v: f64| if v > 0.0 { v + half } else { 0.0 };
+
+        let (sx, sy, sw_geom, sh_geom, sradius, sradii) = match rect.stroke_alignment.as_deref() {
             Some("inside") => (
                 x + half,
                 y + half,
                 w - stroke_width,
                 h - stroke_width,
-                if radius > 0.0 {
-                    (radius - half).max(0.0)
-                } else {
-                    0.0
-                },
+                adjust_inside(radius),
+                radii.map(|[tl, tr, br, bl]| {
+                    [
+                        adjust_inside(tl),
+                        adjust_inside(tr),
+                        adjust_inside(br),
+                        adjust_inside(bl),
+                    ]
+                }),
             ),
             Some("outside") => (
                 x - half,
                 y - half,
                 w + stroke_width,
                 h + stroke_width,
-                if radius > 0.0 { radius + half } else { 0.0 },
+                adjust_outside(radius),
+                radii.map(|[tl, tr, br, bl]| {
+                    [
+                        adjust_outside(tl),
+                        adjust_outside(tr),
+                        adjust_outside(br),
+                        adjust_outside(bl),
+                    ]
+                }),
             ),
             // "center" (default) and any unrecognized value.
-            _ => (x, y, w, h, radius),
+            _ => (x, y, w, h, radius, radii),
         };
+
+        // Whether the stroked shape is still rounded after alignment.
+        let stroke_is_rounded =
+            sradius > 0.0 || sradii.as_ref().is_some_and(|a| a.iter().any(|&v| v > 0.0));
 
         // An inside-aligned stroke can shrink the box to nothing; skip
         // rather than emit a degenerate rectangle.
         if sw_geom > 0.0 && sh_geom > 0.0 {
-            if sradius > 0.0 {
+            if stroke_is_rounded {
                 commands.push(SceneCommand::StrokeRoundedRect {
                     x: sx,
                     y: sy,
                     w: sw_geom,
                     h: sh_geom,
                     radius: sradius,
+                    radii: sradii,
                     color,
                     stroke_width,
                     stroke_dash,
@@ -380,6 +431,17 @@ pub(super) fn compile_ellipse(
     // Apply node opacity then cascade ctx.opacity on top.
     let node_opacity = ellipse.opacity.unwrap_or(1.0).clamp(0.0, 1.0);
 
+    // Resolve independent semi-axis overrides. When absent → `None` → byte-identical
+    // to inscribed-ellipse behavior (renderer uses w/h directly).
+    let rx: Option<f64> = ellipse.rx.as_ref().and_then(|p| {
+        let v = resolve_property_dimension_px(&Some(p.clone()), resolved, 0.0);
+        if v > 0.0 { Some(v) } else { None }
+    });
+    let ry: Option<f64> = ellipse.ry.as_ref().and_then(|p| {
+        let v = resolve_property_dimension_px(&Some(p.clone()), resolved, 0.0);
+        if v > 0.0 { Some(v) } else { None }
+    });
+
     // Rotation bracket (outermost). PushTransform only when rotate ≠ 0.
     let rot = rotation_degrees(ellipse.rotate.as_ref());
     if let Some(angle) = rot {
@@ -420,13 +482,23 @@ pub(super) fn compile_ellipse(
                 y,
                 w,
                 h,
+                rx,
+                ry,
                 gradient,
             });
         } else if let Some(mut color) =
             resolve_property_color(fill_prop, resolved, diagnostics, &ellipse.id)
         {
             color.a = (color.a as f64 * node_opacity * ctx.opacity).round() as u8;
-            commands.push(SceneCommand::FillEllipse { x, y, w, h, color });
+            commands.push(SceneCommand::FillEllipse {
+                x,
+                y,
+                w,
+                h,
+                rx,
+                ry,
+                color,
+            });
         }
     }
 
@@ -460,6 +532,8 @@ pub(super) fn compile_ellipse(
             y,
             w,
             h,
+            rx,
+            ry,
             color,
             stroke_width,
             stroke_dash,

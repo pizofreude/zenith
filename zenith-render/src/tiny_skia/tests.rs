@@ -603,6 +603,8 @@ fn stroke_ellipse_renders() {
         y: 30.0,
         w: 60.0,
         h: 40.0,
+        rx: None,
+        ry: None,
         color,
         stroke_width: 4.0,
         stroke_dash: None,
@@ -723,6 +725,8 @@ fn ellipse_partial_clip_truncates_not_reshapes() {
         y: 0.0,
         w: 20.0,
         h: 20.0,
+        rx: None,
+        ry: None,
         color: Color::srgb(255, 255, 255, 255),
     });
     scene.commands.push(SceneCommand::PopClip);
@@ -943,6 +947,7 @@ fn fill_rounded_rect_cuts_corner_fills_center() {
         w: 40.0,
         h: 40.0,
         radius: 20.0,
+        radii: None,
         color: Color::srgb(255, 255, 255, 255),
     });
     scene.commands.push(SceneCommand::PopClip);
@@ -993,6 +998,7 @@ fn rounded_and_stroke_rects_deterministic_png() {
         w: 30.0,
         h: 30.0,
         radius: 10.0,
+        radii: None,
         color: Color::srgb(0, 200, 0, 255),
     });
     scene.commands.push(SceneCommand::StrokeRoundedRect {
@@ -1001,6 +1007,7 @@ fn rounded_and_stroke_rects_deterministic_png() {
         w: 40.0,
         h: 30.0,
         radius: 8.0,
+        radii: None,
         color: Color::srgb(0, 0, 200, 255),
         stroke_width: 3.0,
         stroke_dash: None,
