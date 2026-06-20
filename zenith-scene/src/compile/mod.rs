@@ -26,9 +26,6 @@ mod paint;
 mod text;
 mod util;
 
-#[cfg(test)]
-mod tests;
-
 use std::collections::BTreeMap;
 
 use zenith_core::{

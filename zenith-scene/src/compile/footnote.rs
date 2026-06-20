@@ -368,3 +368,40 @@ fn node_bottom_box(node: &Node) -> Option<(f64, f64, f64, f64, String)> {
         id.clone(),
     ))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::collect_footnote_markers;
+    use zenith_core::{KdlAdapter, KdlSource};
+
+    /// Two page-level footnotes auto-number `1` and `2` in source order, keyed by
+    /// their ids in the ordered marker map. This is a UNIT test, not an
+    /// integration test: `collect_footnote_markers` is `pub(super)`, so the marker
+    /// NUMBERS can only be asserted with crate-internal access (the public scene
+    /// exposes the rendered glyphs, not the marker strings).
+    #[test]
+    fn two_footnotes_auto_number_one_and_two() {
+        let src = br##"zenith version=1 {
+  project id="proj.fn2" name="FN2"
+  tokens format="zenith-token-v1" {}
+  styles {}
+  document id="doc.fn2" title="FN2" {
+    page id="page.fn2" w=(px)600 h=(px)900 {
+      text id="body" x=(px)60 y=(px)80 w=(px)480 h=(px)200 {
+        span "First mark" footnote-ref="fn.1"
+        span " and second mark" footnote-ref="fn.2"
+      }
+      footnote id="fn.1" { span "First note." }
+      footnote id="fn.2" { span "Second note." }
+    }
+  }
+}
+"##;
+        let doc = KdlAdapter.parse(src).expect("test document must parse");
+        let page = doc.body.pages.first().expect("one page");
+        let markers = collect_footnote_markers(page);
+        assert_eq!(markers.get("fn.1").map(String::as_str), Some("1"));
+        assert_eq!(markers.get("fn.2").map(String::as_str), Some("2"));
+        assert_eq!(markers.len(), 2);
+    }
+}

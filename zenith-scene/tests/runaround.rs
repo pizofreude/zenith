@@ -1,0 +1,154 @@
+mod common;
+use common::*;
+use zenith_core::default_provider;
+use zenith_scene::compile;
+
+/// A wrapping text node WITHOUT `text-exclusion` must emit a command stream
+/// identical to the same node with no exclusion attribute — the determinism gate.
+#[test]
+fn runaround_none_is_byte_identical() {
+    // Same body, no rect, no exclusion: the attribute path must be inert.
+    let a = compile(&runaround_doc("", ""), &default_provider());
+    let b = compile(&runaround_doc("", ""), &default_provider());
+    assert_eq!(
+        a.scene.commands, b.scene.commands,
+        "a node without text-exclusion must be deterministic and unchanged"
+    );
+    // Sanity: the body actually wrapped (more than one glyph-run line).
+    let ys: std::collections::BTreeSet<u64> = glyph_run_positions(&a.scene.commands)
+        .iter()
+        .map(|(_, y)| y.to_bits())
+        .collect();
+    assert!(ys.len() > 1, "body must wrap onto multiple lines");
+}
+
+/// An exclusion on the LEFT half over the top of the box shifts the affected
+/// lines' first glyph to at/after the exclusion's right edge; lines below the
+/// exclusion return to the box origin x.
+#[test]
+fn runaround_left_exclusion_shifts_lines_right() {
+    // Rect [0,0,200,120]: left half, top 120px. text_x=0, box_w=400.
+    // left_w = 0, right_w = 400-200 = 200 → right segment wins → origin = 200.
+    let rect = r##"rect id="ex" x=(px)0 y=(px)0 w=(px)200 h=(px)120 fill="#000000""##;
+    let result = compile(
+        &runaround_doc(rect, r#"text-exclusion="ex""#),
+        &default_provider(),
+    );
+    let pos = glyph_run_positions(&result.scene.commands);
+    assert!(!pos.is_empty(), "text must render");
+    // Lines whose baseline falls within the exclusion band start at x >= 200.
+    let mut saw_shifted = false;
+    let mut saw_returned = false;
+    for (x, y) in &pos {
+        if *y <= 120.0 {
+            assert!(
+                *x >= 200.0 - 0.5,
+                "a line in the exclusion band must start at/after the rect right edge (200); got x={x} y={y}"
+            );
+            saw_shifted = true;
+        } else if *x < 1.0 {
+            saw_returned = true;
+        }
+    }
+    assert!(saw_shifted, "at least one line must be shifted right");
+    assert!(
+        saw_returned,
+        "lines below the exclusion must return to text_x (0)"
+    );
+}
+
+/// An exclusion on the RIGHT keeps affected lines at origin `text_x` but packs
+/// them into the narrower LEFT segment → more line breaks within the band.
+#[test]
+fn runaround_right_exclusion_narrows_lines() {
+    // Rect [250,0,150,120]: right side. left_w = 250, right_w = 400-400 = 0.
+    // left >= right and left >= min → origin = text_x (0), width = 250.
+    let rect = r##"rect id="ex" x=(px)250 y=(px)0 w=(px)150 h=(px)120 fill="#000000""##;
+    let narrowed = compile(
+        &runaround_doc(rect, r#"text-exclusion="ex""#),
+        &default_provider(),
+    );
+    let uniform = compile(&runaround_doc("", ""), &default_provider());
+
+    // Affected lines keep origin x == 0. A wrapped line emits one run PER word,
+    // so the line ORIGIN is the MINIMUM x among runs sharing a baseline y.
+    let mut min_x_by_y: std::collections::BTreeMap<u64, f64> = std::collections::BTreeMap::new();
+    for (x, y) in glyph_run_positions(&narrowed.scene.commands) {
+        let e = min_x_by_y.entry(y.to_bits()).or_insert(f64::INFINITY);
+        *e = e.min(x);
+    }
+    for (y_bits, min_x) in &min_x_by_y {
+        let y = f64::from_bits(*y_bits);
+        if y <= 120.0 {
+            assert!(
+                *min_x < 1.0,
+                "a right-exclusion line must start at text_x (0); got min_x={min_x} y={y}"
+            );
+        }
+    }
+    // The narrower measure produces at least as many lines as the full width.
+    let n_narrow = glyph_run_positions(&narrowed.scene.commands).len();
+    let n_uniform = glyph_run_positions(&uniform.scene.commands).len();
+    assert!(
+        n_narrow >= n_uniform,
+        "narrowing the band must not reduce the line/run count ({n_narrow} vs {n_uniform})"
+    );
+}
+
+/// A FULL-WIDTH exclusion band leaves the lines in that band EMPTY (no glyph
+/// runs in the excluded y-range); text resumes below the band.
+#[test]
+fn runaround_full_width_exclusion_skips_lines() {
+    // Rect [0,100,400,120] spans the whole box width over y in [100,220].
+    // Both segments are 0 wide → those lines are BLOCKED (empty).
+    let rect = r##"rect id="ex" x=(px)0 y=(px)100 w=(px)400 h=(px)120 fill="#000000""##;
+    let result = compile(
+        &runaround_doc(rect, r#"text-exclusion="ex""#),
+        &default_provider(),
+    );
+    let pos = glyph_run_positions(&result.scene.commands);
+    // No glyph baseline may fall strictly inside the excluded band interior.
+    for (_, y) in &pos {
+        assert!(
+            !(*y > 100.0 && *y < 220.0),
+            "no glyph run may land inside a full-width exclusion band (100..220); got y={y}"
+        );
+    }
+    // Text must exist both above and below the band (flow resumes).
+    assert!(
+        pos.iter().any(|(_, y)| *y <= 100.0),
+        "text must flow above the band"
+    );
+    assert!(
+        pos.iter().any(|(_, y)| *y >= 220.0),
+        "text must resume below the band"
+    );
+}
+
+/// An unresolved `text-exclusion` emits the advisory AND renders byte-identically
+/// to the uniform (no-exclusion) stream.
+#[test]
+fn runaround_unresolved_ref_emits_advisory_and_renders_uniform() {
+    let bad = compile(
+        &runaround_doc("", r#"text-exclusion="nope""#),
+        &default_provider(),
+    );
+    let uniform = compile(&runaround_doc("", ""), &default_provider());
+
+    let advisories: Vec<_> = bad
+        .diagnostics
+        .iter()
+        .filter(|d| d.code == "text-exclusion.unresolved_ref")
+        .collect();
+    assert_eq!(
+        advisories.len(),
+        1,
+        "exactly one unresolved-ref advisory; got {:?}",
+        bad.diagnostics
+    );
+
+    assert_eq!(
+        bad.scene.commands, uniform.scene.commands,
+        "an unresolved exclusion must render the uniform stream (byte-identical)"
+    );
+}
