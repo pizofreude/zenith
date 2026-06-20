@@ -302,6 +302,19 @@ pub fn validate(doc: &Document) -> ValidationReport {
     // RTL book: the binding is on the opposite side, mirroring the recto/verso
     // live-area parity (see `margin::check_margins`).
     let rtl_book = doc.page_progression.as_deref() == Some("rtl");
+    // ── A document must contain at least one page ─────────────────────────
+    // A zero-page document has no output target; this is a hard error.
+    if doc.body.pages.is_empty() {
+        diagnostics.push(Diagnostic::error(
+            "document.no_pages",
+            format!(
+                "document '{}': a document must contain at least one page",
+                doc.body.id
+            ),
+            None,
+            Some(doc.body.id.clone()),
+        ));
+    }
     for (page_idx0, page) in doc.body.pages.iter().enumerate() {
         let page_index_1based = page_idx0 + 1;
         register_id(&page.id, &mut seen_ids, &mut diagnostics);
@@ -367,6 +380,33 @@ pub fn validate(doc: &Document) -> ValidationReport {
                     "page '{}': property 'height' has an unrecognized unit; \
                      allowed units are px, pt, pct, deg",
                     page.id
+                ),
+                page.source_span,
+                Some(page.id.clone()),
+            ));
+        }
+
+        // ── Page dimensions must be a strictly positive, finite length ────
+        // A zero or negative width/height is a degenerate output target (an
+        // empty canvas) and is rejected; `(px)0`, `(px)-100`, NaN, and ∞ all
+        // fail here. The unit is validated separately above.
+        if !page.width.value.is_finite() || page.width.value <= 0.0 {
+            diagnostics.push(Diagnostic::error(
+                "value.out_of_range",
+                format!(
+                    "page '{}': width must be a strictly positive length (got {})",
+                    page.id, page.width.value
+                ),
+                page.source_span,
+                Some(page.id.clone()),
+            ));
+        }
+        if !page.height.value.is_finite() || page.height.value <= 0.0 {
+            diagnostics.push(Diagnostic::error(
+                "value.out_of_range",
+                format!(
+                    "page '{}': height must be a strictly positive length (got {})",
+                    page.id, page.height.value
                 ),
                 page.source_span,
                 Some(page.id.clone()),

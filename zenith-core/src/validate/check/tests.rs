@@ -619,6 +619,61 @@ fn page_unknown_unit_produces_invalid_geometry() {
     assert!(report.has_errors());
 }
 
+// ── Page dimensions must be strictly positive ────────────────────────
+
+/// Build a single-page document whose page has the given width/height dims.
+fn doc_with_page_dims(width: Dimension, height: Dimension) -> Document {
+    let mut page = minimal_page("page.dim", vec![]);
+    page.width = width;
+    page.height = height;
+    doc_with(vec![], vec![page])
+}
+
+#[test]
+fn page_zero_width_produces_out_of_range() {
+    let report = validate(&doc_with_page_dims(px(0.0), px(720.0)));
+    assert!(
+        has_code(&report, "value.out_of_range"),
+        "codes: {:?}",
+        codes(&report)
+    );
+    assert!(report.has_errors());
+}
+
+#[test]
+fn page_negative_height_produces_out_of_range() {
+    let report = validate(&doc_with_page_dims(px(1280.0), px(-100.0)));
+    assert!(
+        has_code(&report, "value.out_of_range"),
+        "codes: {:?}",
+        codes(&report)
+    );
+    assert!(report.has_errors());
+}
+
+#[test]
+fn page_positive_dims_no_out_of_range() {
+    let report = validate(&doc_with_page_dims(px(1280.0), px(720.0)));
+    assert!(
+        !has_code(&report, "value.out_of_range"),
+        "positive dims must not trip value.out_of_range; codes: {:?}",
+        codes(&report)
+    );
+}
+
+// ── A document must contain at least one page ────────────────────────
+
+#[test]
+fn empty_document_produces_no_pages_error() {
+    let report = validate(&doc_with(vec![], vec![]));
+    assert!(
+        has_code(&report, "document.no_pages"),
+        "codes: {:?}",
+        codes(&report)
+    );
+    assert!(report.has_errors());
+}
+
 // ── Bonus: node with unknown property → node.unknown_property ─────────
 
 #[test]
@@ -1728,7 +1783,9 @@ fn doc_with_assets(assets: Vec<AssetDecl>) -> Document {
         body: DocumentBody {
             id: "doc.asset-test".to_owned(),
             title: None,
-            pages: vec![],
+            // A valid document needs ≥1 page; these asset tests don't care about
+            // page content, so use a single minimal page.
+            pages: vec![minimal_page("page.one", vec![])],
         },
     }
 }

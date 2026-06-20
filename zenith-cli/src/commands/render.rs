@@ -872,7 +872,14 @@ mod tests {
 }
 "##;
         let err = to_png_all_pages(empty, None, false).expect_err("a doc with no pages must error");
-        assert_eq!(err.exit_code, 2);
+        // A zero-page document is now rejected at validation (document.no_pages,
+        // exit 1) rather than later at the render stage (exit 2).
+        assert_eq!(err.exit_code, 1);
+        assert!(
+            err.message.contains("document.no_pages"),
+            "expected a document.no_pages diagnostic; got: {}",
+            err.message
+        );
     }
 
     // ── overflow="fit" artifact-level tests ──────────────────────────────────
