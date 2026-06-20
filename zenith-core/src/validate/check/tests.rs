@@ -175,6 +175,10 @@ fn minimal_page(id: &str, children: Vec<Node>) -> Page {
         height: px(720.0),
         background: None,
         bleed: None,
+        margin_inner: None,
+        margin_outer: None,
+        margin_top: None,
+        margin_bottom: None,
         safe_zones: Vec::new(),
         folds: Vec::new(),
         children,
@@ -186,6 +190,8 @@ fn doc_with(tokens: Vec<Token>, pages: Vec<Page>) -> Document {
     Document {
         version: 1,
         colorspace: None,
+        mirror_margins: None,
+        page_progression: None,
         project: None,
         assets: AssetBlock::default(),
         tokens: TokenBlock {
@@ -510,6 +516,10 @@ fn page_unknown_unit_produces_invalid_geometry() {
             height: px(720.0),
             background: None,
             bleed: None,
+            margin_inner: None,
+            margin_outer: None,
+            margin_top: None,
+            margin_bottom: None,
             safe_zones: Vec::new(),
             folds: Vec::new(),
             children: vec![],
@@ -1456,6 +1466,8 @@ fn doc_with_assets(assets: Vec<AssetDecl>) -> Document {
     Document {
         version: 1,
         colorspace: None,
+        mirror_margins: None,
+        page_progression: None,
         project: None,
         assets: AssetBlock {
             assets,
@@ -2092,6 +2104,8 @@ fn doc_with_styles(tokens: Vec<Token>, styles: Vec<Style>, pages: Vec<Page>) -> 
     Document {
         version: 1,
         colorspace: None,
+        mirror_margins: None,
+        page_progression: None,
         project: None,
         assets: AssetBlock::default(),
         tokens: TokenBlock {
@@ -2365,6 +2379,10 @@ fn bounded_page(id: &str, w: f64, h: f64, children: Vec<Node>) -> Page {
         height: px(h),
         background: None,
         bleed: None,
+        margin_inner: None,
+        margin_outer: None,
+        margin_top: None,
+        margin_bottom: None,
         safe_zones: Vec::new(),
         folds: Vec::new(),
         children,
@@ -2540,6 +2558,10 @@ fn page_with_bg(id: &str, bg_token_id: &str, children: Vec<Node>) -> Page {
         height: px(720.0),
         background: Some(PropertyValue::TokenRef(bg_token_id.to_owned())),
         bleed: None,
+        margin_inner: None,
+        margin_outer: None,
+        margin_top: None,
+        margin_bottom: None,
         safe_zones: Vec::new(),
         folds: Vec::new(),
         children,
@@ -2767,6 +2789,10 @@ fn page_with_zones(
         height: px(h),
         background: None,
         bleed: None,
+        margin_inner: None,
+        margin_outer: None,
+        margin_top: None,
+        margin_bottom: None,
         safe_zones,
         folds: Vec::new(),
         children,
@@ -3004,6 +3030,10 @@ fn page_with_folds(id: &str, w: f64, h: f64, folds: Vec<Fold>, children: Vec<Nod
         height: px(h),
         background: None,
         bleed: None,
+        margin_inner: None,
+        margin_outer: None,
+        margin_top: None,
+        margin_bottom: None,
         safe_zones: Vec::new(),
         folds,
         children,
@@ -3377,4 +3407,158 @@ fn bleed_negative_warns_not_errors() {
     let report = validate(&doc_with(vec![], vec![page]));
     assert!(has_code(&report, "page.invalid_bleed"));
     assert!(!report.has_errors());
+}
+
+// ══════════════════════════════════════════════════════════════════════
+// margin.violation advisory tests (book live-area)
+// ══════════════════════════════════════════════════════════════════════
+
+/// Helper: a book page with the standard four margins set
+/// (inner 225, outer 150, top 210, bottom 240 on a 1240×1754 spread).
+fn book_page(id: &str, children: Vec<Node>) -> Page {
+    let mut page = bounded_page(id, 1240.0, 1754.0, children);
+    page.margin_inner = Some(px(225.0));
+    page.margin_outer = Some(px(150.0));
+    page.margin_top = Some(px(210.0));
+    page.margin_bottom = Some(px(240.0));
+    page
+}
+
+/// Returns `true` when a `margin.violation` advisory names `node_id`.
+fn has_margin_violation_for(report: &ValidationReport, node_id: &str) -> bool {
+    report
+        .diagnostics
+        .iter()
+        .any(|d| d.code == "margin.violation" && d.subject_id.as_deref() == Some(node_id))
+}
+
+#[test]
+fn margin_recto_node_inside_live_area_no_violation() {
+    // recto live area: x∈[225, 1090], y∈[210, 1514]. A rect fully inside.
+    let doc = doc_with(
+        vec![],
+        vec![book_page(
+            "page.recto",
+            vec![rect_at("ok", 300.0, 300.0, 400.0, 400.0)],
+        )],
+    );
+    let report = validate(&doc);
+    assert!(
+        !has_code(&report, "margin.violation"),
+        "node inside the live area must not trip margin.violation; got {:?}",
+        codes(&report)
+    );
+}
+
+#[test]
+fn margin_recto_node_left_of_inner_violates() {
+    // mirror on, page 1 = recto → inner (225) insets the LEFT. A rect at x=100
+    // crosses the left margin edge.
+    let mut doc = doc_with(
+        vec![],
+        vec![book_page(
+            "page.recto",
+            vec![rect_at("bleeds", 100.0, 300.0, 50.0, 50.0)],
+        )],
+    );
+    doc.mirror_margins = Some(true);
+    let report = validate(&doc);
+    assert!(
+        has_margin_violation_for(&report, "bleeds"),
+        "a recto node left of margin-inner must trip margin.violation; got {:?}",
+        codes(&report)
+    );
+}
+
+#[test]
+fn margin_verso_parity_flips_inner_side() {
+    // A rect at x=160 sits BETWEEN outer (150) and inner (225).
+    // mirror on:
+    //   - page 1 (recto): left inset = inner = 225 → 160 < 225 → VIOLATION.
+    //   - page 2 (verso): left inset = outer = 150 → 160 ≥ 150 → NO violation.
+    let recto_rect = rect_at("r.node", 160.0, 300.0, 400.0, 400.0);
+    let verso_rect = rect_at("v.node", 160.0, 300.0, 400.0, 400.0);
+    let mut doc = doc_with(
+        vec![],
+        vec![
+            book_page("page.recto", vec![recto_rect]),
+            book_page("page.verso", vec![verso_rect]),
+        ],
+    );
+    doc.mirror_margins = Some(true);
+    let report = validate(&doc);
+    assert!(
+        has_margin_violation_for(&report, "r.node"),
+        "recto node at x=160 (< inner 225) must violate; got {:?}",
+        codes(&report)
+    );
+    assert!(
+        !has_margin_violation_for(&report, "v.node"),
+        "verso node at x=160 (≥ outer 150) must NOT violate (inner side flipped); got {:?}",
+        codes(&report)
+    );
+}
+
+#[test]
+fn margin_guide_role_is_exempt() {
+    // A node with role="guide" intentionally lives in the margins → exempt.
+    let mut guide = rect_at("guide.line", 0.0, 300.0, 50.0, 50.0);
+    if let Node::Rect(r) = &mut guide {
+        r.role = Some("guide".to_owned());
+    }
+    let doc = doc_with(vec![], vec![book_page("page.recto", vec![guide])]);
+    let report = validate(&doc);
+    assert!(
+        !has_code(&report, "margin.violation"),
+        "a role=guide node must be exempt from margin.violation; got {:?}",
+        codes(&report)
+    );
+}
+
+#[test]
+fn margin_absent_skips_check() {
+    // A plain page with no margins → the check is skipped entirely.
+    let doc = doc_with(
+        vec![],
+        vec![bounded_page(
+            "page.plain",
+            1240.0,
+            1754.0,
+            vec![rect_at("any", 0.0, 0.0, 50.0, 50.0)],
+        )],
+    );
+    let report = validate(&doc);
+    assert!(
+        !has_code(&report, "margin.violation"),
+        "absent margins must skip the margin check; got {:?}",
+        codes(&report)
+    );
+}
+
+// ══════════════════════════════════════════════════════════════════════
+// document.invalid_page_progression warning tests
+// ══════════════════════════════════════════════════════════════════════
+
+#[test]
+fn page_progression_rtl_is_valid() {
+    let mut doc = doc_with(vec![], vec![minimal_page("page.one", vec![])]);
+    doc.page_progression = Some("rtl".to_owned());
+    let report = validate(&doc);
+    assert!(!has_code(&report, "document.invalid_page_progression"));
+}
+
+#[test]
+fn page_progression_invalid_warns() {
+    let mut doc = doc_with(vec![], vec![minimal_page("page.one", vec![])]);
+    doc.page_progression = Some("sideways".to_owned());
+    let report = validate(&doc);
+    assert!(
+        has_code(&report, "document.invalid_page_progression"),
+        "an unrecognized page-progression must warn; got {:?}",
+        codes(&report)
+    );
+    assert!(
+        !report.has_errors(),
+        "page-progression warning must not be a hard error"
+    );
 }

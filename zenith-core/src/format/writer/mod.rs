@@ -236,6 +236,8 @@ fn write_document(doc: &Document, out: &mut String) {
     // Optional export color space attribute, emitted right after version so the
     // canonical form round-trips (parse → format → parse is byte-stable).
     write_opt_str(out, "colorspace", &doc.colorspace);
+    write_opt_bool(out, "mirror-margins", &doc.mirror_margins);
+    write_opt_str(out, "page-progression", &doc.page_progression);
     out.push_str(" {\n");
 
     // Child order: project, assets, tokens, styles, document.

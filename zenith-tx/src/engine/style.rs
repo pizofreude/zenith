@@ -401,6 +401,7 @@ pub(super) fn apply_replace_text(
                     italic: s.italic,
                     underline: s.underline,
                     strikethrough: s.strikethrough,
+                    vertical_align: s.vertical_align.clone(),
                 })
                 .collect();
             record_affected(node_id, affected);

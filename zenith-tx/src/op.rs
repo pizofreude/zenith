@@ -51,6 +51,9 @@ pub struct OpSpan {
     /// Strikethrough decoration. `None` = inherit.
     #[serde(default)]
     pub strikethrough: Option<bool>,
+    /// Vertical alignment (`"super"` / `"sub"`). `None` = baseline (inherit).
+    #[serde(default)]
+    pub vertical_align: Option<String>,
 }
 
 /// Insertion position for [`Op::AddNode`] within a container's children.

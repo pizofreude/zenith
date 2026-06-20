@@ -28,9 +28,11 @@
 //! - [`contrast`] — the WCAG 2.2 contrast advisory.
 //! - [`safezone`] — safe-zone exclusion/required overlap advisories.
 //! - [`fold`] — fold-line content-crossing advisories.
+//! - [`margin`] — book live-area (mirrored-margin) violation advisories.
 
 mod contrast;
 mod fold;
+mod margin;
 mod nodes;
 mod safezone;
 mod visual;
@@ -98,6 +100,27 @@ pub fn validate(doc: &Document) -> ValidationReport {
                  \"cmyk\" (this attribute is export metadata and does not change \
                  PNG output)",
                 cs
+            ),
+            None,
+            None,
+        ));
+    }
+
+    // ── Document page-progression ─────────────────────────────────────────
+    // `page_progression` is export metadata; it does not affect page render
+    // order or PNG output. Only "ltr" and "rtl" are recognized; any other value
+    // is a Warning (forward-compatible — never a hard error).
+    if let Some(pp) = &doc.page_progression
+        && pp != "ltr"
+        && pp != "rtl"
+    {
+        diagnostics.push(Diagnostic::warning(
+            "document.invalid_page_progression",
+            format!(
+                "document page-progression '{}' is unrecognized; expected \"ltr\" or \
+                 \"rtl\" (this attribute is export metadata and does not change \
+                 page order or PNG output)",
+                pp
             ),
             None,
             None,
@@ -203,7 +226,11 @@ pub fn validate(doc: &Document) -> ValidationReport {
     register_id(&doc.body.id, &mut seen_ids, &mut diagnostics);
 
     // ── Pages and their children ──────────────────────────────────────────
-    for page in &doc.body.pages {
+    // The page index is 1-based (recto = odd, verso = even) and threaded into
+    // the margin advisory so it can pick the parity-correct live area.
+    let mirror_margins = doc.mirror_margins.unwrap_or(false);
+    for (page_idx0, page) in doc.body.pages.iter().enumerate() {
+        let page_index_1based = page_idx0 + 1;
         register_id(&page.id, &mut seen_ids, &mut diagnostics);
 
         // ── Check page geometry (unit must be known) ──────────────────────
@@ -345,6 +372,14 @@ pub fn validate(doc: &Document) -> ValidationReport {
         if let Some((page_w, page_h)) = page_px_bounds {
             safezone::check_safe_zones(page, page_w, page_h, &mut diagnostics);
             fold::check_folds(page, page_w, page_h, &mut diagnostics);
+            margin::check_margins(
+                page,
+                page_w,
+                page_h,
+                page_index_1based,
+                mirror_margins,
+                &mut diagnostics,
+            );
         }
     }
 

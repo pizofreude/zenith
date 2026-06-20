@@ -1009,6 +1009,28 @@ fn points_bbox(
     }
 }
 
+/// Extract the optional `role` attribute from any node variant.
+///
+/// Returns `None` for nodes that have no role set (or none in the AST at all,
+/// such as `Unknown`). Used by the margin advisory to exempt `role="guide"`
+/// nodes, which intentionally live in the page margins.
+pub(super) fn node_role(node: &Node) -> Option<&str> {
+    match node {
+        Node::Rect(n) => n.role.as_deref(),
+        Node::Ellipse(n) => n.role.as_deref(),
+        Node::Line(n) => n.role.as_deref(),
+        Node::Text(n) => n.role.as_deref(),
+        Node::Code(n) => n.role.as_deref(),
+        Node::Frame(n) => n.role.as_deref(),
+        Node::Group(n) => n.role.as_deref(),
+        Node::Image(n) => n.role.as_deref(),
+        Node::Polygon(n) => n.role.as_deref(),
+        Node::Polyline(n) => n.role.as_deref(),
+        Node::Instance(n) => n.role.as_deref(),
+        Node::Unknown(_) => None,
+    }
+}
+
 /// Extract the string id and source span from any node variant.
 pub(super) fn node_id_and_span(node: &Node) -> (&str, Option<crate::ast::Span>) {
     match node {

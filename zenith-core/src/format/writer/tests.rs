@@ -1744,3 +1744,133 @@ fn test_page_bleed_round_trips() {
         "bleed must survive parse → format → parse"
     );
 }
+
+/// **Page mirrored margins + document mirror-margins + page-progression
+/// round-trip**: the four page margins, the document `mirror-margins` toggle,
+/// and `page-progression` all parse, format into canonical text, and survive
+/// parse → format → parse.
+#[test]
+fn test_book_margins_round_trip() {
+    let src = r##"zenith version=1 mirror-margins=#true page-progression="rtl" {
+  project id="proj.book" name="Book"
+  tokens format="zenith-token-v1" {
+  }
+  styles {
+  }
+  document id="doc.book" title="Book" {
+    page id="page.recto" w=(px)1240 h=(px)1754 margin-inner=(px)225 margin-outer=(px)150 margin-top=(px)210 margin-bottom=(px)240 {
+    }
+  }
+}
+"##;
+    let adapter = KdlAdapter;
+    let doc = adapter.parse(src.as_bytes()).expect("parse");
+
+    // Document-level toggles.
+    assert_eq!(doc.mirror_margins, Some(true));
+    assert_eq!(doc.page_progression.as_deref(), Some("rtl"));
+
+    // Page-level margins.
+    let page = &doc.body.pages[0];
+    assert_eq!(page.margin_inner.as_ref().expect("inner").value, 225.0);
+    assert_eq!(page.margin_outer.as_ref().expect("outer").value, 150.0);
+    assert_eq!(page.margin_top.as_ref().expect("top").value, 210.0);
+    assert_eq!(page.margin_bottom.as_ref().expect("bottom").value, 240.0);
+
+    // Canonical form preserves every attribute verbatim.
+    let formatted = format_document(&doc).expect("format");
+    let text = String::from_utf8(formatted).expect("utf8");
+    for needle in [
+        "mirror-margins=#true",
+        "page-progression=\"rtl\"",
+        "margin-inner=(px)225",
+        "margin-outer=(px)150",
+        "margin-top=(px)210",
+        "margin-bottom=(px)240",
+    ] {
+        assert!(
+            text.contains(needle),
+            "formatted output must carry `{needle}`; got:\n{text}"
+        );
+    }
+
+    // Round-trip AST equality (spans stripped).
+    let reparsed = adapter
+        .parse(text.as_bytes())
+        .expect("re-parse after format");
+    assert_eq!(
+        strip_spans(doc),
+        strip_spans(reparsed),
+        "book margins + mirror-margins + page-progression must survive round-trip"
+    );
+}
+
+/// **Span vertical-align round-trip**: a `span ... vertical-align="super"` parses,
+/// formats into the canonical text, and survives parse → format → parse.
+#[test]
+fn test_span_vertical_align_round_trip() {
+    let src = r##"zenith version=1 {
+  project id="proj.va" name="VA"
+  tokens format="zenith-token-v1" {
+  }
+  styles {
+  }
+  document id="doc.va" title="VA" {
+    page id="page.one" w=(px)400 h=(px)400 {
+      text id="body" x=(px)10 y=(px)10 w=(px)300 h=(px)100 {
+        span "E = mc"
+        span "2" vertical-align="super"
+        span "; H"
+        span "2" vertical-align="sub"
+        span "O"
+      }
+    }
+  }
+}
+"##;
+    let adapter = KdlAdapter;
+    let doc = adapter.parse(src.as_bytes()).expect("parse");
+
+    let page = &doc.body.pages[0];
+    let crate::ast::Node::Text(text_node) = &page.children[0] else {
+        panic!("expected a text node");
+    };
+    assert_eq!(
+        text_node.spans[1].vertical_align.as_deref(),
+        Some("super"),
+        "second span must be superscript"
+    );
+    assert_eq!(
+        text_node.spans[3].vertical_align.as_deref(),
+        Some("sub"),
+        "fourth span must be subscript"
+    );
+    assert_eq!(
+        text_node.spans[0].vertical_align, None,
+        "a plain span must have no vertical-align"
+    );
+
+    // Canonical form preserves both vertical-align attributes verbatim.
+    let formatted = format_document(&doc).expect("format");
+    let text = String::from_utf8(formatted).expect("utf8");
+    assert!(
+        text.contains("vertical-align=\"super\""),
+        "formatted output must carry super vertical-align; got:\n{text}"
+    );
+    assert!(
+        text.contains("vertical-align=\"sub\""),
+        "formatted output must carry sub vertical-align; got:\n{text}"
+    );
+
+    // Round-trip AST equality. `strip_spans` only zeroes node SOURCE spans
+    // (the `vertical_align` content field on `TextSpan` is untouched), so this
+    // still proves vertical-align survives the round-trip.
+    let reparsed = adapter
+        .parse(text.as_bytes())
+        .expect("re-parse after format");
+    assert_eq!(
+        strip_spans(doc),
+        strip_spans(reparsed),
+        "span vertical-align must survive parse → format → parse"
+    );
+}

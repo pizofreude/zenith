@@ -48,6 +48,12 @@ pub struct TextSpan {
     pub underline: Option<bool>,
     /// Strikethrough decoration.
     pub strikethrough: Option<bool>,
+    /// Vertical alignment of the span relative to the run baseline. `Some("super")`
+    /// raises the span (superscript); `Some("sub")` lowers it (subscript). Both
+    /// typeset the span at a reduced font size. `None` (or any other value) keeps
+    /// the span on the baseline at full size. See the scene `compile_text`
+    /// super/subscript handling for the exact scale + baseline-shift factors.
+    pub vertical_align: Option<String>,
 }
 
 /// How an `image` node aligns its content within the declared box when the

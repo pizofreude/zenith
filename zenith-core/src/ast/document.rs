@@ -34,6 +34,27 @@ pub struct Page {
     /// the bleed margin at the four trim corners. `None` or a non-positive value
     /// renders byte-identically to a page with no bleed.
     pub bleed: Option<Dimension>,
+    /// Book live-area margin (gutter side). With document `mirror_margins=true`
+    /// this is the BINDING-side margin: it sits on the LEFT for a recto (odd,
+    /// 1-based) page and on the RIGHT for a verso (even) page. Without mirroring
+    /// it is treated uniformly as the left margin. `None` → no inner margin.
+    ///
+    /// Margins are v0 METADATA + VALIDATION ONLY: they describe the intended
+    /// live area and drive the `margin.violation` advisory, but they do NOT
+    /// auto-reposition arbitrary page nodes (that is the job of master pages /
+    /// flow frames). See [`super::super::validate`]'s margin check.
+    pub margin_inner: Option<Dimension>,
+    /// Book live-area margin (fore-edge side). The mirror of [`Page::margin_inner`]:
+    /// with `mirror_margins=true` it sits on the RIGHT for a recto page and on
+    /// the LEFT for a verso page; without mirroring it is the right margin.
+    /// `None` → no outer margin. Metadata + validation only (see `margin_inner`).
+    pub margin_outer: Option<Dimension>,
+    /// Book live-area top margin. `None` → no top margin. Metadata + validation
+    /// only (see [`Page::margin_inner`]).
+    pub margin_top: Option<Dimension>,
+    /// Book live-area bottom margin. `None` → no bottom margin. Metadata +
+    /// validation only (see [`Page::margin_inner`]).
+    pub margin_bottom: Option<Dimension>,
     /// Author-declared safe/dead zones for this page. These are not rendering
     /// nodes; the validator checks page children against them.
     pub safe_zones: Vec<SafeZone>,
@@ -129,6 +150,20 @@ pub struct Document {
     /// PNG is always sRGB); a future PDF backend consults it. An invalid value
     /// is preserved here verbatim and surfaced as a validation warning.
     pub colorspace: Option<String>,
+    /// Mirrored book margins toggle. `Some(true)` → page margins mirror by page
+    /// parity (recto = odd 1-based page → inner margin on LEFT; verso = even →
+    /// inner margin on RIGHT). `Some(false)` or `None` (default) → margins are
+    /// uniform (inner = left, outer = right on every page). This only affects
+    /// how [`Page::margin_inner`]/[`Page::margin_outer`] are interpreted by the
+    /// `margin.violation` validation advisory; it is metadata, not layout.
+    pub mirror_margins: Option<bool>,
+    /// Declared page progression for export: `Some("ltr")` (default) or
+    /// `Some("rtl")` (right-to-left book page order). `None` when the author
+    /// omitted the attribute. v0: metadata for export (e.g. a PDF
+    /// `/ViewerPreferences /Direction /R2L`); it does NOT change page render
+    /// order or PNG output. An invalid value is preserved verbatim and surfaced
+    /// as a validation warning.
+    pub page_progression: Option<String>,
     pub project: Option<Project>,
     /// Asset declarations; empty when the `assets` block is absent.
     pub assets: AssetBlock,

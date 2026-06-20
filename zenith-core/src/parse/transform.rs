@@ -331,6 +331,18 @@ pub fn transform(doc: &KdlDocument) -> Result<Document, ParseError> {
     // an unrecognized value is preserved verbatim for a precise warning.
     let colorspace = optional_string_prop(zenith_node, "colorspace").map(str::to_owned);
 
+    // Optional mirrored-margins toggle (`mirror-margins=#true`). Forward-compat:
+    // both the hyphenated and underscored spellings are accepted.
+    let mirror_margins = optional_bool_prop(zenith_node, "mirror-margins")
+        .or_else(|| optional_bool_prop(zenith_node, "mirror_margins"));
+
+    // Optional page-progression attribute (`page-progression="rtl"`). Value
+    // validity ("ltr"|"rtl") is checked by the validator, not the parser, so an
+    // unrecognized value is preserved verbatim for a precise warning.
+    let page_progression = optional_string_prop(zenith_node, "page-progression")
+        .or_else(|| optional_string_prop(zenith_node, "page_progression"))
+        .map(str::to_owned);
+
     let children_doc = zenith_node.children().ok_or_else(|| {
         ParseError::spanless(
             ParseErrorCode::MissingZenithRoot,
@@ -381,6 +393,8 @@ pub fn transform(doc: &KdlDocument) -> Result<Document, ParseError> {
     Ok(Document {
         version,
         colorspace,
+        mirror_margins,
+        page_progression,
         project,
         assets,
         tokens,
@@ -858,6 +872,19 @@ fn transform_page(node: &KdlNode) -> Result<Page, ParseError> {
     // preserved verbatim for a precise warning.
     let bleed = optional_dimension_prop(node, "bleed");
 
+    // Book live-area margins. Read like any other dimension prop; resolvability
+    // (px/pt) and sign are checked by the validator's margin advisory, never the
+    // parser, so odd-unit/odd-value margins are preserved verbatim. Both the
+    // hyphenated and underscored spellings are accepted for forward-compat.
+    let margin_inner = optional_dimension_prop(node, "margin-inner")
+        .or_else(|| optional_dimension_prop(node, "margin_inner"));
+    let margin_outer = optional_dimension_prop(node, "margin-outer")
+        .or_else(|| optional_dimension_prop(node, "margin_outer"));
+    let margin_top = optional_dimension_prop(node, "margin-top")
+        .or_else(|| optional_dimension_prop(node, "margin_top"));
+    let margin_bottom = optional_dimension_prop(node, "margin-bottom")
+        .or_else(|| optional_dimension_prop(node, "margin_bottom"));
+
     let source_span = node_span(node);
 
     // A page's children block mixes `safe-zone` and `fold` declarations (page
@@ -884,6 +911,10 @@ fn transform_page(node: &KdlNode) -> Result<Page, ParseError> {
         height,
         background,
         bleed,
+        margin_inner,
+        margin_outer,
+        margin_top,
+        margin_bottom,
         safe_zones,
         folds,
         children,
@@ -1694,6 +1725,8 @@ fn transform_span(node: &KdlNode) -> Result<TextSpan, ParseError> {
     let italic = optional_bool_prop(node, "italic");
     let underline = optional_bool_prop(node, "underline");
     let strikethrough = optional_bool_prop(node, "strikethrough");
+    let vertical_align =
+        optional_string_prop_aliased(node, "vertical-align", "vertical_align").map(str::to_owned);
 
     Ok(TextSpan {
         text,
@@ -1702,5 +1735,6 @@ fn transform_span(node: &KdlNode) -> Result<TextSpan, ParseError> {
         italic,
         underline,
         strikethrough,
+        vertical_align,
     })
 }

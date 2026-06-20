@@ -54,6 +54,10 @@ fn write_page(page: &Page, out: &mut String, depth: usize) {
     out.push_str(&fmt_dimension(&page.height));
     write_opt_property_value(out, "background", &page.background);
     write_opt_dimension(out, "bleed", &page.bleed);
+    write_opt_dimension(out, "margin-inner", &page.margin_inner);
+    write_opt_dimension(out, "margin-outer", &page.margin_outer);
+    write_opt_dimension(out, "margin-top", &page.margin_top);
+    write_opt_dimension(out, "margin-bottom", &page.margin_bottom);
 
     out.push_str(" {\n");
     // Safe-zones and folds are page metadata, emitted before the renderable
@@ -494,12 +498,14 @@ fn write_span(span: &TextSpan, out: &mut String, depth: usize) {
     out.push_str(&super::escape_kdl_string(&span.text));
     out.push('"');
 
-    // Inline props: fill, font-weight, italic, underline, strikethrough.
+    // Inline props: fill, font-weight, italic, underline, strikethrough,
+    // vertical-align.
     write_opt_property_value(out, "fill", &span.fill);
     write_opt_property_value(out, "font-weight", &span.font_weight);
     write_opt_bool(out, "italic", &span.italic);
     write_opt_bool(out, "underline", &span.underline);
     write_opt_bool(out, "strikethrough", &span.strikethrough);
+    write_opt_str(out, "vertical-align", &span.vertical_align);
 
     out.push('\n');
 }
