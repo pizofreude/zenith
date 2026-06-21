@@ -1133,11 +1133,13 @@ fn edge_anchor(boxr: (f64, f64, f64, f64), anchor: &str, toward: (f64, f64)) -> 
 /// Compile a `connector` leaf node — a semantic arrow whose endpoints are
 /// DERIVED at compile time from the resolved boxes of its `from`/`to` targets.
 ///
-/// Unit 1 draws a STRAIGHT 2-point line between the resolved edge anchors. The
-/// `route="orthogonal"` mode (Unit 3) and `marker-start`/`marker-end` arrowheads
-/// (Unit 2) are stored + validated but NOT rendered here: the line is always
-/// straight and headless. When `from`/`to` is absent, or a target box is not in
-/// `node_boxes` (unresolved), nothing is emitted (graceful — validation warned).
+/// Unit 1 draws a STRAIGHT 2-point line between the resolved edge anchors. Unit 2
+/// adds filled-triangle arrowheads at the `to` end (`marker-end="arrow"`) and/or
+/// the `from` end (`marker-start="arrow"`), in the line's stroke color and inside
+/// the same rotation bracket. The `route="orthogonal"` mode (Unit 3) is stored +
+/// validated but NOT rendered here. When `from`/`to` is absent, or a target box is
+/// not in `node_boxes` (unresolved), nothing is emitted (graceful — validation
+/// warned); markers follow the same guards, so a skipped line skips its heads.
 #[allow(clippy::too_many_arguments)]
 pub(super) fn compile_connector(
     connector: &ConnectorNode,
@@ -1220,9 +1222,58 @@ pub(super) fn compile_connector(
         fill_even_odd: false,
     });
 
+    // ARROWHEAD MARKERS (Unit 2) — filled triangles in the SAME stroke color,
+    // INSIDE the rotation bracket so they rotate with the line. The tip sits
+    // exactly on the endpoint; the base extends back along the line.
+    {
+        let mut emit_head = |tip, from_pt| {
+            if let Some(points) = arrowhead_points(tip, from_pt, stroke_width) {
+                commands.push(SceneCommand::FillPolygon {
+                    points,
+                    color,
+                    even_odd: false,
+                });
+            }
+        };
+        if connector.marker_end.as_deref() == Some("arrow") {
+            emit_head((tx, ty), (fx, fy));
+        }
+        if connector.marker_start.as_deref() == Some("arrow") {
+            emit_head((fx, fy), (tx, ty));
+        }
+    }
+
     if rot.is_some() {
         commands.push(SceneCommand::PopTransform);
     }
+}
+
+/// Build a filled-triangle arrowhead whose tip sits at `tip`, arriving along the
+/// segment from `from_pt` → `tip` (so the head points in the direction of travel
+/// into `tip`). Returns a flat `[x0,y0, x1,y1, x2,y2]` (tip, left base, right
+/// base), or `None` if the segment is degenerate (endpoints coincide) and the
+/// head cannot be oriented. Size scales with `stroke_width`, clamped so thin
+/// strokes still get a visible head.
+fn arrowhead_points(tip: (f64, f64), from_pt: (f64, f64), stroke_width: f64) -> Option<Vec<f64>> {
+    let vx = tip.0 - from_pt.0;
+    let vy = tip.1 - from_pt.1;
+    let len = (vx * vx + vy * vy).sqrt();
+    if len < 1e-6 {
+        return None;
+    }
+    let (ux, uy) = (vx / len, vy / len);
+    let (px, py) = (-uy, ux);
+    // head_len: 3.5× stroke; half_w: 2.0× stroke — clamped so hairline strokes
+    // still produce a visible 7px × 8px head.
+    let head_len = (stroke_width * 3.5).max(7.0);
+    let half_w = (stroke_width * 2.0).max(4.0);
+    let base_cx = tip.0 - ux * head_len;
+    let base_cy = tip.1 - uy * head_len;
+    let left_x = base_cx + px * half_w;
+    let left_y = base_cy + py * half_w;
+    let right_x = base_cx - px * half_w;
+    let right_y = base_cy - py * half_w;
+    Some(vec![tip.0, tip.1, left_x, left_y, right_x, right_y])
 }
 
 /// Compute the center of the bounding box of a flat `[x0, y0, x1, y1, …]` point list.
