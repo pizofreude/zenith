@@ -7,13 +7,17 @@
 //! a Tier-1 session snapshot and a Tier-2 version. Recording is best-effort:
 //! failures become a warning message on `Recorded::warning` — they never block
 //! the edit.
+//!
+//! Navigation functions ([`history_view`], [`undo_edit`], [`redo_edit`]) expose
+//! the session history to the CLI subcommands.
 
 use std::path::Path;
 
 use zenith_core::{KdlAdapter, KdlSource as _};
 use zenith_session::adapter::{OsClock, OsFs, OsRng};
 use zenith_session::{
-    Outcome, StorePaths, reconcile, record_state, record_version, resolve_data_dir,
+    Outcome, StorePaths, current_content, list_versions, reconcile, record_state, record_version,
+    resolve_data_dir,
 };
 
 // ── Public result type ────────────────────────────────────────────────────────
@@ -148,5 +152,152 @@ pub fn record_edit_in(
     Recorded {
         bytes: final_bytes,
         warning: None,
+    }
+}
+
+// ── Navigation types ──────────────────────────────────────────────────────────
+
+/// One line in a history listing (maps 1-to-1 to a Tier-2 [`HistoryRecord`]).
+#[derive(Debug, Clone, PartialEq)]
+pub struct HistoryLine {
+    /// Stable record id.
+    pub id: String,
+    /// Monotonic sequence number (0-based).
+    pub seq: u64,
+    /// Optional human-facing label / version name.
+    pub label: Option<String>,
+    /// Optional operation-kind tag (e.g. `"tx.apply"`, `"library.add"`).
+    pub op_kind: Option<String>,
+    /// Optional unix-ms timestamp.
+    pub timestamp_ms: Option<u128>,
+}
+
+/// History listing for a single document.
+#[derive(Debug, Clone, PartialEq)]
+pub struct HistoryView {
+    /// The document's stable `doc-id`.
+    pub doc_id: String,
+    /// All Tier-2 version records, oldest first.
+    pub versions: Vec<HistoryLine>,
+    /// `true` when the Tier-1 session has a current HEAD (unsaved session
+    /// content exists), `false` when the session is empty or absent.
+    pub has_session: bool,
+}
+
+/// Outcome of a [`undo_edit`] or [`redo_edit`] navigation call.
+#[derive(Debug, Clone, PartialEq)]
+pub enum NavOutcome {
+    /// Navigation succeeded; the document was rewritten with the restored content.
+    Moved,
+    /// Nothing to undo/redo (already at the boundary, or no session exists yet).
+    NothingToDo,
+}
+
+// ── Navigation helpers ────────────────────────────────────────────────────────
+
+/// Read `doc_path` and extract its embedded `doc-id`.
+///
+/// Returns a human-readable error if the file cannot be read, cannot be parsed,
+/// or has no `doc-id` attribute yet (meaning it has never been edited through
+/// zenith's history pipeline).
+fn doc_id_at(doc_path: &Path) -> Result<String, String> {
+    let bytes = std::fs::read(doc_path)
+        .map_err(|e| format!("cannot read '{}': {e}", doc_path.display()))?;
+    let doc = KdlAdapter
+        .parse(&bytes)
+        .map_err(|e| format!("cannot parse '{}': {}", doc_path.display(), e.message))?;
+    doc.doc_id.ok_or_else(|| {
+        format!(
+            "'{}' has no history yet (no doc-id); edit it with `zenith tx --apply` or \
+             `zenith library add` first",
+            doc_path.display()
+        )
+    })
+}
+
+// ── history_view ──────────────────────────────────────────────────────────────
+
+/// Build the history view for the document at `doc_path`.
+///
+/// Resolves the real data directory automatically. Use [`history_view_in`] in
+/// tests where you want a tempdir-rooted store.
+pub fn history_view(doc_path: &Path) -> Result<HistoryView, String> {
+    let data_dir = resolve_data_dir().map_err(|e| e.message)?;
+    let paths = StorePaths::new(data_dir);
+    history_view_in(&paths, doc_path)
+}
+
+/// Same as [`history_view`] but with an explicit store root (used by tests).
+pub fn history_view_in(paths: &StorePaths, doc_path: &Path) -> Result<HistoryView, String> {
+    let doc_id = doc_id_at(doc_path)?;
+    let fs = OsFs;
+    let versions = list_versions(&fs, paths, &doc_id)
+        .map_err(|e| e.message)?
+        .into_iter()
+        .map(|r| HistoryLine {
+            id: r.id,
+            seq: r.seq,
+            label: r.label,
+            op_kind: r.op_kind,
+            timestamp_ms: r.timestamp_ms,
+        })
+        .collect();
+    let has_session = current_content(&fs, paths, &doc_id)
+        .map_err(|e| e.message)?
+        .is_some();
+    Ok(HistoryView {
+        doc_id,
+        versions,
+        has_session,
+    })
+}
+
+// ── undo_edit ─────────────────────────────────────────────────────────────────
+
+/// Undo the last edit for the document at `doc_path`, rewriting the file in place.
+///
+/// Resolves the real data directory automatically. Use [`undo_edit_in`] in tests.
+pub fn undo_edit(doc_path: &Path) -> Result<NavOutcome, String> {
+    let data_dir = resolve_data_dir().map_err(|e| e.message)?;
+    let paths = StorePaths::new(data_dir);
+    undo_edit_in(&paths, doc_path)
+}
+
+/// Same as [`undo_edit`] but with an explicit store root (used by tests).
+pub fn undo_edit_in(paths: &StorePaths, doc_path: &Path) -> Result<NavOutcome, String> {
+    let doc_id = doc_id_at(doc_path)?;
+    let fs = OsFs;
+    match zenith_session::undo(&fs, paths, &doc_id).map_err(|e| e.message)? {
+        Some(content) => {
+            std::fs::write(doc_path, &content)
+                .map_err(|e| format!("cannot write '{}': {e}", doc_path.display()))?;
+            Ok(NavOutcome::Moved)
+        }
+        None => Ok(NavOutcome::NothingToDo),
+    }
+}
+
+// ── redo_edit ─────────────────────────────────────────────────────────────────
+
+/// Redo the last undone edit for the document at `doc_path`, rewriting the file in place.
+///
+/// Resolves the real data directory automatically. Use [`redo_edit_in`] in tests.
+pub fn redo_edit(doc_path: &Path) -> Result<NavOutcome, String> {
+    let data_dir = resolve_data_dir().map_err(|e| e.message)?;
+    let paths = StorePaths::new(data_dir);
+    redo_edit_in(&paths, doc_path)
+}
+
+/// Same as [`redo_edit`] but with an explicit store root (used by tests).
+pub fn redo_edit_in(paths: &StorePaths, doc_path: &Path) -> Result<NavOutcome, String> {
+    let doc_id = doc_id_at(doc_path)?;
+    let fs = OsFs;
+    match zenith_session::redo(&fs, paths, &doc_id).map_err(|e| e.message)? {
+        Some(content) => {
+            std::fs::write(doc_path, &content)
+                .map_err(|e| format!("cannot write '{}': {e}", doc_path.display()))?;
+            Ok(NavOutcome::Moved)
+        }
+        None => Ok(NavOutcome::NothingToDo),
     }
 }

@@ -495,6 +495,91 @@ pub fn run() -> ExitCode {
             }
         },
 
+        Command::History(args) => {
+            match history::history_view(&args.path) {
+                Ok(view) => {
+                    if args.json {
+                        let versions_json: Vec<serde_json::Value> = view
+                            .versions
+                            .iter()
+                            .map(|v| {
+                                serde_json::json!({
+                                    "id": v.id,
+                                    "seq": v.seq,
+                                    "label": v.label,
+                                    "op_kind": v.op_kind,
+                                    "timestamp_ms": v.timestamp_ms,
+                                })
+                            })
+                            .collect();
+                        let obj = serde_json::json!({
+                            "doc_id": view.doc_id,
+                            "has_session": view.has_session,
+                            "versions": versions_json,
+                        });
+                        match serde_json::to_string_pretty(&obj) {
+                            Ok(s) => println!("{}", s),
+                            Err(_) => {
+                                // Fallback to text if JSON serialisation fails.
+                                println!("doc-id: {}", view.doc_id);
+                                for v in &view.versions {
+                                    let label = v.label.as_deref().unwrap_or("");
+                                    let op = v.op_kind.as_deref().unwrap_or("");
+                                    println!("{:>4}  {}  {} {}", v.seq, v.id, op, label);
+                                }
+                            }
+                        }
+                    } else {
+                        println!("doc-id: {}", view.doc_id);
+                        if view.versions.is_empty() {
+                            println!("(no versions recorded yet)");
+                        } else {
+                            for v in &view.versions {
+                                let label = v.label.as_deref().unwrap_or("");
+                                let op = v.op_kind.as_deref().unwrap_or("");
+                                println!("{:>4}  {}  {} {}", v.seq, v.id, op, label);
+                            }
+                        }
+                    }
+                    ExitCode::SUCCESS
+                }
+                Err(msg) => {
+                    eprintln!("{}", msg);
+                    ExitCode::from(2)
+                }
+            }
+        }
+
+        Command::Undo(args) => match history::undo_edit(&args.path) {
+            Ok(history::NavOutcome::Moved) => {
+                println!("undid last edit to '{}'", args.path.display());
+                ExitCode::SUCCESS
+            }
+            Ok(history::NavOutcome::NothingToDo) => {
+                println!("nothing to undo");
+                ExitCode::SUCCESS
+            }
+            Err(msg) => {
+                eprintln!("{}", msg);
+                ExitCode::from(2)
+            }
+        },
+
+        Command::Redo(args) => match history::redo_edit(&args.path) {
+            Ok(history::NavOutcome::Moved) => {
+                println!("redid last undone edit to '{}'", args.path.display());
+                ExitCode::SUCCESS
+            }
+            Ok(history::NavOutcome::NothingToDo) => {
+                println!("nothing to redo");
+                ExitCode::SUCCESS
+            }
+            Err(msg) => {
+                eprintln!("{}", msg);
+                ExitCode::from(2)
+            }
+        },
+
         Command::Tx(args) => {
             // Read document source.
             let doc_src = match read_file(&args.path) {

@@ -40,6 +40,15 @@ pub enum Command {
 
     /// Inspect the library subsystem (preset + project packs).
     Library(LibraryArgs),
+
+    /// List a document's version history.
+    History(HistoryArgs),
+
+    /// Undo the last edit, rewriting the document in place.
+    Undo(UndoArgs),
+
+    /// Redo the last undone edit, rewriting the document in place.
+    Redo(RedoArgs),
 }
 
 /// Arguments for `zenith library`.
@@ -231,4 +240,29 @@ pub struct RenderArgs {
     /// Emit machine-readable JSON (diagnostics + output path) to stdout.
     #[arg(long)]
     pub json: bool,
+}
+
+/// Arguments for `zenith history`.
+#[derive(Debug, Args)]
+pub struct HistoryArgs {
+    /// Path to the `.zen` document.
+    pub path: PathBuf,
+
+    /// Emit machine-readable JSON instead of a human-readable listing.
+    #[arg(long)]
+    pub json: bool,
+}
+
+/// Arguments for `zenith undo`.
+#[derive(Debug, Args)]
+pub struct UndoArgs {
+    /// Path to the `.zen` document (rewritten in place).
+    pub path: PathBuf,
+}
+
+/// Arguments for `zenith redo`.
+#[derive(Debug, Args)]
+pub struct RedoArgs {
+    /// Path to the `.zen` document (rewritten in place).
+    pub path: PathBuf,
 }
