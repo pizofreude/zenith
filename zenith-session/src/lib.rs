@@ -12,6 +12,7 @@
 //! - [`identity`] — document-identity reconciliation ([`reconcile`])
 //! - [`layout`] — [`StorePaths`] pure path builders
 //! - [`manifest`] — [`HistoryRecord`] schema and append-only JSONL manifest I/O
+//! - [`retention`] — Time-Machine-style retention thinning for Tier-2 version history
 //! - [`revspec`] — revision-spec resolver: map a human/agent revspec string to a record id
 //! - [`session`] — Tier-1 ephemeral session: snapshot DAG with HEAD + redo stack
 //! - [`store`] — content-addressed object store (SHA-256 + DEFLATE)
@@ -24,6 +25,7 @@ pub mod error;
 pub mod identity;
 pub mod layout;
 pub mod manifest;
+pub mod retention;
 pub mod revspec;
 pub mod session;
 pub mod store;
@@ -35,6 +37,7 @@ pub use error::SessionError;
 pub use identity::{DocMeta, Outcome, Reconciled, reconcile};
 pub use layout::StorePaths;
 pub use manifest::{HistoryRecord, append_record, read_records};
+pub use retention::{RetentionPolicy, ThinReport, apply_thinning, thin_versions};
 pub use revspec::{resolve_revspec, resolve_revspec_for};
 pub use session::{
     RecordOutcome, SessionState, clear_session, current_content, record_state, redo, undo,
