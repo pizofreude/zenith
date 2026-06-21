@@ -2344,6 +2344,107 @@ fn blur_wins_over_shadow_when_both_set() {
     );
 }
 
+/// A rect carrying a `filter=(token)` must emit a `BeginFilter { filters:[…] }`
+/// … `EndFilter` bracket around its draw commands, with the ops resolved from
+/// the referenced filter token (and per-kind default amounts substituted).
+#[test]
+fn filter_emits_begin_end_bracket() {
+    let src = r##"zenith version=1 {
+  project id="proj.fl" name="Fl"
+  tokens format="zenith-token-v1" {
+    token id="color.fill" type="color" value="#445566"
+    token id="filter.f" type="filter" {
+      grayscale
+      brightness amount=0.5
+    }
+  }
+  styles {}
+  document id="doc.fl" title="Fl" {
+    page id="page.fl" w=(px)200 h=(px)200 {
+      rect id="rect.fl" x=(px)10 y=(px)10 w=(px)80 h=(px)40 fill=(token)"color.fill" filter=(token)"filter.f"
+    }
+  }
+}
+"##;
+    let doc = parse(src);
+    let result = compile(&doc, &default_provider());
+    let cmds = &result.scene.commands;
+
+    // Locate the BeginFilter and verify the resolved ops.
+    let begin = cmds.iter().find_map(|c| match c {
+        SceneCommand::BeginFilter { filters } => Some(filters),
+        _ => None,
+    });
+    let filters = begin.expect("a BeginFilter must be emitted");
+    assert_eq!(filters.len(), 2, "two filter ops: {filters:?}");
+    assert_eq!(filters[0].kind, zenith_scene::FilterKind::Grayscale);
+    assert_eq!(filters[0].amount, 1.0, "grayscale default amount is 1.0");
+    assert_eq!(filters[1].kind, zenith_scene::FilterKind::Brightness);
+    assert_eq!(filters[1].amount, 0.5);
+
+    // Bracket is balanced, Begin precedes a draw which precedes End.
+    let begin_idx = cmds
+        .iter()
+        .position(|c| matches!(c, SceneCommand::BeginFilter { .. }))
+        .expect("begin index");
+    let end_idx = cmds
+        .iter()
+        .position(|c| matches!(c, SceneCommand::EndFilter))
+        .expect("end index");
+    assert!(begin_idx < end_idx, "Begin must precede End");
+    let has_draw_between = cmds
+        .get(begin_idx + 1..end_idx)
+        .map(|window| {
+            window
+                .iter()
+                .any(|c| matches!(c, SceneCommand::FillRect { .. }))
+        })
+        .unwrap_or(false);
+    assert!(
+        has_draw_between,
+        "a draw must sit inside the bracket: {cmds:?}"
+    );
+}
+
+/// When a rect sets BOTH `blur` and `filter`, blur wins: only a
+/// `BeginBlur`/`EndBlur` bracket is emitted and NO `BeginFilter`/`EndFilter`
+/// appears in the stream (precedence: blur > shadow > filter).
+#[test]
+fn blur_suppresses_filter_when_both_set() {
+    let src = r##"zenith version=1 {
+  project id="proj.bf" name="Bf"
+  tokens format="zenith-token-v1" {
+    token id="color.fill" type="color" value="#445566"
+    token id="filter.f" type="filter" {
+      grayscale
+    }
+  }
+  styles {}
+  document id="doc.bf" title="Bf" {
+    page id="page.bf" w=(px)200 h=(px)200 {
+      rect id="rect.bf" x=(px)10 y=(px)10 w=(px)80 h=(px)60 fill=(token)"color.fill" filter=(token)"filter.f" blur=(px)6
+    }
+  }
+}
+"##;
+    let doc = parse(src);
+    let result = compile(&doc, &default_provider());
+    let cmds = &result.scene.commands;
+
+    assert!(
+        cmds.iter()
+            .any(|c| matches!(c, SceneCommand::BeginBlur { .. })),
+        "BeginBlur must be emitted when blur wins: {cmds:?}"
+    );
+    assert!(
+        !cmds.iter().any(|c| matches!(
+            c,
+            SceneCommand::BeginFilter { .. } | SceneCommand::EndFilter
+        )),
+        "BeginFilter must NOT be emitted when blur wins: {cmds:?}"
+    );
+}
+
 // ── U7: Per-side borders ───────────────────────────────────────────────
 
 /// A rect with `border-bottom=(token)` produces a `StrokeLine` along the

@@ -125,6 +125,8 @@ pub struct ImageNode {
     pub opacity: Option<f64>,
     /// Drop shadow / outer glow, as a `(token)` ref to a `shadow` token.
     pub shadow: Option<PropertyValue>,
+    /// Color/image filter ops, as a `(token)` ref to a `filter` token.
+    pub filter: Option<PropertyValue>,
     /// Compositing blend mode: `"normal"` (default) or one of the 11 separable
     /// blends. `None`/`"normal"` render source-over (byte-identical).
     pub blend_mode: Option<String>,
@@ -193,6 +195,8 @@ pub struct RectNode {
     pub stroke_outer_width: Option<PropertyValue>,
     /// Drop shadow / outer glow, as a `(token)` ref to a `shadow` token.
     pub shadow: Option<PropertyValue>,
+    /// Color/image filter ops, as a `(token)` ref to a `filter` token.
+    pub filter: Option<PropertyValue>,
     /// Compositing blend mode: `"normal"` (default) or one of the 11 separable
     /// blends (`multiply`, `screen`, `overlay`, …). `None`/`"normal"` render
     /// source-over (byte-identical to having no blend).
@@ -277,6 +281,8 @@ pub struct EllipseNode {
     pub stroke_linecap: Option<String>,
     /// Drop shadow / outer glow, as a `(token)` ref to a `shadow` token.
     pub shadow: Option<PropertyValue>,
+    /// Color/image filter ops, as a `(token)` ref to a `filter` token.
+    pub filter: Option<PropertyValue>,
     /// Compositing blend mode: `"normal"` (default) or one of the 11 separable
     /// blends. `None`/`"normal"` render source-over (byte-identical).
     pub blend_mode: Option<String>,
@@ -344,6 +350,8 @@ pub struct TextNode {
     pub font_weight: Option<PropertyValue>,
     /// Drop shadow / outer glow, as a `(token)` ref to a `shadow` token.
     pub shadow: Option<PropertyValue>,
+    /// Color/image filter ops, as a `(token)` ref to a `filter` token.
+    pub filter: Option<PropertyValue>,
     /// Compositing blend mode: `"normal"` (default) or one of the 11 separable
     /// blends. `None`/`"normal"` render source-over (byte-identical).
     pub blend_mode: Option<String>,

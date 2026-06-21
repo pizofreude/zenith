@@ -35,18 +35,56 @@ pub(super) fn decode_for_pdf(bytes: &[u8]) -> Option<DecodedImage> {
     if width == 0 || height == 0 {
         return None;
     }
+    // Demultiply each pixel to straight (un-premultiplied) RGBA8, then defer to
+    // the shared splitter so the PDF image path is identical to the one used for
+    // rasterized filter regions.
     let px = pixmap.pixels();
-    let mut rgb = Vec::with_capacity(px.len() * 3);
-    let mut alpha = Vec::with_capacity(px.len());
-    let mut any_transparent = false;
+    let mut straight = Vec::with_capacity(px.len() * 4);
     for p in px {
         let a = p.alpha();
-        // tiny-skia stores premultiplied channels; `demultiply` yields straight
-        // (un-premultiplied) RGBA so the RGB plane is independent of alpha.
         let s = p.demultiply();
-        rgb.push(s.red());
-        rgb.push(s.green());
-        rgb.push(s.blue());
+        straight.push(s.red());
+        straight.push(s.green());
+        straight.push(s.blue());
+        straight.push(a);
+    }
+    decoded_image_from_straight_rgba(&straight, width, height)
+}
+
+/// Build a [`DecodedImage`] from a STRAIGHT-alpha RGBA8 buffer (row-major,
+/// top-to-bottom), splitting it into a deflated interleaved RGB plane plus an
+/// optional deflated DeviceGray8 alpha SMask. Returns `None` when the dimensions
+/// are zero or `rgba` is not exactly `width * height * 4` bytes.
+///
+/// This is the single splitter shared by [`decode_for_pdf`] (after it demultiplies
+/// its decoded Pixmap) and the PDF backend's rasterize-and-embed filter path. The
+/// alpha SMask is omitted (`None`) when every pixel is fully opaque, matching the
+/// decode path byte-for-byte.
+pub(super) fn decoded_image_from_straight_rgba(
+    rgba: &[u8],
+    width: u32,
+    height: u32,
+) -> Option<DecodedImage> {
+    if width == 0 || height == 0 {
+        return None;
+    }
+    let expected = (width as usize)
+        .checked_mul(height as usize)
+        .and_then(|n| n.checked_mul(4))?;
+    if rgba.len() != expected {
+        return None;
+    }
+
+    let pixel_count = rgba.len() / 4;
+    let mut rgb = Vec::with_capacity(pixel_count * 3);
+    let mut alpha = Vec::with_capacity(pixel_count);
+    let mut any_transparent = false;
+    for chunk in rgba.chunks_exact(4) {
+        // chunks_exact(4) guarantees 4 bytes per chunk: no panic, no indexing risk.
+        rgb.push(chunk[0]);
+        rgb.push(chunk[1]);
+        rgb.push(chunk[2]);
+        let a = chunk[3];
         alpha.push(a);
         if a != 255 {
             any_transparent = true;

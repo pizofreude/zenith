@@ -188,6 +188,31 @@ pub struct ShadowSpec {
     pub color: Color,
 }
 
+// ── Filter ──────────────────────────────────────────────────────────────────
+
+/// The kind of a single color-filter operation.
+///
+/// Scene-local mirror of `zenith_core::FilterKind` — the scene IR stays
+/// decoupled from the core AST, exactly as [`ShadowSpec`] carries a scene-local
+/// [`Color`] rather than a core type. The compile step maps core → scene.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize)]
+pub enum FilterKind {
+    Grayscale,
+    Invert,
+    Sepia,
+    Saturate,
+    Brightness,
+    Contrast,
+    HueRotate,
+}
+
+/// A single color-filter operation applied to captured ink (straight-alpha math).
+#[derive(Debug, Clone, Copy, PartialEq, Serialize)]
+pub struct FilterSpec {
+    pub kind: FilterKind,
+    pub amount: f64,
+}
+
 // ── Fit mode ────────────────────────────────────────────────────────────────
 
 /// How a raster image asset scales to fill its declared box.
@@ -562,6 +587,12 @@ pub enum SceneCommand {
     /// Close the active blur capture: blur the captured ink in place, then
     /// composite it onto the current target.
     EndBlur,
+    // ── Color filter capture ──────────────────────────────────────────────
+    /// Open an offscreen capture; apply `filters` in order to the captured ink
+    /// at the matching EndFilter, then composite back. Empty `filters` opens no capture.
+    BeginFilter { filters: Vec<FilterSpec> },
+    /// Close the active filter capture: transform the captured ink in place, composite onto the target.
+    EndFilter,
 }
 
 // ── Scene glyph ───────────────────────────────────────────────────────────────

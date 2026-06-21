@@ -17,7 +17,7 @@ use crate::ir::{Color, SceneCommand, SceneGlyph};
 
 use super::RenderCtx;
 use super::chain::ChainAssignments;
-use super::paint::{resolve_property_color, resolve_property_shadow};
+use super::paint::{resolve_property_color, resolve_property_filter, resolve_property_shadow};
 use super::style_prop;
 use super::util::{
     blend_mode_ir, resolve_property_dimension_px, rotation_degrees, unsupported_unit_diag,
@@ -1378,6 +1378,23 @@ fn render_chain_member(
                 None => false,
             }
         };
+    let has_filter = !has_blur
+        && !has_shadow
+        && if assignment.lines.is_empty() {
+            false
+        } else {
+            match text
+                .filter
+                .as_ref()
+                .and_then(|p| resolve_property_filter(p, resolved, &text.id))
+            {
+                Some(filters) => {
+                    commands.push(SceneCommand::BeginFilter { filters });
+                    true
+                }
+                None => false,
+            }
+        };
 
     // Honor the node's direction for line layout. The chain pre-pass shapes the
     // source's spans with the source direction (see [`super::chain`]); here the
@@ -1413,6 +1430,9 @@ fn render_chain_member(
     }
     if has_blur {
         commands.push(SceneCommand::EndBlur);
+    }
+    if has_filter {
+        commands.push(SceneCommand::EndFilter);
     }
 
     if blend.is_some() {
@@ -2633,6 +2653,23 @@ pub(super) fn compile_text_sized(
                 None => false,
             }
         };
+    let has_filter = !has_blur
+        && !has_shadow
+        && if shaped_spans.is_empty() {
+            false
+        } else {
+            match text
+                .filter
+                .as_ref()
+                .and_then(|p| resolve_property_filter(p, resolved, &text.id))
+            {
+                Some(filters) => {
+                    commands.push(SceneCommand::BeginFilter { filters });
+                    true
+                }
+                None => false,
+            }
+        };
 
     // Tracks actual line count after emit; set by whichever path runs.
     // Used solely by the overflow="fit" check below.
@@ -3296,6 +3333,9 @@ pub(super) fn compile_text_sized(
     }
     if has_blur {
         commands.push(SceneCommand::EndBlur);
+    }
+    if has_filter {
+        commands.push(SceneCommand::EndFilter);
     }
 
     if blend.is_some() {

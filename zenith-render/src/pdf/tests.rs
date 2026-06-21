@@ -1,7 +1,10 @@
 //! Unit tests for the vector PDF backend.
 
 use zenith_core::{AssetProvider, BytesAssetProvider, FontProvider, default_provider};
-use zenith_scene::{Color, GradientPaint, GradientStop, Rect, Scene, SceneCommand, SceneGlyph};
+use zenith_scene::{
+    Color, FilterKind, FilterSpec, GradientPaint, GradientStop, Rect, Scene, SceneCommand,
+    SceneGlyph,
+};
 
 use super::render_pdf;
 
@@ -251,4 +254,86 @@ fn gradient_scene_renders_shading() {
         "a 3-stop gradient must use a Type 3 stitching function"
     );
     assert!(text.contains(" sh\n"), "shading must be painted with `sh`");
+}
+
+/// A plain opaque FillRect with NO filter bracket renders via the vector path and
+/// embeds zero image XObjects — the page carries no `/Subtype /Image`.
+#[test]
+fn unfiltered_fill_rect_embeds_no_image() {
+    let mut scene = Scene::new(60.0, 40.0);
+    scene.commands.push(SceneCommand::FillRect {
+        x: 10.0,
+        y: 10.0,
+        w: 30.0,
+        h: 20.0,
+        color: Color::srgb(200, 60, 40, 255),
+    });
+    let bytes = render(&scene);
+    let text = String::from_utf8_lossy(&bytes);
+    assert!(
+        !text.contains("/Subtype /Image"),
+        "an unfiltered fill rect must not embed any image XObject"
+    );
+}
+
+/// The SAME rect wrapped in a `BeginFilter{Grayscale 1.0}` / `EndFilter` bracket
+/// is rasterized and embedded as an image XObject — proving the filtered region
+/// is no longer a no-op (it produces ≥1 image where the vector path produces 0).
+#[test]
+fn filtered_fill_rect_embeds_image_xobject() {
+    let mut scene = Scene::new(60.0, 40.0);
+    scene.commands.push(SceneCommand::BeginFilter {
+        filters: vec![FilterSpec {
+            kind: FilterKind::Grayscale,
+            amount: 1.0,
+        }],
+    });
+    scene.commands.push(SceneCommand::FillRect {
+        x: 10.0,
+        y: 10.0,
+        w: 30.0,
+        h: 20.0,
+        color: Color::srgb(200, 60, 40, 255),
+    });
+    scene.commands.push(SceneCommand::EndFilter);
+
+    let bytes = render(&scene);
+    let text = String::from_utf8_lossy(&bytes);
+    assert!(
+        text.contains("/Subtype /Image"),
+        "a filtered fill rect must rasterize+embed an image XObject"
+    );
+    // The XObject is referenced from the page Resources under the `im0` name.
+    assert!(
+        text.contains("/im0"),
+        "the embedded filter image must be named im0 in page resources"
+    );
+}
+
+/// Rasterize-and-embed must stay deterministic: two renders of a filtered scene
+/// are byte-identical (no time, no randomness, fixed deflate level + rounding).
+#[test]
+fn filtered_region_render_is_byte_identical() {
+    let mut scene = Scene::new(80.0, 50.0);
+    scene.commands.push(SceneCommand::BeginFilter {
+        filters: vec![FilterSpec {
+            kind: FilterKind::Sepia,
+            amount: 1.0,
+        }],
+    });
+    scene.commands.push(SceneCommand::FillRect {
+        x: 5.0,
+        y: 5.0,
+        w: 40.0,
+        h: 30.0,
+        color: Color::srgb(20, 140, 200, 255),
+    });
+    scene.commands.push(SceneCommand::EndFilter);
+
+    let a = render(&scene);
+    let b = render(&scene);
+    assert_eq!(
+        a, b,
+        "two renders of a filtered scene must be byte-identical"
+    );
 }

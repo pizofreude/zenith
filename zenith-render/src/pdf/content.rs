@@ -10,15 +10,20 @@
 //! explicitly and documented at their arms: blurred drop-shadows (no vector PDF
 //! equivalent — the *content* is still drawn, only the blur is skipped) and
 //! color-bitmap (emoji) glyphs (omitted; the print scenarios use none).
+//!
+//! Per-pixel color `filter` brackets ARE honored: PDF has no per-pixel filter
+//! primitive, so [`translate`] captures the bracketed commands, rasterizes them
+//! to straight-alpha RGBA, applies the filters, and embeds the cropped result as
+//! an image XObject (see [`emit_filtered_region`]). This is no longer a no-op.
 
 use pdf_writer::Content;
 use zenith_core::{AssetProvider, FontProvider};
-use zenith_scene::{Color, FitMode, ImageClip, Scene, SceneCommand, StrokeAlign};
+use zenith_scene::{Color, FilterSpec, FitMode, ImageClip, Scene, SceneCommand, StrokeAlign};
 
 use super::color;
 use super::geometry::{GlyphPen, ellipse_path, poly_path, rounded_rect_path};
 use super::gradient::{AxialGradient, resolve as resolve_gradient};
-use super::image::{DecodedImage, decode_for_pdf};
+use super::image::{DecodedImage, decode_for_pdf, decoded_image_from_straight_rgba};
 
 /// Page-level resources accumulated during [`translate`], keyed for
 /// deduplication and emitted in a deterministic order by the document writer.
@@ -67,8 +72,50 @@ pub(super) fn translate(
     content.transform([1.0, 0.0, 0.0, -1.0, 0.0, scene.height as f32]);
 
     let page = (scene.width, scene.height);
+
+    // Filter-capture buffer. A color-`filter` bracket has no per-pixel vector PDF
+    // primitive, so while one is active we BUFFER (clone) the bracketed commands
+    // instead of emitting them, then rasterize+filter+embed the whole region at
+    // EndFilter. `None` means draws emit directly. Filters are leaf-only and do
+    // not nest, so a single active capture suffices.
+    let mut capture: Option<(Vec<FilterSpec>, Vec<SceneCommand>)> = None;
+
     for cmd in &scene.commands {
-        emit_command(&mut content, &mut res, cmd, page, fonts, assets);
+        match cmd {
+            // Open a capture (non-empty filters, none already active). Empty
+            // filters or a nested begin are no-ops: nothing is captured, so the
+            // inner commands emit normally.
+            SceneCommand::BeginFilter { filters } => {
+                if capture.is_none() && !filters.is_empty() {
+                    capture = Some((filters.clone(), Vec::new()));
+                }
+                continue;
+            }
+            // Close the active capture: rasterize the buffered region, apply the
+            // filters, and embed it. With no active capture this is a no-op.
+            SceneCommand::EndFilter => {
+                if let Some((filters, buffered)) = capture.take() {
+                    emit_filtered_region(
+                        &mut content,
+                        &mut res,
+                        &buffered,
+                        &filters,
+                        page,
+                        fonts,
+                        assets,
+                    );
+                }
+                continue;
+            }
+            // Any other command: buffer a clone while capturing, else emit now.
+            _ => {
+                if let Some((_, buffered)) = capture.as_mut() {
+                    buffered.push(cmd.clone());
+                } else {
+                    emit_command(&mut content, &mut res, cmd, page, fonts, assets);
+                }
+            }
+        }
     }
 
     (content, res)
@@ -556,6 +603,15 @@ fn emit_command(
         // blur is skipped. Documented honest limitation.
         SceneCommand::BeginBlur { .. } => {}
         SceneCommand::EndBlur => {}
+
+        // ── Color filter capture ──────────────────────────────────────────
+        // `translate` intercepts these before dispatch: a BeginFilter opens a
+        // capture buffer and the matching EndFilter rasterizes+filters+embeds the
+        // buffered region (see `emit_filtered_region`). These arms are therefore
+        // unreachable in normal flow; kept (no wildcard) for exhaustiveness, and a
+        // no-op is the safe fallback if one ever reaches here un-bracketed.
+        SceneCommand::BeginFilter { .. } => {}
+        SceneCommand::EndFilter => {}
     }
 }
 
@@ -740,6 +796,136 @@ fn emit_image(
     content.transform([iw, 0.0, 0.0, -ih, tx as f32, ty as f32 + ih]);
     content.x_object(name(IMAGE_PREFIX, id).as_name());
 
+    content.restore_state();
+}
+
+/// Rasterize a color-`filter` bracket and embed it as an image XObject.
+///
+/// PDF has no per-pixel filter primitive (grayscale, sepia, hue-rotate, …), so a
+/// faithful vector translation is impossible. The user-chosen strategy is
+/// rasterize-and-embed: the `buffered` commands are rendered to a standalone
+/// full-page sub-scene via the crate's own raster backend, the `filters` are
+/// applied to the resulting STRAIGHT-alpha RGBA in place (identical math to the
+/// raster backend), the opaque region is cropped to its tight bounding box, and
+/// that crop is embedded as a FlateDecode image XObject placed back at its scene
+/// position. All arithmetic is deterministic (`f64`, fixed rounding, fixed deflate
+/// level) so the PDF stays byte-identical across runs.
+///
+/// If rasterization fails, the buffered commands are emitted UNFILTERED so the
+/// bracketed content is never lost.
+fn emit_filtered_region(
+    content: &mut Content,
+    res: &mut PageResources,
+    buffered: &[SceneCommand],
+    filters: &[FilterSpec],
+    page: (f64, f64),
+    fonts: &dyn FontProvider,
+    assets: &dyn AssetProvider,
+) {
+    // 1. Build a standalone full-page sub-scene from the buffered commands. The
+    //    background is the default fully-transparent canvas, so only the leaf's
+    //    ink is opaque — exactly what the alpha-bbox crop below keys on.
+    let (pw, ph) = page;
+    let mut sub_scene = Scene::new(pw, ph);
+    sub_scene.commands = buffered.to_vec();
+
+    // 2. Rasterize. On failure, fall back to emitting the buffered commands
+    //    UNFILTERED so content is never lost.
+    let img = match crate::render::render_image(&sub_scene, fonts, assets) {
+        Ok(i) => i,
+        Err(_) => {
+            for c in buffered {
+                emit_command(content, res, c, page, fonts, assets);
+            }
+            return;
+        }
+    };
+    let (iw, ih) = (img.width, img.height);
+    let mut rgba = img.rgba;
+
+    // 3. Apply the per-pixel filters in place on straight-alpha RGBA.
+    crate::tiny_skia::filter::apply_filters_straight(&mut rgba, filters);
+
+    // Defensive: the buffer must be exactly iw*ih*4 bytes for the row math below.
+    let expected = match (iw as usize)
+        .checked_mul(ih as usize)
+        .and_then(|n| n.checked_mul(4))
+    {
+        Some(n) => n,
+        None => return,
+    };
+    if iw == 0 || ih == 0 || rgba.len() != expected {
+        return;
+    }
+    let stride = iw as usize * 4;
+
+    // 4. Scan for the tight opaque bounding box (alpha byte > 0). All-transparent
+    //    ⇒ nothing to draw.
+    let mut min_x = iw;
+    let mut min_y = ih;
+    let mut max_x = 0u32;
+    let mut max_y = 0u32;
+    let mut found = false;
+    for (y, row) in rgba.chunks_exact(stride).enumerate() {
+        for (x, px) in row.chunks_exact(4).enumerate() {
+            if px[3] > 0 {
+                found = true;
+                let (xu, yu) = (x as u32, y as u32);
+                if xu < min_x {
+                    min_x = xu;
+                }
+                if yu < min_y {
+                    min_y = yu;
+                }
+                if xu > max_x {
+                    max_x = xu;
+                }
+                if yu > max_y {
+                    max_y = yu;
+                }
+            }
+        }
+    }
+    if !found {
+        return;
+    }
+
+    // 5. Crop to (cw, ch) at offset (ox, oy) by copying rows.
+    let ox = min_x;
+    let oy = min_y;
+    let cw = max_x - min_x + 1;
+    let ch = max_y - min_y + 1;
+    let crop_stride = cw as usize * 4;
+    let mut cropped = Vec::with_capacity(crop_stride * ch as usize);
+    for y in oy..=max_y {
+        let row_start = y as usize * stride + ox as usize * 4;
+        let row_end = row_start + crop_stride;
+        match rgba.get(row_start..row_end) {
+            Some(slice) => cropped.extend_from_slice(slice),
+            None => return, // bounds guard: never index out of range
+        }
+    }
+
+    // 6. Encode the crop as an image XObject.
+    let Some(decoded) = decoded_image_from_straight_rgba(&cropped, cw, ch) else {
+        return;
+    };
+    let id = res.images.len();
+    res.images.push(decoded);
+
+    // 7. Place it: the crop's top-left maps to scene (ox, oy) and its pixel size
+    //    is (cw, ch). The outer page CTM already flips y, so an image y-up unit
+    //    square maps via [cw 0 0 -ch ox oy+ch] — identical pattern to emit_image.
+    content.save_state();
+    content.transform([
+        cw as f32,
+        0.0,
+        0.0,
+        -(ch as f32),
+        ox as f32,
+        oy as f32 + ch as f32,
+    ]);
+    content.x_object(name(IMAGE_PREFIX, id).as_name());
     content.restore_state();
 }
 

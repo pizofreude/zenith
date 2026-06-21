@@ -36,6 +36,7 @@ fn write_token(token: &Token, out: &mut String, depth: usize) {
         TokenType::FontWeight => "fontWeight",
         TokenType::Gradient => "gradient",
         TokenType::Shadow => "shadow",
+        TokenType::Filter => "filter",
         TokenType::Unknown(s) => s.as_str(),
     };
     out.push_str(" type=\"");
@@ -102,6 +103,24 @@ fn write_token(token: &Token, out: &mut String, depth: usize) {
         return;
     }
 
+    // Filter tokens have no scalar `value=`; they emit a brace block of op
+    // children. Handle and return before the value path.
+    if let TokenValue::Literal(TokenLiteral::Filter(f)) = &token.value {
+        out.push_str(" {\n");
+        for op in &f.ops {
+            indent(out, depth + 1);
+            out.push_str(op.kind.as_op_name());
+            if let Some(amount) = op.amount {
+                out.push_str(" amount=");
+                out.push_str(&fmt_f64(amount));
+            }
+            out.push('\n');
+        }
+        indent(out, depth);
+        out.push_str("}\n");
+        return;
+    }
+
     // value
     out.push_str(" value=");
     match &token.value {
@@ -122,6 +141,7 @@ fn write_token(token: &Token, out: &mut String, depth: usize) {
             // exhaustive.
             TokenLiteral::Gradient(_) => {}
             TokenLiteral::Shadow(_) => {}
+            TokenLiteral::Filter(_) => {}
         },
         TokenValue::Reference { token_id } => {
             out.push_str("(token)\"");

@@ -19,13 +19,14 @@ use tiny_skia::{
 };
 use zenith_core::{AssetKind, AssetProvider, FontProvider};
 use zenith_scene::{
-    BlendMode as IrBlendMode, FitMode, ImageClip, LineCap as IrLineCap, Scene, SceneCommand,
-    ShadowSpec, StrokeAlign,
+    BlendMode as IrBlendMode, FilterSpec, FitMode, ImageClip, LineCap as IrLineCap, Scene,
+    SceneCommand, ShadowSpec, StrokeAlign,
 };
 
 use crate::backend::{RasterBackend, RasterImage};
 use crate::error::RenderError;
 
+pub(crate) mod filter;
 mod gradient;
 mod paths;
 mod pixels;
@@ -37,6 +38,7 @@ mod tests;
 
 pub(crate) use raster::decode_raster_image as decode_raster_to_pixmap;
 
+use filter::apply_filters;
 use gradient::gradient_shader;
 use paths::{
     GlyphOutlinePen, build_align_mask, build_poly_path, build_rounded_rect_path, clip_mask,
@@ -122,6 +124,7 @@ impl RasterBackend for TinySkiaBackend {
         enum CaptureEffect {
             Shadow(Vec<ShadowSpec>),
             Blur(f64),
+            Filter(Vec<FilterSpec>),
         }
 
         // Active offscreen capture: the target pixmap that buffers the ink of
@@ -229,6 +232,40 @@ impl RasterBackend for TinySkiaBackend {
                             .map(|(pm, _, _)| pm)
                             .unwrap_or(&mut pixmap);
                         blur_target.draw_pixmap(
+                            0,
+                            0,
+                            ink.as_ref(),
+                            &PixmapPaint::default(),
+                            Transform::identity(),
+                            None,
+                        );
+                    }
+                    continue;
+                }
+
+                // Open an offscreen capture for a color-filtered element.
+                // Mirrors the BeginBlur guard: leaf-only, no nesting, silently
+                // falls back to crisp draw on allocation failure or empty list.
+                SceneCommand::BeginFilter { filters } => {
+                    if capture.is_none()
+                        && !filters.is_empty()
+                        && let Some(offscreen) = Pixmap::new(width, height)
+                    {
+                        capture = Some((offscreen, CaptureEffect::Filter(filters.clone())));
+                    }
+                    continue;
+                }
+
+                // Close the active filter capture: transform the captured ink
+                // in place, then composite it onto the current target.
+                SceneCommand::EndFilter => {
+                    if let Some((mut ink, CaptureEffect::Filter(filters))) = capture.take() {
+                        apply_filters(&mut ink, &filters);
+                        let filter_target = layer_stack
+                            .last_mut()
+                            .map(|(pm, _, _)| pm)
+                            .unwrap_or(&mut pixmap);
+                        filter_target.draw_pixmap(
                             0,
                             0,
                             ink.as_ref(),

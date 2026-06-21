@@ -13,6 +13,7 @@ pub enum TokenType {
     FontWeight,
     Gradient,
     Shadow,
+    Filter,
     /// An unrecognized token type (forward-compat; version-relative).
     Unknown(String),
 }
@@ -29,6 +30,7 @@ impl TokenType {
             "fontWeight" => Self::FontWeight,
             "gradient" => Self::Gradient,
             "shadow" => Self::Shadow,
+            "filter" => Self::Filter,
             other => Self::Unknown(other.to_owned()),
         }
     }
@@ -50,6 +52,70 @@ pub enum TokenLiteral {
     /// A shadow definition built from child `layer` nodes. Shadows have no
     /// scalar value; they are carried by this dedicated literal variant.
     Shadow(ShadowLiteral),
+    /// A filter definition built from child op nodes. Filters have no scalar
+    /// value; they are carried by this dedicated literal variant.
+    Filter(FilterLiteral),
+}
+
+/// The color/image filter operations, applied in source order.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum FilterKind {
+    Grayscale,
+    Invert,
+    Sepia,
+    Saturate,
+    Brightness,
+    Contrast,
+    HueRotate,
+}
+
+impl FilterKind {
+    /// Parse a filter kind from its KDL op-node name, or `None` if unrecognized.
+    pub fn from_op_name(s: &str) -> Option<Self> {
+        match s {
+            "grayscale" => Some(Self::Grayscale),
+            "invert" => Some(Self::Invert),
+            "sepia" => Some(Self::Sepia),
+            "saturate" => Some(Self::Saturate),
+            "brightness" => Some(Self::Brightness),
+            "contrast" => Some(Self::Contrast),
+            "hue-rotate" => Some(Self::HueRotate),
+            _ => None,
+        }
+    }
+
+    /// The canonical KDL op-node name for this filter kind (inverse of
+    /// [`FilterKind::from_op_name`]).
+    pub fn as_op_name(&self) -> &'static str {
+        match self {
+            Self::Grayscale => "grayscale",
+            Self::Invert => "invert",
+            Self::Sepia => "sepia",
+            Self::Saturate => "saturate",
+            Self::Brightness => "brightness",
+            Self::Contrast => "contrast",
+            Self::HueRotate => "hue-rotate",
+        }
+    }
+}
+
+/// A filter token literal: an ordered list of filter operations, applied in
+/// source order. At least one op is required (enforced at resolution).
+#[derive(Debug, Clone, PartialEq)]
+pub struct FilterLiteral {
+    /// Ordered list of filter ops, in source order.
+    pub ops: Vec<FilterOp>,
+}
+
+/// A single filter operation: a kind plus an optional amount. The amount is a
+/// unitless number whose meaning depends on the kind (e.g. fraction for
+/// `grayscale`, degrees for `hue-rotate`); `None` means "use the op's default".
+#[derive(Debug, Clone, PartialEq)]
+pub struct FilterOp {
+    /// The filter operation kind.
+    pub kind: FilterKind,
+    /// The optional amount for this op.
+    pub amount: Option<f64>,
 }
 
 /// Whether a gradient token is linear or radial.

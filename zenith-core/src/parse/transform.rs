@@ -24,8 +24,8 @@ use crate::ast::{
     provenance::ProvenanceDef,
     style::{Style, StyleBlock, UnknownStyleProp, canonicalize_style_key},
     token::{
-        GradientKind, GradientLiteral, GradientStopRef, ShadowLayerRef, ShadowLiteral, Token,
-        TokenBlock, TokenLiteral, TokenType, TokenValue,
+        FilterKind, FilterLiteral, FilterOp, GradientKind, GradientLiteral, GradientStopRef,
+        ShadowLayerRef, ShadowLiteral, Token, TokenBlock, TokenLiteral, TokenType, TokenValue,
     },
     value::{Dimension, PropertyValue, Unit},
 };
@@ -795,6 +795,19 @@ fn transform_token(node: &KdlNode) -> Result<Token, ParseError> {
         });
     }
 
+    // Filter tokens carry no scalar `value=`; they are built from child op
+    // nodes. Prefer this child-node form even if a stray `value=` is present.
+    if token_type == TokenType::Filter {
+        let token_value = transform_filter(node);
+        let source_span = node_span(node);
+        return Ok(Token {
+            id,
+            token_type,
+            value: token_value,
+            source_span,
+        });
+    }
+
     let value_entry = node.entry("value").ok_or_else(|| {
         ParseError::spanless(
             ParseErrorCode::InvalidPropertyValue,
@@ -977,6 +990,27 @@ fn transform_shadow(node: &KdlNode) -> TokenValue {
     }
 
     TokenValue::Literal(TokenLiteral::Shadow(ShadowLiteral { layers }))
+}
+
+/// Build a filter `TokenValue` from a `token` node's op children. Each child
+/// node name is mapped via [`FilterKind::from_op_name`]; unrecognized names are
+/// skipped. An optional unitless `amount` prop is read per op. Infallible: a
+/// malformed filter simply yields fewer/zero ops, which the resolver later
+/// reports via `filter.no_ops`.
+fn transform_filter(node: &KdlNode) -> TokenValue {
+    let mut ops: Vec<FilterOp> = Vec::new();
+    if let Some(children) = node.children() {
+        for child in children.nodes() {
+            // An unrecognized op name is meaningless; skip it.
+            let Some(kind) = FilterKind::from_op_name(child.name().value()) else {
+                continue;
+            };
+            let amount = optional_f64_prop(child, "amount");
+            ops.push(FilterOp { kind, amount });
+        }
+    }
+
+    TokenValue::Literal(TokenLiteral::Filter(FilterLiteral { ops }))
 }
 
 // ---------------------------------------------------------------------------
@@ -1472,6 +1506,7 @@ const RECT_KNOWN_PROPS: &[&str] = &[
     "stroke-linecap",
     "stroke_linecap",
     "shadow",
+    "filter",
     "blend-mode",
     "blend_mode",
     "blur",
@@ -1559,6 +1594,7 @@ fn transform_rect(node: &KdlNode) -> Result<RectNode, ParseError> {
         stroke_outer,
         stroke_outer_width,
         shadow: optional_property_value(node, "shadow"),
+        filter: optional_property_value(node, "filter"),
         blend_mode,
         blur: optional_dimension_prop(node, "blur"),
         opacity: optional_f64_prop(node, "opacity"),
@@ -1596,6 +1632,7 @@ const IMAGE_KNOWN_PROPS: &[&str] = &[
     "object-position-y",
     "object_position_y",
     "shadow",
+    "filter",
     "blend-mode",
     "blend_mode",
     "blur",
@@ -1647,6 +1684,7 @@ fn transform_image(node: &KdlNode) -> Result<ImageNode, ParseError> {
         object_position_x,
         object_position_y,
         shadow: optional_property_value(node, "shadow"),
+        filter: optional_property_value(node, "filter"),
         blend_mode: optional_string_prop_aliased(node, "blend-mode", "blend_mode")
             .map(str::to_owned),
         blur: optional_dimension_prop(node, "blur"),
@@ -1682,6 +1720,7 @@ const ELLIPSE_KNOWN_PROPS: &[&str] = &[
     "stroke-linecap",
     "stroke_linecap",
     "shadow",
+    "filter",
     "blend-mode",
     "blend_mode",
     "blur",
@@ -1727,6 +1766,7 @@ fn transform_ellipse(node: &KdlNode) -> Result<EllipseNode, ParseError> {
         stroke_gap,
         stroke_linecap,
         shadow: optional_property_value(node, "shadow"),
+        filter: optional_property_value(node, "filter"),
         blend_mode,
         blur: optional_dimension_prop(node, "blur"),
         opacity: optional_f64_prop(node, "opacity"),
@@ -1827,6 +1867,7 @@ const TEXT_KNOWN_PROPS: &[&str] = &[
     "font-weight",
     "font_weight",
     "shadow",
+    "filter",
     "blend-mode",
     "blend_mode",
     "blur",
@@ -1918,6 +1959,7 @@ fn transform_text(node: &KdlNode) -> Result<TextNode, ParseError> {
         font_size_min,
         font_weight,
         shadow: optional_property_value(node, "shadow"),
+        filter: optional_property_value(node, "filter"),
         blend_mode: optional_string_prop_aliased(node, "blend-mode", "blend_mode")
             .map(str::to_owned),
         blur: optional_dimension_prop(node, "blur"),

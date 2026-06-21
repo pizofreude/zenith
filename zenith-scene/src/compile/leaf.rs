@@ -18,8 +18,8 @@ use crate::ir::{LineCap, SceneCommand, StrokeAlign};
 use super::RenderCtx;
 use super::chain::ChainAssignments;
 use super::paint::{
-    apply_gradient_opacity, resolve_property_color, resolve_property_gradient,
-    resolve_property_shadow,
+    apply_gradient_opacity, resolve_property_color, resolve_property_filter,
+    resolve_property_gradient, resolve_property_shadow,
 };
 use super::style_prop;
 use super::text::{MeasureEnv, compile_text, measure_text_wrapped_height, resolve_text_families};
@@ -225,6 +225,19 @@ pub(super) fn compile_rect(
             }
             None => false,
         };
+    let has_filter = !has_blur
+        && !has_shadow
+        && match rect
+            .filter
+            .as_ref()
+            .and_then(|p| resolve_property_filter(p, resolved, &rect.id))
+        {
+            Some(filters) => {
+                commands.push(SceneCommand::BeginFilter { filters });
+                true
+            }
+            None => false,
+        };
 
     // FILL (emitted first, under the stroke) — node-local prop overrides
     // style cascade.
@@ -387,6 +400,9 @@ pub(super) fn compile_rect(
     }
     if has_blur {
         commands.push(SceneCommand::EndBlur);
+    }
+    if has_filter {
+        commands.push(SceneCommand::EndFilter);
     }
 
     // STROKE-OUTER: a second stroke painted OUTSIDE the rect geometry.
@@ -631,6 +647,19 @@ pub(super) fn compile_ellipse(
             }
             None => false,
         };
+    let has_filter = !has_blur
+        && !has_shadow
+        && match ellipse
+            .filter
+            .as_ref()
+            .and_then(|p| resolve_property_filter(p, resolved, &ellipse.id))
+        {
+            Some(filters) => {
+                commands.push(SceneCommand::BeginFilter { filters });
+                true
+            }
+            None => false,
+        };
 
     // FILL (emitted first, under the stroke) — node-local prop overrides
     // style cascade.
@@ -714,6 +743,9 @@ pub(super) fn compile_ellipse(
     }
     if has_blur {
         commands.push(SceneCommand::EndBlur);
+    }
+    if has_filter {
+        commands.push(SceneCommand::EndFilter);
     }
 
     if blend.is_some() {
@@ -1712,6 +1744,7 @@ fn emit_shape_label(
         font_size_min: None,
         font_weight: None,
         shadow: None,
+        filter: None,
         blend_mode: None,
         blur: None,
         opacity: None,

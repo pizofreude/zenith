@@ -7,7 +7,7 @@ use zenith_core::{Diagnostic, ImageNode, ObjectPosition, ResolvedToken, dim_to_p
 use crate::ir::{FitMode, ImageClip, SceneCommand, SrcRect};
 
 use super::RenderCtx;
-use super::paint::resolve_property_shadow;
+use super::paint::{resolve_property_filter, resolve_property_shadow};
 use super::util::{
     blend_mode_ir, resolve_property_dimension_px, rotation_degrees, unsupported_unit_diag,
 };
@@ -169,6 +169,19 @@ pub(super) fn compile_image(
             }
             None => false,
         };
+    let has_filter = !has_blur
+        && !has_shadow
+        && match image
+            .filter
+            .as_ref()
+            .and_then(|p| resolve_property_filter(p, resolved, &image.id))
+        {
+            Some(filters) => {
+                commands.push(SceneCommand::BeginFilter { filters });
+                true
+            }
+            None => false,
+        };
 
     // Resolve the optional source sub-rectangle. All four dimensions must
     // resolve to px; if any present-but-unresolvable unit is encountered, push
@@ -225,6 +238,9 @@ pub(super) fn compile_image(
     }
     if has_blur {
         commands.push(SceneCommand::EndBlur);
+    }
+    if has_filter {
+        commands.push(SceneCommand::EndFilter);
     }
 
     if blend.is_some() {

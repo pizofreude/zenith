@@ -29,7 +29,7 @@ pub use style::{
     STYLE_RECOGNIZED_KEYS, Style, StyleBlock, UnknownStyleProp, canonicalize_style_key,
 };
 pub use token::{
-    GradientKind, GradientLiteral, GradientStopRef, ShadowLayerRef, ShadowLiteral, Token,
-    TokenBlock, TokenLiteral, TokenType, TokenValue,
+    FilterKind, FilterLiteral, FilterOp, GradientKind, GradientLiteral, GradientStopRef,
+    ShadowLayerRef, ShadowLiteral, Token, TokenBlock, TokenLiteral, TokenType, TokenValue,
 };
 pub use value::{Dimension, PropertyValue, Unit, dim_to_px};

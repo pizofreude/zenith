@@ -1927,3 +1927,125 @@ fn backend_render(scene: &Scene, provider: &zenith_core::BytesFontProvider) -> V
         .expect("rasterize must succeed")
         .rgba
 }
+
+// ── Color-filter pixel math (apply_filters) ───────────────────────────────────
+
+/// Build a 1×1 opaque Pixmap with straight-alpha RGB (alpha = 255, so
+/// premultiplied == straight).
+#[cfg(test)]
+fn opaque_pixel(r: u8, g: u8, b: u8) -> tiny_skia::Pixmap {
+    use tiny_skia::{Pixmap, PremultipliedColorU8};
+    let mut pm = Pixmap::new(1, 1).expect("1x1 pixmap");
+    pm.pixels_mut()[0] = PremultipliedColorU8::from_rgba(r, g, b, 255).expect("opaque pixel");
+    pm
+}
+
+/// Read back the single pixel's premultiplied RGBA bytes (alpha 255 → straight).
+#[cfg(test)]
+fn read_pixel(pm: &tiny_skia::Pixmap) -> (u8, u8, u8, u8) {
+    let d = pm.data();
+    (d[0], d[1], d[2], d[3])
+}
+
+/// `Grayscale(1.0)` on an opaque color collapses R=G=B to the luma value
+/// (within a rounding tolerance), leaving alpha unchanged.
+#[test]
+fn apply_filters_grayscale_collapses_to_luma() {
+    use super::filter::apply_filters;
+    use zenith_scene::{FilterKind, FilterSpec};
+
+    let mut pm = opaque_pixel(255, 0, 0);
+    apply_filters(
+        &mut pm,
+        &[FilterSpec {
+            kind: FilterKind::Grayscale,
+            amount: 1.0,
+        }],
+    );
+    let (r, g, b, a) = read_pixel(&pm);
+    // luma of pure red = 0.2126 → 0.2126*255 ≈ 54.
+    assert_eq!(r, g, "grayscale: R == G");
+    assert_eq!(g, b, "grayscale: G == B");
+    assert!((i32::from(r) - 54).abs() <= 1, "luma ≈ 54, got {r}");
+    assert_eq!(a, 255, "alpha is unchanged");
+}
+
+/// `Invert(1.0)` flips every channel; alpha is unchanged.
+#[test]
+fn apply_filters_invert_flips_channels() {
+    use super::filter::apply_filters;
+    use zenith_scene::{FilterKind, FilterSpec};
+
+    let mut pm = opaque_pixel(10, 20, 30);
+    apply_filters(
+        &mut pm,
+        &[FilterSpec {
+            kind: FilterKind::Invert,
+            amount: 1.0,
+        }],
+    );
+    let (r, g, b, a) = read_pixel(&pm);
+    assert_eq!((r, g, b), (245, 235, 225), "1 - channel");
+    assert_eq!(a, 255, "alpha is unchanged");
+}
+
+/// `Brightness(0.0)` drives every channel to black; alpha is unchanged.
+#[test]
+fn apply_filters_brightness_zero_is_black() {
+    use super::filter::apply_filters;
+    use zenith_scene::{FilterKind, FilterSpec};
+
+    let mut pm = opaque_pixel(200, 100, 50);
+    apply_filters(
+        &mut pm,
+        &[FilterSpec {
+            kind: FilterKind::Brightness,
+            amount: 0.0,
+        }],
+    );
+    let (r, g, b, a) = read_pixel(&pm);
+    assert_eq!((r, g, b), (0, 0, 0), "brightness 0 → black");
+    assert_eq!(a, 255, "alpha is unchanged");
+}
+
+/// A fully-transparent pixel is left untouched by any color filter.
+#[test]
+fn apply_filters_skips_transparent_pixel() {
+    use super::filter::apply_filters;
+    use tiny_skia::Pixmap;
+    use zenith_scene::{FilterKind, FilterSpec};
+
+    let mut pm = Pixmap::new(1, 1).expect("1x1 pixmap"); // all zero (transparent)
+    apply_filters(
+        &mut pm,
+        &[FilterSpec {
+            kind: FilterKind::Invert,
+            amount: 1.0,
+        }],
+    );
+    assert_eq!(read_pixel(&pm), (0, 0, 0, 0), "transparent pixel untouched");
+}
+
+/// Determinism: applying the same filter to two identical copies yields
+/// byte-identical results.
+#[test]
+fn apply_filters_is_deterministic() {
+    use super::filter::apply_filters;
+    use zenith_scene::{FilterKind, FilterSpec};
+
+    let filters = [
+        FilterSpec {
+            kind: FilterKind::Sepia,
+            amount: 1.0,
+        },
+        FilterSpec {
+            kind: FilterKind::HueRotate,
+            amount: 90.0,
+        },
+    ];
+    let mut a = opaque_pixel(123, 45, 200);
+    let mut b = opaque_pixel(123, 45, 200);
+    apply_filters(&mut a, &filters);
+    apply_filters(&mut b, &filters);
+    assert_eq!(a.data(), b.data(), "same input + filters → identical bytes");
+}

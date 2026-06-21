@@ -68,6 +68,7 @@ fn token_ref(id: &str) -> PropertyValue {
 fn minimal_rect(id: &str, fill: Option<PropertyValue>) -> Node {
     Node::Rect(Box::new(RectNode {
         shadow: None,
+        filter: None,
         id: id.to_owned(),
         name: None,
         role: None,
@@ -109,6 +110,7 @@ fn minimal_rect(id: &str, fill: Option<PropertyValue>) -> Node {
 fn minimal_ellipse(id: &str, fill: Option<PropertyValue>) -> Node {
     Node::Ellipse(EllipseNode {
         shadow: None,
+        filter: None,
         id: id.to_owned(),
         name: None,
         role: None,
@@ -139,6 +141,7 @@ fn minimal_ellipse(id: &str, fill: Option<PropertyValue>) -> Node {
 fn minimal_text(id: &str, fill: Option<PropertyValue>) -> Node {
     Node::Text(Box::new(TextNode {
         shadow: None,
+        filter: None,
         id: id.to_owned(),
         name: None,
         role: None,
@@ -373,6 +376,7 @@ fn rect_missing_w_produces_node_missing_geometry() {
             "page.one",
             vec![Node::Rect(Box::new(RectNode {
                 shadow: None,
+                filter: None,
                 id: "rect.no-w".to_owned(),
                 name: None,
                 role: None,
@@ -449,6 +453,7 @@ fn fill_with_missing_token_ref_produces_unknown_reference() {
 fn font_weight_with_missing_token_ref_produces_unknown_reference() {
     let text = Node::Text(Box::new(TextNode {
         shadow: None,
+        filter: None,
         id: "text.fw".to_owned(),
         name: None,
         role: None,
@@ -815,6 +820,7 @@ fn unknown_property_on_rect_produces_warning() {
             "page.one",
             vec![Node::Rect(Box::new(RectNode {
                 shadow: None,
+                filter: None,
                 id: "rect.one".to_owned(),
                 name: None,
                 role: None,
@@ -949,6 +955,7 @@ fn group_child_missing_geometry_surfaces() {
     // recurse into group children and report the missing geometry.
     let child_rect = Node::Rect(Box::new(RectNode {
         shadow: None,
+        filter: None,
         id: "rect.inner".to_owned(),
         name: None,
         role: None,
@@ -1088,6 +1095,7 @@ fn frame_clean_doc_no_errors() {
     // off_canvas nor frame.child_overflow fire.
     let inner = Node::Rect(Box::new(RectNode {
         shadow: None,
+        filter: None,
         id: "rect.inner".to_owned(),
         name: None,
         role: None,
@@ -1237,6 +1245,7 @@ fn frame_child_missing_geometry_surfaces() {
     // into frame children and report the missing geometry.
     let child_rect = Node::Rect(Box::new(RectNode {
         shadow: None,
+        filter: None,
         id: "rect.inner".to_owned(),
         name: None,
         role: None,
@@ -1362,6 +1371,7 @@ fn frame_child_fully_inside_is_clean() {
 fn flow_frame_child_without_geometry_is_skipped() {
     let child_rect = Node::Rect(Box::new(RectNode {
         shadow: None,
+        filter: None,
         id: "rect.flow".to_owned(),
         name: None,
         role: None,
@@ -1527,6 +1537,7 @@ fn stroke_width_with_dimension_token_is_clean() {
             "page.one",
             vec![Node::Rect(Box::new(RectNode {
                 shadow: None,
+                filter: None,
                 id: "rect.one".to_owned(),
                 name: None,
                 role: None,
@@ -1583,6 +1594,7 @@ fn text_font_family_with_font_family_token_is_clean() {
             "page.one",
             vec![Node::Text(Box::new(TextNode {
                 shadow: None,
+                filter: None,
                 id: "text.one".to_owned(),
                 name: None,
                 role: None,
@@ -1666,6 +1678,7 @@ fn ellipse_missing_w_produces_node_missing_geometry() {
             "page.one",
             vec![Node::Ellipse(EllipseNode {
                 shadow: None,
+                filter: None,
                 id: "ellipse.no-w".to_owned(),
                 name: None,
                 role: None,
@@ -1735,6 +1748,7 @@ fn ellipse_stroke_raw_literal_produces_raw_visual_literal() {
             "page.one",
             vec![Node::Ellipse(EllipseNode {
                 shadow: None,
+                filter: None,
                 id: "ellipse.stroke-lit".to_owned(),
                 name: None,
                 role: None,
@@ -2106,6 +2120,7 @@ fn doc_with_assets_and_nodes(assets: Vec<AssetDecl>, children: Vec<Node>) -> Doc
 fn full_image(id: &str, asset: &str, fit: Option<&str>) -> ImageNode {
     ImageNode {
         shadow: None,
+        filter: None,
         id: id.to_owned(),
         name: None,
         role: None,
@@ -3220,6 +3235,7 @@ fn bounded_page(id: &str, w: f64, h: f64, children: Vec<Node>) -> Page {
 fn rect_at(id: &str, x: f64, y: f64, w: f64, h: f64) -> Node {
     Node::Rect(Box::new(RectNode {
         shadow: None,
+        filter: None,
         id: id.to_owned(),
         name: None,
         role: None,
@@ -3362,6 +3378,7 @@ fn rect_at_rotated(id: &str, x: f64, y: f64, w: f64, h: f64, rotate_deg: Option<
     });
     Node::Rect(Box::new(RectNode {
         shadow: None,
+        filter: None,
         id: id.to_owned(),
         name: None,
         role: None,
@@ -3547,6 +3564,7 @@ fn text_with_fill_and_size(
 ) -> Node {
     Node::Text(Box::new(crate::ast::node::TextNode {
         shadow: None,
+        filter: None,
         id: id.to_owned(),
         name: None,
         role: None,
@@ -3759,6 +3777,7 @@ fn no_page_background_skips_contrast_check() {
 fn text_with_fill_and_contrast_bg(id: &str, fill_token: &str, contrast_bg_token: &str) -> Node {
     Node::Text(Box::new(crate::ast::node::TextNode {
         shadow: None,
+        filter: None,
         id: id.to_owned(),
         name: None,
         role: None,
@@ -3959,6 +3978,7 @@ fn image_at(id: &str, x: f64, y: f64, w: f64, h: f64) -> Node {
         object_position_y: None,
         opacity: None,
         shadow: None,
+        filter: None,
         visible: None,
         locked: None,
         rotate: None,
@@ -5062,6 +5082,7 @@ fn resolved_page_ref_target_does_not_warn() {
         stroke_outer: None,
         stroke_outer_width: None,
         shadow: None,
+        filter: None,
         opacity: None,
         visible: None,
         locked: None,

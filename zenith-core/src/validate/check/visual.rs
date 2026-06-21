@@ -29,6 +29,8 @@ pub(super) enum VisualExpect {
     FontWeight,
     /// A shadow slot that accepts a shadow token.
     Shadow,
+    /// A filter slot that accepts a filter token.
+    Filter,
 }
 
 /// Check a single visual property value:
@@ -106,6 +108,9 @@ pub(super) fn check_visual_prop(
                 VisualExpect::Shadow => {
                     matches!(resolved.token_type, TokenType::Shadow)
                 }
+                VisualExpect::Filter => {
+                    matches!(resolved.token_type, TokenType::Filter)
+                }
             };
 
             if !type_ok {
@@ -149,6 +154,7 @@ fn visual_expect_name(e: VisualExpect) -> &'static str {
         VisualExpect::FontFamily => "fontFamily",
         VisualExpect::FontWeight => "fontWeight",
         VisualExpect::Shadow => "shadow",
+        VisualExpect::Filter => "filter",
     }
 }
 
@@ -161,6 +167,7 @@ fn token_type_name(t: &TokenType) -> &str {
         TokenType::FontWeight => "fontWeight",
         TokenType::Gradient => "gradient",
         TokenType::Shadow => "shadow",
+        TokenType::Filter => "filter",
         TokenType::Unknown(s) => s.as_str(),
     }
 }

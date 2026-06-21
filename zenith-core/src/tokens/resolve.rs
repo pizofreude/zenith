@@ -18,8 +18,8 @@
 use std::collections::{BTreeMap, HashMap, HashSet};
 
 use crate::ast::token::{
-    GradientKind, GradientLiteral, ShadowLiteral, Token, TokenBlock, TokenLiteral, TokenType,
-    TokenValue,
+    FilterKind, FilterLiteral, GradientKind, GradientLiteral, ShadowLiteral, Token, TokenBlock,
+    TokenLiteral, TokenType, TokenValue,
 };
 use crate::ast::value::{Dimension, Unit};
 use crate::diagnostics::Diagnostic;
@@ -48,6 +48,7 @@ pub enum ResolvedValue {
     FontWeight(u32),
     Gradient(ResolvedGradient),
     Shadow(ResolvedShadow),
+    Filter(ResolvedFilter),
 }
 
 impl ResolvedValue {
@@ -109,6 +110,21 @@ pub struct ResolvedShadowLayer {
     pub dy: f64,
     pub blur: f64,
     pub color_token: String,
+}
+
+/// A resolved filter: an ordered list of filter ops, applied in source order.
+/// Filters carry no color refs, so there is no second cross-check pass.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ResolvedFilter {
+    /// Ordered list of resolved ops, in source order.
+    pub ops: Vec<ResolvedFilterOp>,
+}
+
+/// A single resolved filter op: a kind plus an optional finite amount.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ResolvedFilterOp {
+    pub kind: FilterKind,
+    pub amount: Option<f64>,
 }
 
 /// A successfully resolved token (type + value pair).
@@ -450,6 +466,7 @@ fn validate_literal(
         TokenType::FontWeight => validate_font_weight(token_id, literal, span, diagnostics),
         TokenType::Gradient => validate_gradient(token_id, literal, span, diagnostics),
         TokenType::Shadow => validate_shadow(token_id, literal, span, diagnostics),
+        TokenType::Filter => validate_filter(token_id, literal, span, diagnostics),
         TokenType::Unknown(_) => {
             // Already handled upstream; should not reach here.
             None
@@ -845,6 +862,66 @@ fn validate_shadow(
     }))
 }
 
+/// Validate a filter literal: require ≥1 op, each amount (when present) finite.
+/// Filters carry no color refs, so there is no second cross-check pass.
+fn validate_filter(
+    token_id: &str,
+    literal: &TokenLiteral,
+    span: Option<crate::ast::Span>,
+    diagnostics: &mut Vec<Diagnostic>,
+) -> Option<ResolvedValue> {
+    let TokenLiteral::Filter(FilterLiteral { ops }) = literal else {
+        diagnostics.push(invalid_value(
+            token_id,
+            &format!(
+                "filter token '{}' must be defined by op child nodes, got {}",
+                token_id,
+                literal_kind_name(literal),
+            ),
+            span,
+        ));
+        return None;
+    };
+
+    if ops.is_empty() {
+        diagnostics.push(Diagnostic::error(
+            "filter.no_ops",
+            format!(
+                "filter token '{}' has no ops; at least 1 is required",
+                token_id
+            ),
+            span,
+            Some(token_id.to_owned()),
+        ));
+        return None;
+    }
+
+    let mut resolved_ops: Vec<ResolvedFilterOp> = Vec::with_capacity(ops.len());
+    for op in ops {
+        if let Some(amount) = op.amount
+            && !amount.is_finite()
+        {
+            diagnostics.push(Diagnostic::error(
+                "filter.invalid_amount",
+                format!(
+                    "filter token '{}' has a non-finite op amount; \
+                     NaN and ±inf are invalid",
+                    token_id
+                ),
+                span,
+                Some(token_id.to_owned()),
+            ));
+            return None;
+        }
+        resolved_ops.push(ResolvedFilterOp {
+            kind: op.kind,
+            amount: op.amount,
+        });
+    }
+
+    Some(ResolvedValue::Filter(ResolvedFilter { ops: resolved_ops }))
+}
+
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 fn invalid_value(token_id: &str, message: &str, span: Option<crate::ast::Span>) -> Diagnostic {
@@ -863,6 +940,7 @@ fn literal_kind_name(lit: &TokenLiteral) -> &'static str {
         TokenLiteral::Number(_) => "a number literal",
         TokenLiteral::Gradient(_) => "a gradient literal",
         TokenLiteral::Shadow(_) => "a shadow literal",
+        TokenLiteral::Filter(_) => "a filter literal",
     }
 }
 
@@ -875,6 +953,7 @@ fn type_name_of(t: &TokenType) -> &str {
         TokenType::FontWeight => "fontWeight",
         TokenType::Gradient => "gradient",
         TokenType::Shadow => "shadow",
+        TokenType::Filter => "filter",
         TokenType::Unknown(s) => s.as_str(),
     }
 }
@@ -1804,5 +1883,93 @@ mod tests {
             "codes: {:?}",
             codes(&r.diagnostics)
         );
+    }
+
+    // ── Filter resolution ─────────────────────────────────────────────────
+
+    use crate::ast::token::{FilterKind, FilterLiteral, FilterOp};
+
+    fn filter_token(id: &str, ops: Vec<(FilterKind, Option<f64>)>) -> Token {
+        Token {
+            id: id.to_owned(),
+            token_type: TokenType::Filter,
+            value: TokenValue::Literal(TokenLiteral::Filter(FilterLiteral {
+                ops: ops
+                    .into_iter()
+                    .map(|(kind, amount)| FilterOp { kind, amount })
+                    .collect(),
+            })),
+            source_span: None,
+        }
+    }
+
+    #[test]
+    fn resolves_filter_with_ops() {
+        let b = block(vec![filter_token(
+            "filter.photo",
+            vec![
+                (FilterKind::Grayscale, Some(0.5)),
+                (FilterKind::HueRotate, None),
+            ],
+        )]);
+        let r = resolve_tokens(&b);
+        assert!(
+            r.diagnostics.is_empty(),
+            "unexpected diagnostics: {:?}",
+            r.diagnostics
+        );
+        match &r.resolved["filter.photo"].value {
+            ResolvedValue::Filter(f) => {
+                assert_eq!(f.ops.len(), 2);
+                assert_eq!(f.ops[0].kind, FilterKind::Grayscale);
+                assert_eq!(f.ops[0].amount, Some(0.5));
+                assert_eq!(f.ops[1].kind, FilterKind::HueRotate);
+                assert_eq!(f.ops[1].amount, None);
+            }
+            other => panic!("expected filter, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn empty_filter_produces_no_ops() {
+        let b = block(vec![filter_token("filter.empty", vec![])]);
+        let r = resolve_tokens(&b);
+        assert!(
+            has_code(&r.diagnostics, "filter.no_ops"),
+            "codes: {:?}",
+            codes(&r.diagnostics)
+        );
+        assert!(!r.resolved.contains_key("filter.empty"));
+    }
+
+    #[test]
+    fn filter_non_finite_amount_produces_invalid_amount() {
+        let b = block(vec![filter_token(
+            "filter.bad",
+            vec![(FilterKind::Saturate, Some(f64::NAN))],
+        )]);
+        let r = resolve_tokens(&b);
+        assert!(
+            has_code(&r.diagnostics, "filter.invalid_amount"),
+            "codes: {:?}",
+            codes(&r.diagnostics)
+        );
+        assert!(!r.resolved.contains_key("filter.bad"));
+    }
+
+    #[test]
+    fn filter_wrong_literal_type_produces_invalid_value() {
+        let b = block(vec![literal_token(
+            "filter.bad-shape",
+            TokenType::Filter,
+            TokenLiteral::String("grayscale".to_owned()),
+        )]);
+        let r = resolve_tokens(&b);
+        assert!(
+            has_code(&r.diagnostics, "token.invalid_value"),
+            "codes: {:?}",
+            codes(&r.diagnostics)
+        );
+        assert!(!r.resolved.contains_key("filter.bad-shape"));
     }
 }

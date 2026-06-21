@@ -62,6 +62,7 @@ fn token_type_str(tt: &zenith_core::TokenType) -> &'static str {
         zenith_core::TokenType::FontWeight => "fontWeight",
         zenith_core::TokenType::Gradient => "gradient",
         zenith_core::TokenType::Shadow => "shadow",
+        zenith_core::TokenType::Filter => "filter",
         zenith_core::TokenType::Unknown(_) => "unknown",
     }
 }
@@ -107,6 +108,17 @@ fn resolved_value_str(rv: &ResolvedValue) -> String {
                 })
                 .collect();
             format!("shadow({})", layers.join(", "))
+        }
+        ResolvedValue::Filter(f) => {
+            let ops: Vec<String> = f
+                .ops
+                .iter()
+                .map(|op| match op.amount {
+                    Some(amount) => format!("{} amount={}", op.kind.as_op_name(), amount),
+                    None => op.kind.as_op_name().to_owned(),
+                })
+                .collect();
+            format!("filter({})", ops.join(", "))
         }
     }
 }

@@ -6,7 +6,7 @@ use std::collections::BTreeMap;
 use zenith_core::{Diagnostic, GradientKind, PropertyValue, ResolvedToken, ResolvedValue};
 
 use crate::color::{parse_color, parse_srgb_hex};
-use crate::ir::{Color, GradientPaint, GradientStop, ShadowSpec};
+use crate::ir::{Color, FilterKind, FilterSpec, GradientPaint, GradientStop, ShadowSpec};
 
 /// Build an [`ir::Color`](Color) from a resolved color token, preserving its
 /// CMYK origin when present. Returns `None` only when the resolved value is not
@@ -202,6 +202,56 @@ pub(super) fn resolve_property_shadow(
         return None;
     }
     Some(layers)
+}
+
+/// Resolve a `filter` `PropertyValue` into a list of [`FilterSpec`] operations,
+/// or `None`.
+///
+/// Mirrors [`resolve_property_shadow`]: returns `Some` only when `prop` is a
+/// `TokenRef` whose token resolved to a `ResolvedValue::Filter`. Each op's core
+/// [`zenith_core::FilterKind`] is mapped to the scene-local [`FilterKind`], and
+/// the per-kind default `amount` is substituted when the op carries `None`.
+/// Returns `None` for non-filter props, or when the op list is empty.
+pub(super) fn resolve_property_filter(
+    prop: &PropertyValue,
+    resolved: &BTreeMap<String, ResolvedToken>,
+    _subject_id: &str,
+) -> Option<Vec<FilterSpec>> {
+    let PropertyValue::TokenRef(token_id) = prop else {
+        return None;
+    };
+    let ResolvedValue::Filter(f) = &resolved.get(token_id.as_str())?.value else {
+        return None;
+    };
+
+    let mut ops: Vec<FilterSpec> = Vec::with_capacity(f.ops.len());
+    for op in &f.ops {
+        let kind = match op.kind {
+            zenith_core::FilterKind::Grayscale => FilterKind::Grayscale,
+            zenith_core::FilterKind::Invert => FilterKind::Invert,
+            zenith_core::FilterKind::Sepia => FilterKind::Sepia,
+            zenith_core::FilterKind::Saturate => FilterKind::Saturate,
+            zenith_core::FilterKind::Brightness => FilterKind::Brightness,
+            zenith_core::FilterKind::Contrast => FilterKind::Contrast,
+            zenith_core::FilterKind::HueRotate => FilterKind::HueRotate,
+        };
+        // Per-kind default amount when the op leaves it unspecified.
+        let amount = op.amount.unwrap_or(match kind {
+            FilterKind::Grayscale
+            | FilterKind::Invert
+            | FilterKind::Sepia
+            | FilterKind::Saturate
+            | FilterKind::Brightness
+            | FilterKind::Contrast => 1.0,
+            FilterKind::HueRotate => 0.0,
+        });
+        ops.push(FilterSpec { kind, amount });
+    }
+
+    if ops.is_empty() {
+        return None;
+    }
+    Some(ops)
 }
 
 /// Apply the cascaded opacity multiplier to every stop's alpha, matching the
