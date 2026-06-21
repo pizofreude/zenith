@@ -456,6 +456,7 @@ fn node_visible(node: &Node) -> Option<bool> {
         Node::Toc(n) => n.visible,
         Node::Table(n) => n.visible,
         Node::Shape(n) => n.visible,
+        Node::Connector(n) => n.visible,
         // A footnote has no `visible` flag.
         Node::Footnote(_) => None,
         Node::Unknown(_) => None,
@@ -483,6 +484,7 @@ fn node_declared_w(node: &Node) -> Option<f64> {
         | Node::Polyline(_)
         | Node::Instance(_)
         | Node::Footnote(_)
+        | Node::Connector(_)
         | Node::Unknown(_) => None,
     }?;
     dim_to_px(w.value, &w.unit)
@@ -508,6 +510,7 @@ fn node_declared_h(node: &Node) -> Option<f64> {
         | Node::Polyline(_)
         | Node::Instance(_)
         | Node::Footnote(_)
+        | Node::Connector(_)
         | Node::Unknown(_) => None,
     }?;
     dim_to_px(h.value, &h.unit)
@@ -606,6 +609,7 @@ fn with_flow_box(node: &Node, x: f64, y: f64, w: f64, h: Option<f64>) -> Node {
         | Node::Polyline(_)
         | Node::Instance(_)
         | Node::Footnote(_)
+        | Node::Connector(_)
         | Node::Unknown(_) => {}
     }
     out
@@ -919,11 +923,13 @@ fn set_node_fill(node: &mut Node, fill: PropertyValue) {
         Node::Footnote(n) => n.fill = Some(fill),
         Node::Table(n) => n.fill = Some(fill),
         Node::Shape(n) => n.fill = Some(fill),
+        // A connector is stroke-only; it has no fill to override.
         Node::Line(_)
         | Node::Frame(_)
         | Node::Group(_)
         | Node::Image(_)
         | Node::Instance(_)
+        | Node::Connector(_)
         | Node::Unknown(_) => {}
     }
 }
@@ -946,6 +952,7 @@ fn set_node_visible(node: &mut Node, v: bool) {
         Node::Toc(n) => n.visible = Some(v),
         Node::Table(n) => n.visible = Some(v),
         Node::Shape(n) => n.visible = Some(v),
+        Node::Connector(n) => n.visible = Some(v),
         // A footnote has no `visible` flag; nothing to set.
         Node::Footnote(_) => {}
         Node::Unknown(_) => {}
@@ -971,6 +978,7 @@ fn node_local_id(node: &Node) -> Option<&str> {
         Node::Footnote(n) => Some(&n.id),
         Node::Table(n) => Some(&n.id),
         Node::Shape(n) => Some(&n.id),
+        Node::Connector(n) => Some(&n.id),
         Node::Unknown(_) => None,
     }
 }
@@ -1022,6 +1030,7 @@ fn prefix_node_id(node: &mut Node, prefix: &str) {
         Node::Footnote(n) => pre!(n.id),
         Node::Table(n) => pre!(n.id),
         Node::Shape(n) => pre!(n.id),
+        Node::Connector(n) => pre!(n.id),
         Node::Unknown(_) => {}
     }
 }
@@ -1251,6 +1260,7 @@ fn group_children_center(children: &[Node], base_dx: f64, base_dy: f64) -> Optio
             | Node::Field(_)
             | Node::Toc(_)
             | Node::Footnote(_)
+            | Node::Connector(_)
             | Node::Unknown(_) => {}
         }
     }

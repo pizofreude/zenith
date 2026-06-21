@@ -345,6 +345,16 @@ fn build_node_entry(node: &Node) -> NodeEntry {
             // no child entries in the inspect tree.
             children: vec![],
         },
+        Node::Connector(n) => NodeEntry {
+            id: n.id.clone(),
+            kind: "connector".into(),
+            // A connector has no authored bbox — its endpoints are derived from
+            // its targets' boxes at compile time.
+            geometry: None,
+            visible: n.visible,
+            locked: n.locked,
+            children: vec![],
+        },
         Node::Unknown(n) => NodeEntry {
             id: String::new(),
             kind: n.kind.clone(),
@@ -415,6 +425,7 @@ fn node_id_str(node: &Node) -> &str {
         Node::Footnote(n) => &n.id,
         Node::Table(n) => &n.id,
         Node::Shape(n) => &n.id,
+        Node::Connector(n) => &n.id,
         Node::Unknown(_) => "",
     }
 }

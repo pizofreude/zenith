@@ -1208,6 +1208,7 @@ fn child_declared_box(node: &zenith_core::Node) -> (Option<f64>, Option<f64>) {
         | Node::Polyline(_)
         | Node::Instance(_)
         | Node::Footnote(_)
+        | Node::Connector(_)
         | Node::Unknown(_) => (None, None),
     }
 }

@@ -19,8 +19,8 @@ pub mod validate;
 // Curated flat re-exports for the most-used public surface.
 pub use asset::{AssetData, AssetProvider, BytesAssetProvider};
 pub use ast::{
-    AssetBlock, AssetDecl, AssetKind, CodeNode, ComponentDef, Dimension, Document, DocumentBody,
-    EllipseNode, FieldNode, FootnoteNode, FrameNode, GradientKind, GradientLiteral,
+    AssetBlock, AssetDecl, AssetKind, CodeNode, ComponentDef, ConnectorNode, Dimension, Document,
+    DocumentBody, EllipseNode, FieldNode, FootnoteNode, FrameNode, GradientKind, GradientLiteral,
     GradientStopRef, GroupNode, ImageNode, InstanceNode, LineNode, MasterDef, Node, ObjectPosition,
     Override, Page, Point, PolygonNode, PolylineNode, Project, PropertyValue, RectNode,
     STYLE_RECOGNIZED_KEYS, SafeZone, SafeZoneType, SectionDef, ShadowLayerRef, ShadowLiteral,

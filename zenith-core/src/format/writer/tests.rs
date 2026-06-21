@@ -381,6 +381,7 @@ fn strip_node_span(node: &mut crate::ast::Node) {
             }
         }
         Node::Shape(s) => s.source_span = None,
+        Node::Connector(c) => c.source_span = None,
         Node::Unknown(u) => u.source_span = None,
     }
 }

@@ -430,6 +430,7 @@ fn node_is_locked(doc: &Document, id: &str) -> bool {
             Node::Toc(n) => n.locked,
             Node::Table(n) => n.locked,
             Node::Shape(n) => n.locked,
+            Node::Connector(n) => n.locked,
             // A footnote has no `locked` field; treat as unlocked.
             Node::Footnote(_) => None,
             Node::Unknown(_) => None,
@@ -600,6 +601,7 @@ pub(super) fn node_id_of(node: &Node) -> Option<&str> {
         Node::Footnote(f) => Some(&f.id),
         Node::Table(t) => Some(&t.id),
         Node::Shape(s) => Some(&s.id),
+        Node::Connector(c) => Some(&c.id),
         Node::Unknown(_) => None,
     }
 }
@@ -625,6 +627,7 @@ pub(super) fn node_kind_str(node: &Node) -> &'static str {
         Node::Footnote(_) => "footnote",
         Node::Table(_) => "table",
         Node::Shape(_) => "shape",
+        Node::Connector(_) => "connector",
         Node::Unknown(_) => "unknown",
     }
 }

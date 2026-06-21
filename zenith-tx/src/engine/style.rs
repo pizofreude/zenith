@@ -32,11 +32,14 @@ fn node_fill_mut(node: &mut Node) -> Option<&mut Option<PropertyValue>> {
         Node::Footnote(n) => Some(&mut n.fill),
         Node::Table(n) => Some(&mut n.fill),
         Node::Shape(n) => Some(&mut n.fill),
+        // A connector is stroke-only (like `line`): it has no `fill` field, so
+        // set_fill honestly surfaces tx.unsupported_property.
         Node::Line(_)
         | Node::Frame(_)
         | Node::Group(_)
         | Node::Image(_)
         | Node::Instance(_)
+        | Node::Connector(_)
         | Node::Unknown(_) => None,
     }
 }
@@ -52,6 +55,7 @@ fn node_stroke_mut(node: &mut Node) -> Option<&mut Option<PropertyValue>> {
         Node::Polyline(n) => Some(&mut n.stroke),
         Node::Ellipse(n) => Some(&mut n.stroke),
         Node::Shape(n) => Some(&mut n.stroke),
+        Node::Connector(n) => Some(&mut n.stroke),
         Node::Text(_)
         | Node::Code(_)
         | Node::Frame(_)
@@ -77,6 +81,7 @@ fn node_stroke_width_mut(node: &mut Node) -> Option<&mut Option<PropertyValue>> 
         Node::Polyline(n) => Some(&mut n.stroke_width),
         Node::Ellipse(n) => Some(&mut n.stroke_width),
         Node::Shape(n) => Some(&mut n.stroke_width),
+        Node::Connector(n) => Some(&mut n.stroke_width),
         Node::Text(_)
         | Node::Code(_)
         | Node::Frame(_)
@@ -110,6 +115,7 @@ fn node_opacity_mut(node: &mut Node) -> Option<&mut Option<f64>> {
         Node::Toc(n) => Some(&mut n.opacity),
         Node::Table(n) => Some(&mut n.opacity),
         Node::Shape(n) => Some(&mut n.opacity),
+        Node::Connector(n) => Some(&mut n.opacity),
         // A footnote has no `opacity` field.
         Node::Footnote(_) => None,
         Node::Unknown(_) => None,
@@ -141,6 +147,7 @@ fn node_overflow_mut(node: &mut Node) -> Option<&mut Option<String>> {
         | Node::Footnote(_)
         | Node::Table(_)
         | Node::Shape(_)
+        | Node::Connector(_)
         | Node::Unknown(_) => None,
     }
 }
@@ -589,6 +596,7 @@ fn collect_text_entries(children: &[Node], out: &mut Vec<(String, bool)>) {
             | Node::Field(_)
             | Node::Toc(_)
             | Node::Footnote(_)
+            | Node::Connector(_)
             | Node::Unknown(_) => {}
         }
     }

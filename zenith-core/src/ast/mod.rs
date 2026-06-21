@@ -15,9 +15,9 @@ pub use document::{
     SectionDef,
 };
 pub use node::{
-    CodeNode, EllipseNode, FieldNode, FootnoteNode, FrameNode, GroupNode, ImageNode, InstanceNode,
-    LineNode, Node, ObjectPosition, Override, Point, PolygonNode, PolylineNode, RectNode,
-    ShapeNode, TableCell, TableColumn, TableNode, TableRow, TextNode, TextSpan, TocNode,
+    CodeNode, ConnectorNode, EllipseNode, FieldNode, FootnoteNode, FrameNode, GroupNode, ImageNode,
+    InstanceNode, LineNode, Node, ObjectPosition, Override, Point, PolygonNode, PolylineNode,
+    RectNode, ShapeNode, TableCell, TableColumn, TableNode, TableRow, TextNode, TextSpan, TocNode,
     UnknownNode, UnknownProperty, UnknownValue,
 };
 pub use span::Span;

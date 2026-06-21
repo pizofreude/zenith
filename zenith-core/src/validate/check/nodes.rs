@@ -1997,6 +1997,147 @@ pub(super) fn walk_node(
             }
         }
 
+        Node::Connector(c) => {
+            register_id(&c.id, seen_ids, diagnostics);
+            check_style_ref(
+                &c.id,
+                c.style.as_deref(),
+                declared_style_ids,
+                c.source_span,
+                diagnostics,
+            );
+
+            // Stroke visual properties — token-required (connector has no fill).
+            check_visual_prop(
+                &c.id,
+                "stroke",
+                c.stroke.as_ref(),
+                VisualExpect::Color,
+                referenced_token_ids,
+                resolved_tokens,
+                diagnostics,
+            );
+            check_visual_prop(
+                &c.id,
+                "stroke-width",
+                c.stroke_width.as_ref(),
+                VisualExpect::Dimension,
+                referenced_token_ids,
+                resolved_tokens,
+                diagnostics,
+            );
+
+            // Target existence: `from`/`to`, when present, must name an id in the
+            // document. A reference to a missing id is advisory (the connector
+            // simply renders nothing at compile time). Mirrors
+            // `text-exclusion.unresolved_ref`.
+            if let Some(target) = &c.from
+                && !all_node_ids.contains(target)
+            {
+                diagnostics.push(Diagnostic::warning(
+                    "connector.unknown_target",
+                    format!(
+                        "connector '{}': from '{}' matches no node id in the document",
+                        c.id, target
+                    ),
+                    c.source_span,
+                    Some(c.id.clone()),
+                ));
+            }
+            if let Some(target) = &c.to
+                && !all_node_ids.contains(target)
+            {
+                diagnostics.push(Diagnostic::warning(
+                    "connector.unknown_target",
+                    format!(
+                        "connector '{}': to '{}' matches no node id in the document",
+                        c.id, target
+                    ),
+                    c.source_span,
+                    Some(c.id.clone()),
+                ));
+            }
+
+            // Missing endpoints: a connector with no `from`/`to` can't route.
+            if c.from.is_none() || c.to.is_none() {
+                diagnostics.push(Diagnostic::warning(
+                    "connector.missing_target",
+                    format!(
+                        "connector '{}': both 'from' and 'to' are required to route",
+                        c.id
+                    ),
+                    c.source_span,
+                    Some(c.id.clone()),
+                ));
+            }
+
+            // Enum-value checks (Warnings on unrecognized values, not errors).
+            if let Some(r) = c.route.as_deref()
+                && !matches!(r, "straight" | "orthogonal")
+            {
+                diagnostics.push(Diagnostic::warning(
+                    "connector.invalid_route",
+                    format!(
+                        "connector '{}': route '{r}' is not one of straight/orthogonal",
+                        c.id
+                    ),
+                    c.source_span,
+                    Some(c.id.clone()),
+                ));
+            }
+            for (label, marker) in [
+                ("marker-start", c.marker_start.as_deref()),
+                ("marker-end", c.marker_end.as_deref()),
+            ] {
+                if let Some(m) = marker
+                    && !matches!(m, "none" | "arrow")
+                {
+                    diagnostics.push(Diagnostic::warning(
+                        "connector.invalid_marker",
+                        format!(
+                            "connector '{}': {label} '{m}' is not one of none/arrow",
+                            c.id
+                        ),
+                        c.source_span,
+                        Some(c.id.clone()),
+                    ));
+                }
+            }
+            for (label, anchor) in [
+                ("from-anchor", c.from_anchor.as_deref()),
+                ("to-anchor", c.to_anchor.as_deref()),
+            ] {
+                if let Some(a) = anchor
+                    && !matches!(a, "top" | "bottom" | "left" | "right" | "center" | "auto")
+                {
+                    diagnostics.push(Diagnostic::warning(
+                        "connector.invalid_anchor",
+                        format!(
+                            "connector '{}': {label} '{a}' is not one of \
+                             top/bottom/left/right/center/auto",
+                            c.id
+                        ),
+                        c.source_span,
+                        Some(c.id.clone()),
+                    ));
+                }
+            }
+
+            // Unknown properties.
+            for prop_name in c.unknown_props.keys() {
+                diagnostics.push(Diagnostic::warning(
+                    "node.unknown_property",
+                    format!(
+                        "connector '{}': unknown property '{}' (version-relative; \
+                         may be valid in a later schema version)",
+                        c.id, prop_name
+                    ),
+                    c.source_span,
+                    Some(c.id.clone()),
+                ));
+            }
+        }
+
         Node::Unknown(u) => {
             diagnostics.push(Diagnostic::warning(
                 "node.unknown_kind",
@@ -2134,11 +2275,15 @@ pub(super) fn node_bbox(node: &Node, page_w: f64, page_h: f64) -> Option<(f64, f
             let h = resolve_axis(n.h.as_ref()?, page_h)?;
             Some((x, y, w, h))
         }
+        // A connector has no authored bbox: its endpoints are DERIVED from the
+        // resolved boxes of its `from`/`to` targets at compile time and are not
+        // known at validate time, so there is no off_canvas check here.
         Node::Group(_)
         | Node::Instance(_)
         | Node::Field(_)
         | Node::Toc(_)
         | Node::Footnote(_)
+        | Node::Connector(_)
         | Node::Unknown(_) => None,
     }
 }
@@ -2186,7 +2331,8 @@ fn points_bbox(
 /// produced by forward-compat).
 ///
 /// Covered (have a `rotate` field): `Rect`, `Ellipse`, `Frame`, `Image`,
-/// `Text`, `Code`, `Group`, `Polygon`, `Polyline`, `Table`, `Shape`.
+/// `Text`, `Code`, `Group`, `Polygon`, `Polyline`, `Table`, `Shape`,
+/// `Connector`.
 /// Not covered: `Line`, `Instance`, `Field`, `Footnote`, `Unknown`.
 fn node_rotate_deg(node: &Node) -> Option<f64> {
     let dim = match node {
@@ -2201,6 +2347,7 @@ fn node_rotate_deg(node: &Node) -> Option<f64> {
         Node::Polyline(n) => n.rotate.as_ref(),
         Node::Table(n) => n.rotate.as_ref(),
         Node::Shape(n) => n.rotate.as_ref(),
+        Node::Connector(n) => n.rotate.as_ref(),
         Node::Line(_)
         | Node::Instance(_)
         | Node::Field(_)
@@ -2234,6 +2381,7 @@ pub(super) fn node_role(node: &Node) -> Option<&str> {
         Node::Footnote(n) => n.role.as_deref(),
         Node::Table(n) => n.role.as_deref(),
         Node::Shape(n) => n.role.as_deref(),
+        Node::Connector(n) => n.role.as_deref(),
         Node::Unknown(_) => None,
     }
 }
@@ -2257,6 +2405,7 @@ pub(super) fn node_id_and_span(node: &Node) -> (&str, Option<crate::ast::Span>) 
         Node::Footnote(n) => (&n.id, n.source_span),
         Node::Table(n) => (&n.id, n.source_span),
         Node::Shape(n) => (&n.id, n.source_span),
+        Node::Connector(n) => (&n.id, n.source_span),
         Node::Unknown(n) => (&n.kind, n.source_span),
     }
 }

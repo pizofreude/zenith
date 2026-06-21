@@ -2936,3 +2936,160 @@ page id="page.shp" w=(px)640 h=(px)360 {{
         "top-aligned baseline ({top_y}) must be higher (smaller y) than middle ({middle_y})"
     );
 }
+
+// ── connector node (U1): straight line between resolved edge anchors ──────────
+//
+// A `connector` declares `from`/`to` target ids and, at compile time, resolves
+// those nodes' boxes to draw a STRAIGHT 2-point line between anchor points on
+// their edges. U1 = straight line, no arrowhead markers, no orthogonal routing.
+
+/// Collect the first `StrokePolyline`'s flat points, or panic.
+fn first_stroke_polyline_points(cmds: &[SceneCommand]) -> Vec<f64> {
+    cmds.iter()
+        .find_map(|c| match c {
+            SceneCommand::StrokePolyline { points, .. } => Some(points.clone()),
+            _ => None,
+        })
+        .unwrap_or_else(|| panic!("expected a StrokePolyline; got: {cmds:?}"))
+}
+
+/// Two rects laid out horizontally with a connector between them, default
+/// (auto) anchors. The from-box center is left of the to-box center, so auto
+/// picks the right edge of `a` and the left edge of `b`.
+#[test]
+fn connector_auto_anchors_between_horizontal_boxes() {
+    let src = r##"zenith version=1 {
+  project id="proj.cn" name="CN"
+  tokens format="zenith-token-v1" {
+token id="color.fill" type="color" value="#dbeafe"
+token id="color.line" type="color" value="#1e3a8a"
+token id="size.stroke" type="dimension" value=(px)2
+  }
+  styles {}
+  document id="doc.cn" title="CN" {
+page id="page.cn" w=(px)640 h=(px)360 {
+  rect id="a" x=(px)40 y=(px)40 w=(px)100 h=(px)80 fill=(token)"color.fill"
+  rect id="b" x=(px)300 y=(px)60 w=(px)100 h=(px)80 fill=(token)"color.fill"
+  connector id="c1" from="a" to="b" stroke=(token)"color.line" stroke-width=(token)"size.stroke"
+}
+  }
+}
+"##;
+    let doc = parse(src);
+    let result = compile(&doc, &default_provider());
+    let cmds = &result.scene.commands;
+
+    // a: x=40 y=40 w=100 h=80  → center (90,80),  right-mid edge = (140, 80)
+    // b: x=300 y=60 w=100 h=80 → center (350,100), left-mid edge = (300, 100)
+    let pts = first_stroke_polyline_points(cmds);
+    assert_eq!(
+        pts,
+        vec![140.0, 80.0, 300.0, 100.0],
+        "auto anchors must be a's right-mid and b's left-mid; got {pts:?}"
+    );
+
+    // U1: straight 2-point open line, centered stroke.
+    assert!(
+        cmds.iter().any(|c| matches!(
+            c,
+            SceneCommand::StrokePolyline { points, closed: false, align: StrokeAlign::Center, .. }
+                if points.len() == 4
+        )),
+        "connector must emit a straight open StrokePolyline; got {cmds:?}"
+    );
+}
+
+/// Explicit `from-anchor="right"` / `to-anchor="left"` anchors are honored
+/// verbatim (no auto resolution).
+#[test]
+fn connector_explicit_anchors_are_honored() {
+    let src = r##"zenith version=1 {
+  project id="proj.cn" name="CN"
+  tokens format="zenith-token-v1" {
+token id="color.line" type="color" value="#1e3a8a"
+  }
+  styles {}
+  document id="doc.cn" title="CN" {
+page id="page.cn" w=(px)640 h=(px)360 {
+  rect id="a" x=(px)40 y=(px)40 w=(px)100 h=(px)80 stroke=(token)"color.line"
+  rect id="b" x=(px)300 y=(px)60 w=(px)100 h=(px)80 stroke=(token)"color.line"
+  connector id="c1" from="a" to="b" from-anchor="right" to-anchor="left" stroke=(token)"color.line"
+}
+  }
+}
+"##;
+    let doc = parse(src);
+    let result = compile(&doc, &default_provider());
+    let cmds = &result.scene.commands;
+
+    // a right-mid = (140, 80); b left-mid = (300, 100).
+    let pts = first_stroke_polyline_points(cmds);
+    assert_eq!(pts, vec![140.0, 80.0, 300.0, 100.0]);
+}
+
+/// A connector to a MISSING target emits no StrokePolyline (graceful skip).
+#[test]
+fn connector_missing_target_emits_nothing() {
+    let src = r##"zenith version=1 {
+  project id="proj.cn" name="CN"
+  tokens format="zenith-token-v1" {
+token id="color.line" type="color" value="#1e3a8a"
+  }
+  styles {}
+  document id="doc.cn" title="CN" {
+page id="page.cn" w=(px)640 h=(px)360 {
+  rect id="a" x=(px)40 y=(px)40 w=(px)100 h=(px)80 stroke=(token)"color.line"
+  connector id="c1" from="a" to="ghost" stroke=(token)"color.line"
+}
+  }
+}
+"##;
+    let doc = parse(src);
+    let result = compile(&doc, &default_provider());
+    let cmds = &result.scene.commands;
+    assert!(
+        !cmds
+            .iter()
+            .any(|c| matches!(c, SceneCommand::StrokePolyline { .. })),
+        "connector to a missing target must emit no StrokePolyline; got {cmds:?}"
+    );
+}
+
+/// A connector reroutes when its target box changes: compiling two documents
+/// that differ only in the `to` rect's position yields different endpoints.
+#[test]
+fn connector_reroutes_when_target_moves() {
+    let doc_src = |to_x: u32| {
+        format!(
+            r##"zenith version=1 {{
+  project id="proj.cn" name="CN"
+  tokens format="zenith-token-v1" {{
+token id="color.line" type="color" value="#1e3a8a"
+  }}
+  styles {{}}
+  document id="doc.cn" title="CN" {{
+page id="page.cn" w=(px)640 h=(px)360 {{
+  rect id="a" x=(px)40 y=(px)40 w=(px)100 h=(px)80 stroke=(token)"color.line"
+  rect id="b" x=(px){to_x} y=(px)60 w=(px)100 h=(px)80 stroke=(token)"color.line"
+  connector id="c1" from="a" to="b" from-anchor="right" to-anchor="left" stroke=(token)"color.line"
+}}
+  }}
+}}
+"##
+        )
+    };
+
+    let r1 = compile(&parse(&doc_src(300)), &default_provider());
+    let r2 = compile(&parse(&doc_src(420)), &default_provider());
+
+    let p1 = first_stroke_polyline_points(&r1.scene.commands);
+    let p2 = first_stroke_polyline_points(&r2.scene.commands);
+
+    // The `to` (left-edge) endpoint must move with the target rect.
+    assert_eq!(p1[2], 300.0, "first layout: b left-mid x = 300");
+    assert_eq!(p2[2], 420.0, "moved layout: b left-mid x = 420");
+    assert_ne!(
+        p1, p2,
+        "connector endpoints must change when the target moves"
+    );
+}

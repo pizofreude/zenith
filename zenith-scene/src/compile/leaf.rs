@@ -7,8 +7,9 @@
 use std::collections::BTreeMap;
 
 use zenith_core::{
-    Diagnostic, EllipseNode, FontProvider, LineNode, Point, PolygonNode, PolylineNode,
-    PropertyValue, RectNode, ResolvedToken, ShapeNode, Span, Style, TextNode, dim_to_px,
+    ConnectorNode, Diagnostic, EllipseNode, FontProvider, LineNode, Point, PolygonNode,
+    PolylineNode, PropertyValue, RectNode, ResolvedToken, ShapeNode, Span, Style, TextNode,
+    dim_to_px,
 };
 use zenith_layout::RustybuzzEngine;
 
@@ -1092,6 +1093,132 @@ pub(super) fn compile_polyline(
             fill_even_odd: false,
         });
     }
+
+    if rot.is_some() {
+        commands.push(SceneCommand::PopTransform);
+    }
+}
+
+/// Compute the page-absolute anchor point on the edge of a `(x, y, w, h)` box.
+///
+/// Named anchors map to the edge centers; `"center"` is the box center.
+/// `"auto"` (the default for an absent / unrecognized anchor) chooses the edge
+/// by the dominant axis toward `toward` (the OTHER box's center): a larger
+/// horizontal delta picks left/right, otherwise top/bottom.
+fn edge_anchor(boxr: (f64, f64, f64, f64), anchor: &str, toward: (f64, f64)) -> (f64, f64) {
+    let (x, y, w, h) = boxr;
+    let cx = x + w / 2.0;
+    let cy = y + h / 2.0;
+    match anchor {
+        "top" => (cx, y),
+        "bottom" => (cx, y + h),
+        "left" => (x, cy),
+        "right" => (x + w, cy),
+        "center" => (cx, cy),
+        // "auto" and any unrecognized value: dominant-axis edge toward `toward`.
+        _ => {
+            let dx = toward.0 - cx;
+            let dy = toward.1 - cy;
+            if dx.abs() >= dy.abs() {
+                if dx >= 0.0 { (x + w, cy) } else { (x, cy) }
+            } else if dy >= 0.0 {
+                (cx, y + h)
+            } else {
+                (cx, y)
+            }
+        }
+    }
+}
+
+/// Compile a `connector` leaf node — a semantic arrow whose endpoints are
+/// DERIVED at compile time from the resolved boxes of its `from`/`to` targets.
+///
+/// Unit 1 draws a STRAIGHT 2-point line between the resolved edge anchors. The
+/// `route="orthogonal"` mode (Unit 3) and `marker-start`/`marker-end` arrowheads
+/// (Unit 2) are stored + validated but NOT rendered here: the line is always
+/// straight and headless. When `from`/`to` is absent, or a target box is not in
+/// `node_boxes` (unresolved), nothing is emitted (graceful — validation warned).
+#[allow(clippy::too_many_arguments)]
+pub(super) fn compile_connector(
+    connector: &ConnectorNode,
+    resolved: &BTreeMap<String, ResolvedToken>,
+    style_map: &BTreeMap<&str, &Style>,
+    commands: &mut Vec<SceneCommand>,
+    diagnostics: &mut Vec<Diagnostic>,
+    node_boxes: &BTreeMap<String, (f64, f64, f64, f64)>,
+    ctx: RenderCtx,
+) {
+    if connector.visible == Some(false) {
+        return;
+    }
+
+    // Both endpoints are required to route; absent → emit nothing (validation
+    // already warned via `connector.missing_target`).
+    let (Some(from_id), Some(to_id)) = (connector.from.as_deref(), connector.to.as_deref()) else {
+        return;
+    };
+
+    // Look up the resolved page-absolute boxes of both targets. A missing box
+    // (unresolved id, or a target with no authored geometry) → emit nothing.
+    let (Some(from_box), Some(to_box)) = (node_boxes.get(from_id), node_boxes.get(to_id)) else {
+        return;
+    };
+    let from_box = *from_box;
+    let to_box = *to_box;
+
+    let from_center = (from_box.0 + from_box.2 / 2.0, from_box.1 + from_box.3 / 2.0);
+    let to_center = (to_box.0 + to_box.2 / 2.0, to_box.1 + to_box.3 / 2.0);
+
+    // Resolve anchors: each end aims toward the OTHER box's center for "auto".
+    let from_anchor = connector.from_anchor.as_deref().unwrap_or("auto");
+    let to_anchor = connector.to_anchor.as_deref().unwrap_or("auto");
+    let (fx, fy) = edge_anchor(from_box, from_anchor, to_center);
+    let (tx, ty) = edge_anchor(to_box, to_anchor, from_center);
+
+    // Straight line: 2 points (Unit 1). Orthogonal routing is Unit 3.
+    let flat_points = vec![fx, fy, tx, ty];
+
+    // STROKE — only emit when a stroke color is present (mirrors polyline: no
+    // stroke token → nothing drawn). Style cascade for stroke + stroke-width.
+    let node_opacity = connector.opacity.unwrap_or(1.0).clamp(0.0, 1.0);
+    let stroke_prop = connector
+        .stroke
+        .as_ref()
+        .or_else(|| style_prop(&connector.style, style_map, "stroke"));
+    let Some(stroke_prop) = stroke_prop else {
+        return;
+    };
+    let Some(mut color) = resolve_property_color(stroke_prop, resolved, diagnostics, &connector.id)
+    else {
+        return;
+    };
+    color.a = (color.a as f64 * node_opacity * ctx.opacity).round() as u8;
+
+    let sw = connector
+        .stroke_width
+        .clone()
+        .or_else(|| style_prop(&connector.style, style_map, "stroke-width").cloned());
+    let stroke_width = resolve_property_dimension_px(&sw, resolved, 1.0);
+
+    // Rotation bracket: rotate about the line's bbox center, matching polyline.
+    let rot = rotation_degrees(connector.rotate.as_ref());
+    if let Some(angle) = rot {
+        let (cx, cy) = flat_points_centroid_center(&flat_points);
+        commands.push(SceneCommand::PushTransform {
+            angle_deg: angle,
+            cx,
+            cy,
+        });
+    }
+
+    commands.push(SceneCommand::StrokePolyline {
+        points: flat_points,
+        color,
+        stroke_width,
+        closed: false,
+        align: StrokeAlign::Center,
+        fill_even_odd: false,
+    });
 
     if rot.is_some() {
         commands.push(SceneCommand::PopTransform);

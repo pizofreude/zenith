@@ -68,11 +68,14 @@ fn node_geometry_mut(node: &mut Node) -> Option<GeometryMut<'_>> {
         // A footnote has NO x/y/w/h box (the renderer positions it in the
         // footnote zone), so set_geometry does not apply — it honestly surfaces
         // tx.unsupported_property rather than silently dropping the request.
+        // A connector has NO authored box (its endpoints are derived from its
+        // targets' boxes), so set_geometry does not apply either.
         Node::Line(_)
         | Node::Polygon(_)
         | Node::Polyline(_)
         | Node::Instance(_)
         | Node::Footnote(_)
+        | Node::Connector(_)
         | Node::Unknown(_) => None,
     }
 }
@@ -95,8 +98,8 @@ pub(super) struct GeometryDelta {
 /// variants that do not carry a `rotate` field.
 ///
 /// Supported: `Rect`, `Ellipse`, `Frame`, `Image`, `Text`, `Code`, `Group`,
-/// `Polygon`, `Polyline`.
-/// Unsupported: `Line`, `Instance`, `Field`, `Footnote`, `Unknown`.
+/// `Polygon`, `Polyline`, `Table`, `Shape`, `Connector`.
+/// Unsupported: `Line`, `Instance`, `Field`, `Toc`, `Footnote`, `Unknown`.
 fn node_rotate_mut(node: &mut Node) -> Option<&mut Option<Dimension>> {
     match node {
         Node::Rect(n) => Some(&mut n.rotate),
@@ -110,6 +113,7 @@ fn node_rotate_mut(node: &mut Node) -> Option<&mut Option<Dimension>> {
         Node::Polyline(n) => Some(&mut n.rotate),
         Node::Table(n) => Some(&mut n.rotate),
         Node::Shape(n) => Some(&mut n.rotate),
+        Node::Connector(n) => Some(&mut n.rotate),
         // Line has no rotate field.
         // Instance has no rotate field.
         // Field has no rotate field.

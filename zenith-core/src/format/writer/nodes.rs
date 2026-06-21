@@ -5,10 +5,10 @@
 use std::fmt::Write as _;
 
 use crate::ast::{
-    CodeNode, DocumentBody, EllipseNode, FieldNode, Fold, FootnoteNode, FrameNode, GroupNode,
-    ImageNode, InstanceNode, LineNode, Node, Override, Page, Point, PolygonNode, PolylineNode,
-    RectNode, SafeZone, SafeZoneType, ShapeNode, TableCell, TableNode, TableRow, TextNode,
-    TextSpan, TocNode,
+    CodeNode, ConnectorNode, DocumentBody, EllipseNode, FieldNode, Fold, FootnoteNode, FrameNode,
+    GroupNode, ImageNode, InstanceNode, LineNode, Node, Override, Page, Point, PolygonNode,
+    PolylineNode, RectNode, SafeZone, SafeZoneType, ShapeNode, TableCell, TableNode, TableRow,
+    TextNode, TextSpan, TocNode,
 };
 
 use super::{
@@ -168,6 +168,7 @@ fn write_node(node: &Node, out: &mut String, depth: usize) {
         Node::Footnote(f) => write_footnote(f, out, depth),
         Node::Table(t) => write_table(t, out, depth),
         Node::Shape(s) => write_shape(s, out, depth),
+        Node::Connector(c) => write_connector(c, out, depth),
         Node::Unknown(u) => write_unknown_node(u, out, depth),
     }
 }
@@ -604,6 +605,44 @@ fn write_line(l: &LineNode, out: &mut String, depth: usize) {
 
     // Unknown properties in sorted key order (BTreeMap iteration is sorted).
     for (key, prop) in &l.unknown_props {
+        out.push(' ');
+        out.push_str(key);
+        out.push('=');
+        out.push_str(&fmt_unknown_value(&prop.value));
+    }
+
+    out.push('\n');
+}
+
+fn write_connector(c: &ConnectorNode, out: &mut String, depth: usize) {
+    indent(out, depth);
+    out.push_str("connector");
+
+    // Canonical property order: id, name, role, from, to, from-anchor,
+    // to-anchor, route, marker-start, marker-end, stroke, stroke-width,
+    // opacity, visible, locked, rotate, style, then unknown props (sorted).
+    out.push_str(" id=\"");
+    out.push_str(&c.id);
+    out.push('"');
+    write_opt_str(out, "name", &c.name);
+    write_opt_str(out, "role", &c.role);
+    write_opt_str(out, "from", &c.from);
+    write_opt_str(out, "to", &c.to);
+    write_opt_str(out, "from-anchor", &c.from_anchor);
+    write_opt_str(out, "to-anchor", &c.to_anchor);
+    write_opt_str(out, "route", &c.route);
+    write_opt_str(out, "marker-start", &c.marker_start);
+    write_opt_str(out, "marker-end", &c.marker_end);
+    write_opt_property_value(out, "stroke", &c.stroke);
+    write_opt_property_value(out, "stroke-width", &c.stroke_width);
+    write_opt_f64(out, "opacity", &c.opacity);
+    write_opt_bool(out, "visible", &c.visible);
+    write_opt_bool(out, "locked", &c.locked);
+    write_opt_dimension(out, "rotate", &c.rotate);
+    write_opt_str(out, "style", &c.style);
+
+    // Unknown properties in sorted key order (BTreeMap iteration is sorted).
+    for (key, prop) in &c.unknown_props {
         out.push(' ');
         out.push_str(key);
         out.push('=');

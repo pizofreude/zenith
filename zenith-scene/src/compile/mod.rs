@@ -47,7 +47,8 @@ use field::{
 };
 use image::compile_image;
 use leaf::{
-    compile_ellipse, compile_line, compile_polygon, compile_polyline, compile_rect, compile_shape,
+    compile_connector, compile_ellipse, compile_line, compile_polygon, compile_polyline,
+    compile_rect, compile_shape,
 };
 use paint::{resolve_property_color, resolve_property_gradient};
 use table::compile_table;
@@ -571,6 +572,7 @@ pub(super) fn node_role(node: &Node) -> Option<&str> {
         Node::Footnote(n) => n.role.as_deref(),
         Node::Table(n) => n.role.as_deref(),
         Node::Shape(n) => n.role.as_deref(),
+        Node::Connector(n) => n.role.as_deref(),
         Node::Unknown(_) => None,
     }
 }
@@ -779,6 +781,18 @@ pub(super) fn compile_node(
                 diagnostics,
                 chains,
                 field_ctx.footnote_markers,
+                field_ctx.node_boxes,
+                ctx,
+            );
+            0.0
+        }
+        Node::Connector(connector) => {
+            compile_connector(
+                connector,
+                resolved,
+                style_map,
+                commands,
+                diagnostics,
                 field_ctx.node_boxes,
                 ctx,
             );

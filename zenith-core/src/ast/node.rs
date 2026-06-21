@@ -545,6 +545,55 @@ pub struct CodeNode {
     pub unknown_props: BTreeMap<String, UnknownProperty>,
 }
 
+/// A `connector` node — a semantic arrow that declares `from`/`to` target node
+/// ids and, at COMPILE time, resolves those targets' bounding boxes to draw a
+/// straight line between anchor points on their edges.
+///
+/// A connector has NO authored geometry (`x`/`y`/`w`/`h`): its endpoints are
+/// DERIVED from the resolved boxes of `from` and `to`, so when a target moves
+/// the connector reroutes automatically (the boxes are recomputed each compile).
+/// It is a stroke-only LEAF: it has a `stroke`/`stroke_width` (no `fill`), no
+/// text/spans, and no children.
+///
+/// Unit 1 renders a STRAIGHT line between the two resolved anchors with NO
+/// arrowhead markers (Unit 2) and NO orthogonal routing (Unit 3); the `route`
+/// and `marker_*` attributes are stored + validated now but render straight /
+/// headless until those units land.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ConnectorNode {
+    pub id: String,
+    pub name: Option<String>,
+    pub role: Option<String>,
+    /// The source target node id (the box the arrow starts from).
+    pub from: Option<String>,
+    /// The destination target node id (the box the arrow points to).
+    pub to: Option<String>,
+    /// Source-edge anchor (`top`/`bottom`/`left`/`right`/`center`/`auto`).
+    /// Absent or unrecognized is treated as `"auto"` at compile time.
+    pub from_anchor: Option<String>,
+    /// Destination-edge anchor (`top`/`bottom`/`left`/`right`/`center`/`auto`).
+    pub to_anchor: Option<String>,
+    /// Routing mode (`straight`(default)/`orthogonal`). Orthogonal is Unit 3:
+    /// stored + validated now, rendered as a straight line until then.
+    pub route: Option<String>,
+    /// Start-cap marker (`none`(default)/`arrow`). Markers are Unit 2: stored +
+    /// validated now, rendered headless until then.
+    pub marker_start: Option<String>,
+    /// End-cap marker (`none`(default)/`arrow`). Markers are Unit 2.
+    pub marker_end: Option<String>,
+    pub stroke: Option<PropertyValue>,
+    pub stroke_width: Option<PropertyValue>,
+    pub opacity: Option<f64>,
+    pub visible: Option<bool>,
+    pub locked: Option<bool>,
+    pub rotate: Option<Dimension>,
+    pub style: Option<String>,
+    /// Source declaration span, when available.
+    pub source_span: Option<Span>,
+    /// Unknown properties preserved for forward-compat.
+    pub unknown_props: BTreeMap<String, UnknownProperty>,
+}
+
 /// An unrecognized node kind, preserved for forward-compat.
 ///
 /// When a `.zen` document contains a node kind that this binary does not
@@ -1096,5 +1145,9 @@ pub enum Node {
     // spans). Boxing keeps `Node` compact for the `large_enum_variant` lint,
     // mirroring `Rect`/`Text`/`Table`.
     Shape(Box<ShapeNode>),
+    // Boxed: `ConnectorNode` carries many optional attrs (from/to + anchors +
+    // route + markers + visual fields). Boxing keeps `Node` compact for the
+    // `large_enum_variant` lint, mirroring `Rect`/`Text`/`Table`/`Shape`.
+    Connector(Box<ConnectorNode>),
     Unknown(UnknownNode),
 }

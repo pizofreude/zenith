@@ -15,10 +15,10 @@ use crate::ast::{
         SafeZoneType, SectionDef,
     },
     node::{
-        CodeNode, EllipseNode, FieldNode, FootnoteNode, FrameNode, GroupNode, ImageNode,
-        InstanceNode, LineNode, Node, ObjectPosition, Override, Point, PolygonNode, PolylineNode,
-        RectNode, ShapeNode, TableCell, TableColumn, TableNode, TableRow, TextNode, TextSpan,
-        TocNode, UnknownNode, UnknownProperty, UnknownValue,
+        CodeNode, ConnectorNode, EllipseNode, FieldNode, FootnoteNode, FrameNode, GroupNode,
+        ImageNode, InstanceNode, LineNode, Node, ObjectPosition, Override, Point, PolygonNode,
+        PolylineNode, RectNode, ShapeNode, TableCell, TableColumn, TableNode, TableRow, TextNode,
+        TextSpan, TocNode, UnknownNode, UnknownProperty, UnknownValue,
     },
     style::{Style, StyleBlock, UnknownStyleProp, canonicalize_style_key},
     token::{
@@ -1263,6 +1263,62 @@ fn transform_shape(node: &KdlNode) -> Result<ShapeNode, ParseError> {
     })
 }
 
+const CONNECTOR_KNOWN_PROPS: &[&str] = &[
+    "id",
+    "name",
+    "role",
+    "from",
+    "to",
+    "from-anchor",
+    "from_anchor",
+    "to-anchor",
+    "to_anchor",
+    "route",
+    "marker-start",
+    "marker_start",
+    "marker-end",
+    "marker_end",
+    "stroke",
+    "stroke-width",
+    "stroke_width",
+    "opacity",
+    "visible",
+    "locked",
+    "rotate",
+    "style",
+];
+
+fn transform_connector(node: &KdlNode) -> Result<ConnectorNode, ParseError> {
+    let id = required_string_prop(node, "id")?.to_owned();
+
+    let unknown_props = collect_unknown_props(node, CONNECTOR_KNOWN_PROPS);
+
+    Ok(ConnectorNode {
+        id,
+        name: optional_string_prop(node, "name").map(str::to_owned),
+        role: optional_string_prop(node, "role").map(str::to_owned),
+        from: optional_string_prop(node, "from").map(str::to_owned),
+        to: optional_string_prop(node, "to").map(str::to_owned),
+        from_anchor: optional_string_prop_aliased(node, "from-anchor", "from_anchor")
+            .map(str::to_owned),
+        to_anchor: optional_string_prop_aliased(node, "to-anchor", "to_anchor").map(str::to_owned),
+        route: optional_string_prop(node, "route").map(str::to_owned),
+        marker_start: optional_string_prop_aliased(node, "marker-start", "marker_start")
+            .map(str::to_owned),
+        marker_end: optional_string_prop_aliased(node, "marker-end", "marker_end")
+            .map(str::to_owned),
+        stroke: optional_property_value(node, "stroke"),
+        stroke_width: optional_property_value_aliased(node, "stroke-width", "stroke_width"),
+        opacity: optional_f64_prop(node, "opacity"),
+        visible: optional_bool_prop(node, "visible"),
+        locked: optional_bool_prop(node, "locked"),
+        rotate: optional_dimension_prop(node, "rotate"),
+        style: optional_string_prop(node, "style").map(str::to_owned),
+        source_span: node_span(node),
+        unknown_props,
+    })
+}
+
 fn transform_node(node: &KdlNode) -> Result<Node, ParseError> {
     match node.name().value() {
         "rect" => transform_rect(node).map(|r| Node::Rect(Box::new(r))),
@@ -1281,6 +1337,7 @@ fn transform_node(node: &KdlNode) -> Result<Node, ParseError> {
         "footnote" => transform_footnote(node).map(Node::Footnote),
         "table" => transform_table(node).map(|t| Node::Table(Box::new(t))),
         "shape" => transform_shape(node).map(|s| Node::Shape(Box::new(s))),
+        "connector" => transform_connector(node).map(|c| Node::Connector(Box::new(c))),
         _ => Ok(Node::Unknown(UnknownNode {
             kind: node.name().value().to_owned(),
             source_span: node_span(node),

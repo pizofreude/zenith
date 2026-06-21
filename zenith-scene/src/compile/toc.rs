@@ -216,6 +216,7 @@ fn collect_entries(
             | Node::Toc(_)
             | Node::Footnote(_)
             | Node::Shape(_)
+            | Node::Connector(_)
             | Node::Unknown(_) => {}
         }
     }

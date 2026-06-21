@@ -13,8 +13,8 @@ use crate::ast::document::{
 };
 use crate::ast::node::ImageNode;
 use crate::ast::node::{
-    CodeNode, EllipseNode, FieldNode, FrameNode, GroupNode, LineNode, Node, RectNode, ShapeNode,
-    TextNode, TextSpan, TocNode, UnknownNode,
+    CodeNode, ConnectorNode, EllipseNode, FieldNode, FrameNode, GroupNode, LineNode, Node,
+    RectNode, ShapeNode, TextNode, TextSpan, TocNode, UnknownNode,
 };
 use crate::ast::style::StyleBlock;
 use crate::ast::token::{Token, TokenBlock, TokenLiteral, TokenType, TokenValue};
@@ -2386,6 +2386,196 @@ fn shape_valid_h_align_does_not_warn() {
             codes(&report)
         );
     }
+}
+
+// ── connector validation ──────────────────────────────────────────────────────
+
+/// A bare connector with caller-supplied `from`/`to` (and optional enum attrs)
+/// for driving the validate-time diagnostic paths.
+#[allow(clippy::too_many_arguments)]
+fn make_connector(
+    id: &str,
+    from: Option<&str>,
+    to: Option<&str>,
+    route: Option<&str>,
+    marker_end: Option<&str>,
+    from_anchor: Option<&str>,
+) -> Node {
+    Node::Connector(Box::new(ConnectorNode {
+        id: id.to_owned(),
+        name: None,
+        role: None,
+        from: from.map(str::to_owned),
+        to: to.map(str::to_owned),
+        from_anchor: from_anchor.map(str::to_owned),
+        to_anchor: None,
+        route: route.map(str::to_owned),
+        marker_start: None,
+        marker_end: marker_end.map(str::to_owned),
+        stroke: None,
+        stroke_width: None,
+        opacity: None,
+        visible: None,
+        locked: None,
+        rotate: None,
+        style: None,
+        source_span: None,
+        unknown_props: BTreeMap::new(),
+    }))
+}
+
+#[test]
+fn connector_unknown_target_warns() {
+    // `to="ghost"` names no node id → connector.unknown_target.
+    let doc = doc_with(
+        vec![],
+        vec![minimal_page(
+            "page.one",
+            vec![
+                minimal_rect("a", None),
+                make_connector("c1", Some("a"), Some("ghost"), None, None, None),
+            ],
+        )],
+    );
+    let report = validate(&doc);
+    assert!(
+        has_code(&report, "connector.unknown_target"),
+        "codes: {:?}",
+        codes(&report)
+    );
+}
+
+#[test]
+fn connector_valid_targets_do_not_warn_unknown() {
+    let doc = doc_with(
+        vec![],
+        vec![minimal_page(
+            "page.one",
+            vec![
+                minimal_rect("a", None),
+                minimal_rect("b", None),
+                make_connector("c1", Some("a"), Some("b"), None, None, None),
+            ],
+        )],
+    );
+    let report = validate(&doc);
+    assert!(
+        !has_code(&report, "connector.unknown_target"),
+        "valid from/to must not warn; codes: {:?}",
+        codes(&report)
+    );
+    assert!(
+        !has_code(&report, "connector.missing_target"),
+        "both endpoints present must not warn missing; codes: {:?}",
+        codes(&report)
+    );
+}
+
+#[test]
+fn connector_missing_target_warns() {
+    // `to` absent → connector.missing_target.
+    let doc = doc_with(
+        vec![],
+        vec![minimal_page(
+            "page.one",
+            vec![
+                minimal_rect("a", None),
+                make_connector("c1", Some("a"), None, None, None, None),
+            ],
+        )],
+    );
+    let report = validate(&doc);
+    assert!(
+        has_code(&report, "connector.missing_target"),
+        "codes: {:?}",
+        codes(&report)
+    );
+}
+
+#[test]
+fn connector_invalid_route_warns() {
+    let doc = doc_with(
+        vec![],
+        vec![minimal_page(
+            "page.one",
+            vec![
+                minimal_rect("a", None),
+                minimal_rect("b", None),
+                make_connector("c1", Some("a"), Some("b"), Some("zigzag"), None, None),
+            ],
+        )],
+    );
+    let report = validate(&doc);
+    assert!(
+        has_code(&report, "connector.invalid_route"),
+        "codes: {:?}",
+        codes(&report)
+    );
+}
+
+#[test]
+fn connector_valid_route_does_not_warn() {
+    for route in ["straight", "orthogonal"] {
+        let doc = doc_with(
+            vec![],
+            vec![minimal_page(
+                "page.one",
+                vec![
+                    minimal_rect("a", None),
+                    minimal_rect("b", None),
+                    make_connector("c1", Some("a"), Some("b"), Some(route), None, None),
+                ],
+            )],
+        );
+        let report = validate(&doc);
+        assert!(
+            !has_code(&report, "connector.invalid_route"),
+            "route {route:?} must not warn; codes: {:?}",
+            codes(&report)
+        );
+    }
+}
+
+#[test]
+fn connector_invalid_marker_warns() {
+    let doc = doc_with(
+        vec![],
+        vec![minimal_page(
+            "page.one",
+            vec![
+                minimal_rect("a", None),
+                minimal_rect("b", None),
+                make_connector("c1", Some("a"), Some("b"), None, Some("diamond"), None),
+            ],
+        )],
+    );
+    let report = validate(&doc);
+    assert!(
+        has_code(&report, "connector.invalid_marker"),
+        "codes: {:?}",
+        codes(&report)
+    );
+}
+
+#[test]
+fn connector_invalid_anchor_warns() {
+    let doc = doc_with(
+        vec![],
+        vec![minimal_page(
+            "page.one",
+            vec![
+                minimal_rect("a", None),
+                minimal_rect("b", None),
+                make_connector("c1", Some("a"), Some("b"), None, None, Some("sideways")),
+            ],
+        )],
+    );
+    let report = validate(&doc);
+    assert!(
+        has_code(&report, "connector.invalid_anchor"),
+        "codes: {:?}",
+        codes(&report)
+    );
 }
 
 // ── polygon: point with missing y → node.missing_geometry ─────────────
