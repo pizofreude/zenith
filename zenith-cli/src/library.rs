@@ -403,6 +403,23 @@ pub fn load_pack_document(pack: &LibraryPack) -> Result<Document, AddError> {
         .map_err(|e| AddError::new(format!("error parsing pack '{}': {}", pack.id, e)))
 }
 
+/// Build the "unknown library package" [`AddError`], listing the available pack
+/// ids (sorted, de-duplicated) so the caller sees what they could have meant.
+fn unknown_package_error(pkg_id: &str, packs: &[LibraryPack]) -> AddError {
+    let mut available: Vec<&str> = packs.iter().map(|p| p.id.as_str()).collect();
+    available.sort_unstable();
+    available.dedup();
+    AddError::new(format!(
+        "unknown library package '{}' (available: {})",
+        pkg_id,
+        if available.is_empty() {
+            "none".to_owned()
+        } else {
+            available.join(", ")
+        }
+    ))
+}
+
 /// Sanitize a package id into a safe component-id fragment.
 ///
 /// Replaces `@` and `/` (and any other non-`[A-Za-z0-9._-]` byte) with `.`,
@@ -620,20 +637,10 @@ pub fn materialize(
 ) -> Result<AddOutcome, AddError> {
     let (at_x, at_y) = at;
     // 1. Resolve the pack + load its document. ────────────────────────────────
-    let pack = packs.iter().find(|p| p.id == pkg_id).ok_or_else(|| {
-        let mut available: Vec<&str> = packs.iter().map(|p| p.id.as_str()).collect();
-        available.sort_unstable();
-        available.dedup();
-        AddError::new(format!(
-            "unknown library package '{}' (available: {})",
-            pkg_id,
-            if available.is_empty() {
-                "none".to_owned()
-            } else {
-                available.join(", ")
-            }
-        ))
-    })?;
+    let pack = packs
+        .iter()
+        .find(|p| p.id == pkg_id)
+        .ok_or_else(|| unknown_package_error(pkg_id, packs))?;
 
     let pack_doc = load_pack_document(pack)?;
 
@@ -862,20 +869,10 @@ pub fn materialize_token(
     id_base: &str,
 ) -> Result<TokenAddOutcome, AddError> {
     // 1. Resolve the pack + load its document. ────────────────────────────────
-    let pack = packs.iter().find(|p| p.id == pkg_id).ok_or_else(|| {
-        let mut available: Vec<&str> = packs.iter().map(|p| p.id.as_str()).collect();
-        available.sort_unstable();
-        available.dedup();
-        AddError::new(format!(
-            "unknown library package '{}' (available: {})",
-            pkg_id,
-            if available.is_empty() {
-                "none".to_owned()
-            } else {
-                available.join(", ")
-            }
-        ))
-    })?;
+    let pack = packs
+        .iter()
+        .find(|p| p.id == pkg_id)
+        .ok_or_else(|| unknown_package_error(pkg_id, packs))?;
 
     let pack_doc = load_pack_document(pack)?;
 
@@ -1103,20 +1100,10 @@ pub fn materialize_action(
     action_id: &str,
 ) -> Result<ActionAddOutcome, AddError> {
     // 1. Resolve the pack + load its document. ────────────────────────────────
-    let pack = packs.iter().find(|p| p.id == pkg_id).ok_or_else(|| {
-        let mut available: Vec<&str> = packs.iter().map(|p| p.id.as_str()).collect();
-        available.sort_unstable();
-        available.dedup();
-        AddError::new(format!(
-            "unknown library package '{}' (available: {})",
-            pkg_id,
-            if available.is_empty() {
-                "none".to_owned()
-            } else {
-                available.join(", ")
-            }
-        ))
-    })?;
+    let pack = packs
+        .iter()
+        .find(|p| p.id == pkg_id)
+        .ok_or_else(|| unknown_package_error(pkg_id, packs))?;
 
     let pack_doc = load_pack_document(pack)?;
 
