@@ -6,7 +6,7 @@ use zenith_tx::{Op, Permissions, Transaction, TxStatus, run_transaction};
 
 /// Doc with:
 /// - "txt.ltr"  — text node, two spans (second has italic + font_weight for
-///               formatting-preservation checks), contains "V0"
+///   formatting-preservation checks), contains "V0"
 /// - "txt.locked" — locked text node, also contains "V0"
 /// - "rect1"    — rect node (for wrong-node-type tests)
 const TEXT_EDIT_DOC: &str = r##"zenith version=1 {

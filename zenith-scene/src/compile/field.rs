@@ -872,12 +872,25 @@ mod tests {
 
     // ── resolve_field_to_text: folio_style ────────────────────────────────────
 
-    fn make_ctx() -> (
+    type CtxStores = (
         BTreeMap<String, usize>,
         BTreeMap<String, String>,
         BTreeMap<String, (f64, f64, f64, f64)>,
-    ) {
+    );
+
+    fn make_ctx() -> CtxStores {
         (BTreeMap::new(), BTreeMap::new(), BTreeMap::new())
+    }
+
+    /// The five section-relative fields, grouped to keep `ctx_with_section`
+    /// under the argument-count lint.
+    #[derive(Default)]
+    struct SectionArgs<'a> {
+        page_index: Option<usize>,
+        page_count: Option<usize>,
+        folio_start: Option<usize>,
+        folio_style: Option<&'a str>,
+        name: Option<&'a str>,
     }
 
     fn field_ctx<'a>(
@@ -1199,11 +1212,7 @@ mod tests {
         by_id: &'a BTreeMap<String, usize>,
         markers: &'a BTreeMap<String, String>,
         boxes: &'a BTreeMap<String, (f64, f64, f64, f64)>,
-        section_page_index: Option<usize>,
-        section_page_count: Option<usize>,
-        section_folio_start: Option<usize>,
-        section_folio_style: Option<&'a str>,
-        section_name: Option<&'a str>,
+        sec: SectionArgs<'a>,
     ) -> FieldCtx<'a> {
         FieldCtx {
             page_index_1based: page_1based,
@@ -1214,11 +1223,11 @@ mod tests {
             footnote_markers: markers,
             node_boxes: boxes,
             total_pages: total,
-            section_page_index,
-            section_page_count,
-            section_folio_start,
-            section_folio_style,
-            section_name,
+            section_page_index: sec.page_index,
+            section_page_count: sec.page_count,
+            section_folio_start: sec.folio_start,
+            section_folio_style: sec.folio_style,
+            section_name: sec.name,
         }
     }
 
@@ -1233,11 +1242,13 @@ mod tests {
             &by_id,
             &markers,
             &boxes,
-            Some(0),
-            Some(3),
-            Some(1),
-            None,
-            Some("Body"),
+            SectionArgs {
+                page_index: Some(0),
+                page_count: Some(3),
+                folio_start: Some(1),
+                name: Some("Body"),
+                ..SectionArgs::default()
+            },
         );
         let field = section_field("section-page-number", None);
         let text = resolve_field_to_text(&field, &ctx)
@@ -1255,11 +1266,13 @@ mod tests {
             &by_id,
             &markers,
             &boxes,
-            Some(1),
-            Some(2),
-            Some(1),
-            Some("lower-roman"),
-            Some("Front"),
+            SectionArgs {
+                page_index: Some(1),
+                page_count: Some(2),
+                folio_start: Some(1),
+                folio_style: Some("lower-roman"),
+                name: Some("Front"),
+            },
         );
         let field = section_field("section-page-number", None);
         let text = resolve_field_to_text(&field, &ctx)
@@ -1277,11 +1290,13 @@ mod tests {
             &by_id,
             &markers,
             &boxes,
-            Some(1),
-            Some(2),
-            Some(1),
-            Some("lower-roman"),
-            Some("Front"),
+            SectionArgs {
+                page_index: Some(1),
+                page_count: Some(2),
+                folio_start: Some(1),
+                folio_style: Some("lower-roman"),
+                name: Some("Front"),
+            },
         );
         let field = section_field("section-page-number", Some("upper-roman"));
         let text =
@@ -1293,7 +1308,7 @@ mod tests {
     #[test]
     fn section_page_number_no_section_returns_none() {
         let (by_id, markers, boxes) = make_ctx();
-        let ctx = ctx_with_section(1, 5, &by_id, &markers, &boxes, None, None, None, None, None);
+        let ctx = ctx_with_section(1, 5, &by_id, &markers, &boxes, SectionArgs::default());
         let field = section_field("section-page-number", None);
         assert!(
             resolve_field_to_text(&field, &ctx).is_none(),
@@ -1310,11 +1325,13 @@ mod tests {
             &by_id,
             &markers,
             &boxes,
-            Some(0),
-            Some(3),
-            Some(1),
-            None,
-            Some("Body"),
+            SectionArgs {
+                page_index: Some(0),
+                page_count: Some(3),
+                folio_start: Some(1),
+                name: Some("Body"),
+                ..SectionArgs::default()
+            },
         );
         let field = section_field("section-page-count", None);
         let text = resolve_field_to_text(&field, &ctx).expect("section-page-count must resolve");
@@ -1324,7 +1341,7 @@ mod tests {
     #[test]
     fn section_page_count_no_section_returns_none() {
         let (by_id, markers, boxes) = make_ctx();
-        let ctx = ctx_with_section(1, 5, &by_id, &markers, &boxes, None, None, None, None, None);
+        let ctx = ctx_with_section(1, 5, &by_id, &markers, &boxes, SectionArgs::default());
         let field = section_field("section-page-count", None);
         assert!(
             resolve_field_to_text(&field, &ctx).is_none(),
@@ -1341,11 +1358,13 @@ mod tests {
             &by_id,
             &markers,
             &boxes,
-            Some(0),
-            Some(3),
-            Some(1),
-            None,
-            Some("Chapter One"),
+            SectionArgs {
+                page_index: Some(0),
+                page_count: Some(3),
+                folio_start: Some(1),
+                name: Some("Chapter One"),
+                ..SectionArgs::default()
+            },
         );
         let field = section_field("section-name", None);
         let text = resolve_field_to_text(&field, &ctx).expect("section-name must resolve");
@@ -1361,11 +1380,13 @@ mod tests {
             &by_id,
             &markers,
             &boxes,
-            Some(0),
-            Some(1),
-            Some(1),
-            None,
-            Some(""),
+            SectionArgs {
+                page_index: Some(0),
+                page_count: Some(1),
+                folio_start: Some(1),
+                name: Some(""),
+                ..SectionArgs::default()
+            },
         );
         let field = section_field("section-name", None);
         assert!(
@@ -1377,7 +1398,7 @@ mod tests {
     #[test]
     fn section_name_no_section_returns_none() {
         let (by_id, markers, boxes) = make_ctx();
-        let ctx = ctx_with_section(1, 5, &by_id, &markers, &boxes, None, None, None, None, None);
+        let ctx = ctx_with_section(1, 5, &by_id, &markers, &boxes, SectionArgs::default());
         let field = section_field("section-name", None);
         assert!(
             resolve_field_to_text(&field, &ctx).is_none(),
@@ -1395,11 +1416,13 @@ mod tests {
             &by_id,
             &markers,
             &boxes,
-            Some(0),
-            Some(2),
-            Some(1),
-            None,
-            Some("Front"),
+            SectionArgs {
+                page_index: Some(0),
+                page_count: Some(2),
+                folio_start: Some(1),
+                name: Some("Front"),
+                ..SectionArgs::default()
+            },
         );
         // Use page_index_1based = 1 to trigger suppress_first.
         ctx.page_index_1based = 1;
