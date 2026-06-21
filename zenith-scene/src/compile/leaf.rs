@@ -7,20 +7,23 @@
 use std::collections::BTreeMap;
 
 use zenith_core::{
-    Diagnostic, EllipseNode, LineNode, Point, PolygonNode, PolylineNode, PropertyValue, RectNode,
-    ResolvedToken, ShapeNode, Span, Style, dim_to_px,
+    Diagnostic, EllipseNode, FontProvider, LineNode, Point, PolygonNode, PolylineNode,
+    PropertyValue, RectNode, ResolvedToken, ShapeNode, Span, Style, TextNode, dim_to_px,
 };
+use zenith_layout::RustybuzzEngine;
 
 use crate::ir::{LineCap, SceneCommand, StrokeAlign};
 
 use super::RenderCtx;
+use super::chain::ChainAssignments;
 use super::paint::{
     apply_gradient_opacity, resolve_property_color, resolve_property_gradient,
     resolve_property_shadow,
 };
 use super::style_prop;
+use super::text::{MeasureEnv, compile_text, measure_text_wrapped_height, resolve_text_families};
 use super::util::{
-    blend_mode_ir, resolve_property_dimension_px, rotation_degrees, unsupported_unit_diag,
+    blend_mode_ir, px, resolve_property_dimension_px, rotation_degrees, unsupported_unit_diag,
 };
 
 /// Resolve dashed-stroke parameters from raw node fields.
@@ -1130,7 +1133,7 @@ fn flat_points_centroid_center(flat: &[f64]) -> (f64, f64) {
     ((min_x + max_x) / 2.0, (min_y + max_y) / 2.0)
 }
 
-/// Compile a `shape` compound node — UNIT 1: BACKGROUND ONLY.
+/// Compile a `shape` compound node — background + owned centered label.
 ///
 /// Emits the background primitive selected by [`ShapeNode::kind`] (default
 /// `"process"` when absent or unrecognized):
@@ -1141,17 +1144,31 @@ fn flat_points_centroid_center(flat: &[f64]) -> (f64, f64) {
 /// - `decision`  → 4-point diamond polygon (`FillPolygon` + closed
 ///   `StrokePolyline`) built from the bbox mid-edges.
 ///
-/// The owned label spans are NOT rendered in this unit (a later unit handles the
-/// centered text). `opacity`/`visible`/`rotate` are honored exactly as
-/// `compile_rect` does; `stroke_alignment` insets the rounded-rect/ellipse box
-/// the same way `compile_rect` handles it. For the decision diamond the stroke
-/// is left centered in U1.
+/// AFTER the background (so the label paints ON TOP of the fill), the owned
+/// label [`ShapeNode::spans`] are rendered as a synthesized [`TextNode`] laid
+/// into the shape's padded content box, REUSING the production
+/// [`compile_text`] path. The label is horizontally aligned by `h_align`
+/// (default `center`) and vertically aligned by `v_align` (default `middle`,
+/// via a measured pre-offset like the table cell), and it shares the SAME
+/// `ctx` as the background — so the shape's opacity, rotation, and clip
+/// propagate to the label and the two stay locked together.
+///
+/// `opacity`/`visible`/`rotate` are honored exactly as `compile_rect` does;
+/// `stroke_alignment` insets the rounded-rect/ellipse box the same way
+/// `compile_rect` handles it. For the decision diamond the stroke is left
+/// centered (v0).
+#[allow(clippy::too_many_arguments)]
 pub(super) fn compile_shape(
     shape: &ShapeNode,
     resolved: &BTreeMap<String, ResolvedToken>,
     style_map: &BTreeMap<&str, &Style>,
+    fonts: &dyn FontProvider,
+    engine: &RustybuzzEngine,
     commands: &mut Vec<SceneCommand>,
     diagnostics: &mut Vec<Diagnostic>,
+    chains: &ChainAssignments,
+    footnote_markers: &BTreeMap<String, String>,
+    node_boxes: &BTreeMap<String, (f64, f64, f64, f64)>,
     ctx: RenderCtx,
 ) {
     // Skip invisible shapes.
@@ -1329,9 +1346,174 @@ pub(super) fn compile_shape(
         }
     }
 
+    // OWNED LABEL (painted ON TOP of the background). Emitted INSIDE the
+    // rotation bracket so the label rotates with the shape, and using the SAME
+    // `ctx` so the shape's opacity/clip cascade onto the glyphs too.
+    emit_shape_label(
+        shape,
+        resolved,
+        style_map,
+        fonts,
+        engine,
+        commands,
+        diagnostics,
+        chains,
+        footnote_markers,
+        node_boxes,
+        x,
+        y,
+        w,
+        h,
+        ctx,
+    );
+
     if rot.is_some() {
         commands.push(SceneCommand::PopTransform);
     }
+}
+
+/// Synthesize a [`TextNode`] for the shape's owned label and render it via the
+/// production [`compile_text`] path into the shape's padded content box.
+///
+/// The label inherits the shape's `ctx` (opacity / rotation / clip). Horizontal
+/// alignment maps `h_align` → the text node's `align` (default `center`);
+/// vertical alignment is applied by PRE-OFFSETTING the synthetic node's `y`
+/// (measured via [`measure_text_wrapped_height`]), exactly like the table cell
+/// — `TextNode` has no native v-align. The label defaults to centered both ways.
+///
+/// v0 simplification: for ALL kinds the content box is the bbox inset by
+/// `padding`. The decision diamond inscribes its label in the bbox; an author
+/// adds `padding` to keep the text inside the rhombus.
+#[allow(clippy::too_many_arguments)]
+fn emit_shape_label(
+    shape: &ShapeNode,
+    resolved: &BTreeMap<String, ResolvedToken>,
+    style_map: &BTreeMap<&str, &Style>,
+    fonts: &dyn FontProvider,
+    engine: &RustybuzzEngine,
+    commands: &mut Vec<SceneCommand>,
+    diagnostics: &mut Vec<Diagnostic>,
+    chains: &ChainAssignments,
+    footnote_markers: &BTreeMap<String, String>,
+    node_boxes: &BTreeMap<String, (f64, f64, f64, f64)>,
+    x: f64,
+    y: f64,
+    w: f64,
+    h: f64,
+    ctx: RenderCtx,
+) {
+    // Nothing to render when the label has no spans.
+    if shape.spans.is_empty() {
+        return;
+    }
+
+    // Padded content box: bbox inset by `padding` (token → px; 0 when absent).
+    let pad = resolve_property_dimension_px(&shape.padding, resolved, 0.0);
+    let content_x = x + pad;
+    let content_y = y + pad;
+    let content_w = (w - 2.0 * pad).max(0.0);
+    let content_h = (h - 2.0 * pad).max(0.0);
+
+    // Padding larger than the box collapses the content area; skip rather than
+    // emit a degenerate (zero/negative) text box.
+    if content_w <= 0.0 || content_h <= 0.0 {
+        return;
+    }
+
+    // Map the shape's `h_align` to the text node's `align` (default center).
+    let align = match shape.h_align.as_deref() {
+        Some("end") => Some("end".to_owned()),
+        Some("start") => Some("start".to_owned()),
+        // "center", any unrecognized value, and absent all center the label.
+        _ => Some("center".to_owned()),
+    };
+
+    // Synthesize the label as a fresh TextNode laid into the content box. A
+    // synthetic id derived from the shape id keeps it unique (never collides).
+    let mut synth = TextNode {
+        id: format!("{}/label", shape.id),
+        name: None,
+        role: None,
+        x: Some(px(content_x)),
+        y: Some(px(content_y)),
+        w: Some(px(content_w)),
+        h: Some(px(content_h)),
+        align,
+        direction: None,
+        overflow: None,
+        overflow_wrap: None,
+        style: shape.text_style.clone(),
+        fill: None,
+        stroke: None,
+        stroke_width: None,
+        contrast_bg: None,
+        font_family: None,
+        font_size: None,
+        font_size_min: None,
+        font_weight: None,
+        shadow: None,
+        blend_mode: None,
+        blur: None,
+        opacity: None,
+        visible: None,
+        locked: None,
+        rotate: None,
+        chain: None,
+        drop_cap_lines: None,
+        hyphenate: None,
+        widow_orphan: None,
+        tab_leader: None,
+        text_exclusion: None,
+        padding_left: None,
+        text_indent: None,
+        bullet: None,
+        bullet_gap: None,
+        spans: shape.spans.clone(),
+        source_span: shape.source_span,
+        unknown_props: BTreeMap::new(),
+    };
+
+    // VERTICAL ALIGNMENT: TextNode has no native v-align, so pre-offset `y` by
+    // the measured wrapped height (same approach as the table cell). Default is
+    // middle.
+    let families = resolve_text_families(&synth, resolved, style_map, fonts, diagnostics);
+    let wrapped_h = measure_text_wrapped_height(
+        &synth,
+        content_w,
+        &families,
+        &MeasureEnv {
+            resolved,
+            style_map,
+            fonts,
+            engine,
+        },
+        diagnostics,
+    )
+    .unwrap_or(0.0);
+    let v_offset = match shape.v_align.as_deref() {
+        Some("top") => 0.0,
+        Some("bottom") => (content_h - wrapped_h).max(0.0),
+        // "middle", any unrecognized value, and absent center vertically.
+        _ => ((content_h - wrapped_h) / 2.0).max(0.0),
+    };
+    synth.y = Some(px(content_y + v_offset));
+
+    // Emit the label via the production text path, sharing the shape's ctx so
+    // opacity / rotation / clip propagate onto the glyphs. The returned content
+    // height is irrelevant here.
+    let _ = compile_text(
+        &synth,
+        resolved,
+        style_map,
+        fonts,
+        engine,
+        commands,
+        diagnostics,
+        chains,
+        footnote_markers,
+        node_boxes,
+        ctx,
+    );
 }
 
 /// Emit the rounded-rect (or plain-rect when `radius <= 0`) background for a

@@ -2779,3 +2779,160 @@ page id="page.shp" w=(px)640 h=(px)360 {
         "U1 shape is background-only — no DrawGlyphRun; got: {cmds:?}"
     );
 }
+
+// ── shape node: owned centered text label (U2) ────────────────────────────
+//
+// U2 renders the shape's owned label spans as a synthesized text node laid into
+// the shape's padded content box, REUSING the production text path. A labeled
+// shape now emits BOTH a background AND a DrawGlyphRun; an unlabeled shape still
+// emits background only (the U1 regression guards above stay valid because those
+// shapes carry no spans).
+
+/// A `process` shape WITH a `span` label emits its background AND a glyph run.
+/// The glyph run sits inside the padded content box (its origin x ≥ content_x)
+/// and its baseline is pushed down toward the vertical middle (baseline y >
+/// content_y) for the default `middle` v-align. The background paints BEFORE
+/// the label.
+#[test]
+fn shape_with_label_emits_background_and_glyph_run() {
+    let src = r##"zenith version=1 {
+  project id="proj.shp" name="SHP"
+  tokens format="zenith-token-v1" {
+token id="color.fill" type="color" value="#dbeafe"
+token id="color.line" type="color" value="#1e3a8a"
+token id="size.stroke" type="dimension" value=(px)2
+token id="size.pad" type="dimension" value=(px)8
+  }
+  styles {}
+  document id="doc.shp" title="SHP" {
+page id="page.shp" w=(px)640 h=(px)360 {
+  shape id="s1" x=(px)40 y=(px)40 w=(px)200 h=(px)120 kind="process" fill=(token)"color.fill" stroke=(token)"color.line" stroke-width=(token)"size.stroke" padding=(token)"size.pad" {
+    span "Hi"
+  }
+}
+  }
+}
+"##;
+    let doc = parse(src);
+    let result = compile(&doc, &default_provider());
+    let cmds = &result.scene.commands;
+
+    // Background still present.
+    assert!(
+        cmds.iter()
+            .any(|c| matches!(c, SceneCommand::FillRect { .. })),
+        "labeled shape must still emit its background fill; got: {cmds:?}"
+    );
+
+    // Label present.
+    let glyph = cmds.iter().find_map(|c| match c {
+        SceneCommand::DrawGlyphRun { x, y, .. } => Some((*x, *y)),
+        _ => None,
+    });
+    let (gx, gy) =
+        glyph.unwrap_or_else(|| panic!("labeled shape must emit a DrawGlyphRun; got: {cmds:?}"));
+
+    // Content box: bbox (40,40,200,120) inset by padding 8 → x=48, y=48.
+    let content_x = 48.0;
+    let content_y = 48.0;
+    assert!(
+        gx >= content_x,
+        "glyph-run origin x ({gx}) must be inside the padded content box (≥ {content_x})"
+    );
+    assert!(
+        gy > content_y,
+        "default middle v-align must push the baseline below content_y ({content_y}); got {gy}"
+    );
+
+    // Z-order: the background fill must come before the glyph run.
+    let fill_idx = cmds
+        .iter()
+        .position(|c| matches!(c, SceneCommand::FillRect { .. }));
+    let glyph_idx = cmds
+        .iter()
+        .position(|c| matches!(c, SceneCommand::DrawGlyphRun { .. }));
+    assert!(
+        fill_idx < glyph_idx,
+        "background must paint BEFORE the label; fill at {fill_idx:?}, glyph at {glyph_idx:?}"
+    );
+}
+
+/// A shape with EMPTY spans (no `span` child) still emits its background and
+/// NO glyph run — the U1 background-only behavior is preserved for unlabeled
+/// shapes.
+#[test]
+fn shape_without_label_emits_no_glyph_run() {
+    let src = r##"zenith version=1 {
+  project id="proj.shp" name="SHP"
+  tokens format="zenith-token-v1" {
+token id="color.fill" type="color" value="#dbeafe"
+token id="color.line" type="color" value="#1e3a8a"
+token id="size.stroke" type="dimension" value=(px)2
+  }
+  styles {}
+  document id="doc.shp" title="SHP" {
+page id="page.shp" w=(px)640 h=(px)360 {
+  shape id="s1" x=(px)40 y=(px)40 w=(px)200 h=(px)120 kind="process" fill=(token)"color.fill" stroke=(token)"color.line" stroke-width=(token)"size.stroke"
+}
+  }
+}
+"##;
+    let doc = parse(src);
+    let result = compile(&doc, &default_provider());
+    let cmds = &result.scene.commands;
+
+    assert!(
+        cmds.iter()
+            .any(|c| matches!(c, SceneCommand::FillRect { .. })),
+        "unlabeled shape must still emit its background; got: {cmds:?}"
+    );
+    assert!(
+        !cmds
+            .iter()
+            .any(|c| matches!(c, SceneCommand::DrawGlyphRun { .. })),
+        "unlabeled shape must NOT emit a DrawGlyphRun; got: {cmds:?}"
+    );
+}
+
+/// `v-align="top"` places the label's baseline HIGHER than the default
+/// `middle`. Same shape + label, different v-align → different baseline y.
+#[test]
+fn shape_label_top_valign_is_higher_than_middle() {
+    let mk = |valign: &str| -> f64 {
+        let src = format!(
+            r##"zenith version=1 {{
+  project id="proj.shp" name="SHP"
+  tokens format="zenith-token-v1" {{
+token id="color.fill" type="color" value="#dbeafe"
+  }}
+  styles {{}}
+  document id="doc.shp" title="SHP" {{
+page id="page.shp" w=(px)640 h=(px)360 {{
+  shape id="s1" x=(px)40 y=(px)40 w=(px)200 h=(px)120 kind="process" fill=(token)"color.fill" v-align="{valign}" {{
+    span "Hi"
+  }}
+}}
+  }}
+}}
+"##
+        );
+        let doc = parse(&src);
+        let result = compile(&doc, &default_provider());
+        result
+            .scene
+            .commands
+            .iter()
+            .find_map(|c| match c {
+                SceneCommand::DrawGlyphRun { y, .. } => Some(*y),
+                _ => None,
+            })
+            .unwrap_or_else(|| panic!("expected a DrawGlyphRun for v-align={valign}"))
+    };
+
+    let top_y = mk("top");
+    let middle_y = mk("middle");
+    assert!(
+        top_y < middle_y,
+        "top-aligned baseline ({top_y}) must be higher (smaller y) than middle ({middle_y})"
+    );
+}

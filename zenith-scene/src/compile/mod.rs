@@ -769,7 +769,19 @@ pub(super) fn compile_node(
             0.0
         }
         Node::Shape(shape) => {
-            compile_shape(shape, resolved, style_map, commands, diagnostics, ctx);
+            compile_shape(
+                shape,
+                resolved,
+                style_map,
+                fonts,
+                engine,
+                commands,
+                diagnostics,
+                chains,
+                field_ctx.footnote_markers,
+                field_ctx.node_boxes,
+                ctx,
+            );
             0.0
         }
         Node::Footnote(_) => {
