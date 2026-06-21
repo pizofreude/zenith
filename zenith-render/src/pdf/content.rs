@@ -6,19 +6,20 @@
 //! for the document writer to materialize.
 //!
 //! Every [`SceneCommand`] variant is handled explicitly — no wildcard arm
-//! silently drops a primitive. The two honest v0 limitations are matched
-//! explicitly and documented at their arms: blurred drop-shadows (no vector PDF
-//! equivalent — the *content* is still drawn, only the blur is skipped) and
-//! color-bitmap (emoji) glyphs (omitted; the print scenarios use none).
+//! silently drops a primitive. The one honest v0 limitation matched explicitly
+//! at its arm is color-bitmap (emoji) glyphs (omitted; the print scenarios use
+//! none).
 //!
-//! Per-pixel color `filter` brackets ARE honored: PDF has no per-pixel filter
-//! primitive, so [`translate`] captures the bracketed commands, rasterizes them
-//! to straight-alpha RGBA, applies the filters, and embeds the cropped result as
-//! an image XObject (see [`emit_filtered_region`]). This is no longer a no-op.
+//! Non-vector effect brackets — blur, drop-shadow, per-pixel color filter, and
+//! mask — have no vector PDF equivalent, so [`translate`] buffers each bracket
+//! INCLUSIVE (the `Begin*`, its body, and the matching `End*`), renders it as a
+//! standalone sub-scene via the raster backend (which self-applies the effect),
+//! crops to the opaque bounding box, and embeds the result as an image XObject
+//! (see [`embed_rasterized_region`]). All four are honored, not no-ops.
 
 use pdf_writer::Content;
 use zenith_core::{AssetProvider, FontProvider};
-use zenith_scene::{Color, FilterSpec, FitMode, ImageClip, Scene, SceneCommand, StrokeAlign};
+use zenith_scene::{Color, FitMode, ImageClip, Scene, SceneCommand, StrokeAlign};
 
 use super::color;
 use super::geometry::{GlyphPen, ellipse_path, poly_path, rounded_rect_path};
@@ -73,101 +74,87 @@ pub(super) fn translate(
 
     let page = (scene.width, scene.height);
 
-    // Filter-capture buffer. A color-`filter` bracket has no per-pixel vector PDF
-    // primitive, so while one is active we BUFFER (clone) the bracketed commands
-    // instead of emitting them, then rasterize+filter+embed the whole region at
-    // EndFilter. `None` means draws emit directly. Filters are leaf-only and do
-    // not nest, so a single active capture suffices.
-    let mut capture: Option<(Vec<FilterSpec>, Vec<SceneCommand>)> = None;
-
-    // Mask-capture buffer. A `mask` bracket (and any blur/filter nested inside)
-    // is raster-only — PDF has no per-pixel coverage primitive — so while one is
-    // active we BUFFER the WHOLE bracket INCLUSIVE (the `BeginMask`, its body,
-    // and the matching `EndMask`) and render it as a standalone sub-scene at the
-    // close (see `embed_rasterized_region`). `depth` counts nested mask brackets
-    // so the buffer closes only at the matching outermost `EndMask`. A mask
-    // bracket is intercepted only at top level; when a filter capture is already
-    // active a nested `BeginMask` is buffered as an ordinary command and handled
-    // by that capture's own sub-scene render.
-    let mut mask_buf: Option<(u32, Vec<SceneCommand>)> = None;
+    // Inclusive effect buffer. The four non-vector effect brackets — blur,
+    // drop-shadow, per-pixel color filter, and mask — have no vector PDF
+    // primitive, so while one is open we BUFFER the WHOLE bracket INCLUSIVE (the
+    // `Begin*`, its body, and the matching `End*`) instead of emitting, then
+    // render it as a standalone sub-scene whose raster backend self-applies every
+    // effect (see `embed_rasterized_region`). `depth` counts nested effect
+    // brackets so the buffer closes only at the matching outermost `End*`; a
+    // mask>blur nesting closes correctly because every inner `Begin*` bumps the
+    // count and every `End*` lowers it. A bracket is intercepted only at top
+    // level; once a buffer is open, any nested effect is just more buffered
+    // content handled by that one sub-scene render. `None` means draws emit
+    // directly.
+    let mut effect_buf: Option<(u32, Vec<SceneCommand>)> = None;
 
     for cmd in &scene.commands {
-        // ── Mask bracket (inclusive buffering, top-level only) ─────────────
-        // Highest precedence: once a mask bracket is open we buffer everything —
-        // including any BeginFilter/BeginBlur/BeginMask — until the matching
-        // outermost EndMask, then render the whole region as one sub-scene.
-        if let Some((depth, buffered)) = mask_buf.as_mut() {
-            match cmd {
-                SceneCommand::BeginMask { .. } => {
-                    *depth += 1;
-                    buffered.push(cmd.clone());
+        let is_open = is_effect_open(cmd);
+        let is_close = is_effect_close(cmd);
+
+        // While a bracket is open, buffer everything, tracking nesting depth, and
+        // render the region when the outermost bracket closes.
+        if let Some((depth, buffered)) = effect_buf.as_mut() {
+            buffered.push(cmd.clone());
+            if is_open {
+                *depth += 1;
+            } else if is_close {
+                *depth = depth.saturating_sub(1);
+                if *depth == 0
+                    && let Some((_, region)) = effect_buf.take()
+                {
+                    embed_rasterized_region(&mut content, &mut res, &region, page, fonts, assets);
                 }
-                SceneCommand::EndMask => {
-                    buffered.push(cmd.clone());
-                    *depth -= 1;
-                    if *depth == 0
-                        && let Some((_, region)) = mask_buf.take()
-                    {
-                        embed_rasterized_region(
-                            &mut content,
-                            &mut res,
-                            &region,
-                            page,
-                            fonts,
-                            assets,
-                        );
-                    }
-                }
-                other => buffered.push(other.clone()),
             }
             continue;
         }
 
-        match cmd {
-            // Open a mask bracket at top level (no filter capture active — a
-            // filter capture buffers a nested BeginMask as an ordinary command).
-            // The Begin is buffered too so the sub-scene self-applies the mask.
-            SceneCommand::BeginMask { .. } if capture.is_none() => {
-                mask_buf = Some((1, vec![cmd.clone()]));
-                continue;
-            }
-            // Open a capture (non-empty filters, none already active). Empty
-            // filters or a nested begin are no-ops: nothing is captured, so the
-            // inner commands emit normally.
-            SceneCommand::BeginFilter { filters } => {
-                if capture.is_none() && !filters.is_empty() {
-                    capture = Some((filters.clone(), Vec::new()));
-                }
-                continue;
-            }
-            // Close the active capture: rasterize the buffered region, apply the
-            // filters, and embed it. With no active capture this is a no-op.
-            SceneCommand::EndFilter => {
-                if let Some((filters, buffered)) = capture.take() {
-                    emit_filtered_region(
-                        &mut content,
-                        &mut res,
-                        &buffered,
-                        &filters,
-                        page,
-                        fonts,
-                        assets,
-                    );
-                }
-                continue;
-            }
-            // Any other command: buffer a clone while capturing, else emit now.
-            _ => {
-                if let Some((_, buffered)) = capture.as_mut() {
-                    buffered.push(cmd.clone());
-                } else {
-                    emit_command(&mut content, &mut res, cmd, page, fonts, assets);
-                }
-            }
+        // No buffer open: a top-level effect-open starts one (the Begin is
+        // buffered too so the sub-scene self-applies the effect). An empty
+        // `BeginFilter` is a no-op — it stays vector and falls through to
+        // `emit_command` (which no-ops it); blur/shadow/mask always open.
+        if is_open && !is_empty_filter(cmd) {
+            effect_buf = Some((1, vec![cmd.clone()]));
+            continue;
         }
+
+        emit_command(&mut content, &mut res, cmd, page, fonts, assets);
     }
 
     (content, res)
+}
+
+/// True for a command that opens a non-vector effect bracket (blur, shadow,
+/// filter, or mask). Returns `false` for all other variants. Note: `matches!`
+/// is NOT exhaustive — a new `Begin*` variant silently returns `false` (and
+/// is treated as a plain draw). Update this predicate alongside any new effect.
+fn is_effect_open(cmd: &SceneCommand) -> bool {
+    matches!(
+        cmd,
+        SceneCommand::BeginBlur { .. }
+            | SceneCommand::BeginShadow { .. }
+            | SceneCommand::BeginFilter { .. }
+            | SceneCommand::BeginMask { .. }
+    )
+}
+
+/// True for a command that closes a non-vector effect bracket — the matching
+/// `End*` for each [`is_effect_open`] case.
+fn is_effect_close(cmd: &SceneCommand) -> bool {
+    matches!(
+        cmd,
+        SceneCommand::EndBlur
+            | SceneCommand::EndShadow
+            | SceneCommand::EndFilter
+            | SceneCommand::EndMask
+    )
+}
+
+/// True for a `BeginFilter` carrying no filters — a no-op bracket that must not
+/// open a buffer (it stays vector). The compiler never emits empty filters; the
+/// guard is preserved defensively. All other commands return false.
+fn is_empty_filter(cmd: &SceneCommand) -> bool {
+    matches!(cmd, SceneCommand::BeginFilter { filters } if filters.is_empty())
 }
 
 /// Apply the fill-alpha ExtGState for `color` if it is non-opaque (interning the
@@ -638,36 +625,19 @@ fn emit_command(
             content.restore_state();
         }
 
-        // ── Shadow capture ────────────────────────────────────────────────
-        // v0 limitation: a Gaussian blur has no vector PDF equivalent. We do
-        // NOT drop the bracketed content — the draws between BeginShadow and
-        // EndShadow pass straight through and paint crisp; only the blurred
-        // shadow layers are skipped. Documented honest limitation.
+        // ── Non-vector effect brackets ────────────────────────────────────
+        // `translate` intercepts every BALANCED effect bracket (blur, shadow,
+        // filter, mask) before dispatch, buffering it inclusive and rendering it
+        // as a self-applying sub-scene (see `embed_rasterized_region`). These
+        // arms are therefore unreachable in normal flow; kept (no wildcard) for
+        // exhaustiveness, and a no-op is the safe fallback so a malformed or
+        // standalone End* / empty Begin* reaching here can never panic.
         SceneCommand::BeginShadow { .. } => {}
         SceneCommand::EndShadow => {}
-
-        // ── Gaussian blur capture ─────────────────────────────────────────
-        // v0 limitation: per-element Gaussian blur has no vector PDF equivalent.
-        // The bracketed ink passes straight through and paints crisp; only the
-        // blur is skipped. Documented honest limitation.
         SceneCommand::BeginBlur { .. } => {}
         SceneCommand::EndBlur => {}
-
-        // ── Color filter capture ──────────────────────────────────────────
-        // `translate` intercepts these before dispatch: a BeginFilter opens a
-        // capture buffer and the matching EndFilter rasterizes+filters+embeds the
-        // buffered region (see `emit_filtered_region`). These arms are therefore
-        // unreachable in normal flow; kept (no wildcard) for exhaustiveness, and a
-        // no-op is the safe fallback if one ever reaches here un-bracketed.
         SceneCommand::BeginFilter { .. } => {}
         SceneCommand::EndFilter => {}
-
-        // ── Mask capture ──────────────────────────────────────────────────
-        // `translate` intercepts a BeginMask and buffers the whole bracket
-        // (inclusive of any nested blur/filter), then rasterizes+embeds it via
-        // `embed_rasterized_region`. These arms are therefore unreachable in
-        // normal flow; kept (no wildcard) for exhaustiveness, and a no-op is the
-        // safe fallback if one ever reaches here un-bracketed.
         SceneCommand::BeginMask { .. } => {}
         SceneCommand::EndMask => {}
     }
@@ -857,64 +827,16 @@ fn emit_image(
     content.restore_state();
 }
 
-/// Rasterize a color-`filter` bracket and embed it as an image XObject.
+/// Rasterize a self-applying effect bracket (blur, shadow, filter, or mask —
+/// including any effect nested inside it) and embed it as an image XObject.
 ///
-/// PDF has no per-pixel filter primitive (grayscale, sepia, hue-rotate, …), so a
-/// faithful vector translation is impossible. The user-chosen strategy is
-/// rasterize-and-embed: the `buffered` commands are rendered to a standalone
-/// full-page sub-scene via the crate's own raster backend, the `filters` are
-/// applied to the resulting STRAIGHT-alpha RGBA in place (identical math to the
-/// raster backend), the opaque region is cropped to its tight bounding box, and
-/// that crop is embedded as a FlateDecode image XObject placed back at its scene
-/// position. All arithmetic is deterministic (`f64`, fixed rounding, fixed deflate
+/// `sub_commands` is the WHOLE bracket inclusive (`Begin*` … matching `End*`), so
+/// the raster backend ([`crate::render::render_image`]) self-applies every effect
+/// — no post-pass is needed here. This helper builds the standalone full-page
+/// sub-scene (default transparent canvas, so only the bracket's ink is opaque),
+/// renders it, crops to the tight opaque bounding box, and embeds the crop at its
+/// scene position. All arithmetic is deterministic (fixed rounding, fixed deflate
 /// level) so the PDF stays byte-identical across runs.
-///
-/// If rasterization fails, the buffered commands are emitted UNFILTERED so the
-/// bracketed content is never lost.
-fn emit_filtered_region(
-    content: &mut Content,
-    res: &mut PageResources,
-    buffered: &[SceneCommand],
-    filters: &[FilterSpec],
-    page: (f64, f64),
-    fonts: &dyn FontProvider,
-    assets: &dyn AssetProvider,
-) {
-    // 1. Build a standalone full-page sub-scene from the buffered commands. The
-    //    background is the default fully-transparent canvas, so only the leaf's
-    //    ink is opaque — exactly what the alpha-bbox crop below keys on.
-    let (pw, ph) = page;
-    let mut sub_scene = Scene::new(pw, ph);
-    sub_scene.commands = buffered.to_vec();
-
-    // 2. Rasterize. On failure, fall back to emitting the buffered commands
-    //    UNFILTERED so content is never lost.
-    let img = match crate::render::render_image(&sub_scene, fonts, assets) {
-        Ok(i) => i,
-        Err(_) => {
-            for c in buffered {
-                emit_command(content, res, c, page, fonts, assets);
-            }
-            return;
-        }
-    };
-    let (iw, ih) = (img.width, img.height);
-    let mut rgba = img.rgba;
-
-    // 3. Apply the per-pixel filters in place on straight-alpha RGBA.
-    crate::tiny_skia::filter::apply_filters_straight(&mut rgba, filters);
-
-    crop_and_embed(content, res, &rgba, iw, ih);
-}
-
-/// Rasterize a self-applying bracket (e.g. a `mask` region, including any
-/// blur/filter nested inside it) and embed it as an image XObject.
-///
-/// Unlike [`emit_filtered_region`], NO post-filter pass is applied: the
-/// `sub_commands` already contain the `BeginMask`/`BeginBlur`/`BeginFilter`
-/// brackets, so the raster backend ([`crate::render::render_image`]) self-applies
-/// every effect. This helper just builds the sub-scene, renders it, crops to the
-/// tight opaque bounding box, and embeds the crop at its scene position.
 ///
 /// On render failure the buffered commands are emitted via [`emit_command`] so
 /// content is never lost (the region then draws unmasked rather than vanishing).
@@ -948,8 +870,8 @@ fn embed_rasterized_region(
 /// Crop a rendered straight-alpha RGBA buffer to its tight opaque bounding box
 /// and embed that crop as an image XObject placed back at its scene position.
 ///
-/// Shared by [`emit_filtered_region`] and [`embed_rasterized_region`]. A fully
-/// transparent (or zero-sized / malformed) buffer embeds nothing.
+/// Used by [`embed_rasterized_region`]. A fully transparent (or zero-sized /
+/// malformed) buffer embeds nothing.
 fn crop_and_embed(content: &mut Content, res: &mut PageResources, rgba: &[u8], iw: u32, ih: u32) {
     // Defensive: the buffer must be exactly iw*ih*4 bytes for the row math below.
     let expected = match (iw as usize)

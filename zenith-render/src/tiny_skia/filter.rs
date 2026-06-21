@@ -62,50 +62,6 @@ pub(super) fn apply_filters(pm: &mut Pixmap, filters: &[FilterSpec]) {
     }
 }
 
-/// Apply `filters` (in order) to a STRAIGHT-alpha RGBA8 buffer, in place.
-///
-/// Unlike [`apply_filters`], this operates directly on straight (un-premultiplied)
-/// RGBA8 — the exact format of [`crate::backend::RasterImage::rgba`] — so there is
-/// no premultiply round-trip. The per-kind color math is the SAME (`apply_one`,
-/// clamped after every op, rounded via `to_u8`). Alpha bytes are never modified;
-/// fully-transparent pixels (`a == 0`) are skipped. Iteration is over
-/// `chunks_exact_mut(4)`, so there is no manual indexing and no panic.
-///
-/// Used by the PDF backend, which has no per-pixel filter primitive: a filtered
-/// leaf is rasterized to straight RGBA, transformed here, then embedded as an
-/// image XObject. Pure `f64` math with deterministic rounding ⇒ byte-identical
-/// across runs.
-pub(crate) fn apply_filters_straight(rgba: &mut [u8], filters: &[FilterSpec]) {
-    if filters.is_empty() {
-        return;
-    }
-    for px in rgba.chunks_exact_mut(4) {
-        // Straight RGBA byte order: [r, g, b, a].
-        let a = px[3];
-        if a == 0 {
-            // Alpha 0 → fully transparent; color filters leave it untouched.
-            continue;
-        }
-        let mut r = f64::from(px[0]) / 255.0;
-        let mut g = f64::from(px[1]) / 255.0;
-        let mut b = f64::from(px[2]) / 255.0;
-
-        for spec in filters {
-            let (nr, ng, nb) = apply_one(spec, r, g, b);
-            r = nr.clamp(0.0, 1.0);
-            g = ng.clamp(0.0, 1.0);
-            b = nb.clamp(0.0, 1.0);
-        }
-
-        // Straight [0,1] → straight [0,255] with the same deterministic rounding
-        // (`floor(x * 255 + 0.5)`) used by `apply_filters`.
-        px[0] = to_u8(r);
-        px[1] = to_u8(g);
-        px[2] = to_u8(b);
-        // px[3] (alpha) is intentionally left unchanged.
-    }
-}
-
 /// Apply a single filter op to straight-alpha RGB in `[0,1]` (unclamped output;
 /// the caller clamps each channel after every op).
 fn apply_one(spec: &FilterSpec, r: f64, g: f64, b: f64) -> (f64, f64, f64) {
