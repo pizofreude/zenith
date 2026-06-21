@@ -580,6 +580,35 @@ pub fn run() -> ExitCode {
             }
         },
 
+        Command::Version(args) => match history::name_version(&args.path, &args.name) {
+            Ok(id) => {
+                println!("saved version '{}' as {}", args.name, id);
+                ExitCode::SUCCESS
+            }
+            Err(msg) => {
+                eprintln!("{msg}");
+                ExitCode::from(2)
+            }
+        },
+
+        Command::Restore(args) => match history::restore(&args.path, &args.rev) {
+            Ok(outcome) => {
+                if let Some(w) = &outcome.warning {
+                    eprintln!("warning: {w}");
+                }
+                println!(
+                    "restored '{}' to {}",
+                    args.path.display(),
+                    outcome.version_id
+                );
+                ExitCode::SUCCESS
+            }
+            Err(msg) => {
+                eprintln!("{msg}");
+                ExitCode::from(2)
+            }
+        },
+
         Command::Tx(args) => {
             // Read document source.
             let doc_src = match read_file(&args.path) {

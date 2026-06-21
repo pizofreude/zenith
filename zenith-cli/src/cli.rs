@@ -49,6 +49,12 @@ pub enum Command {
 
     /// Redo the last undone edit, rewriting the document in place.
     Redo(RedoArgs),
+
+    /// Save the current document as a named version.
+    Version(VersionArgs),
+
+    /// Restore the document to a past version.
+    Restore(RestoreArgs),
 }
 
 /// Arguments for `zenith library`.
@@ -265,4 +271,22 @@ pub struct UndoArgs {
 pub struct RedoArgs {
     /// Path to the `.zen` document (rewritten in place).
     pub path: PathBuf,
+}
+
+/// Arguments for `zenith version`.
+#[derive(Debug, Args)]
+pub struct VersionArgs {
+    /// Path to the `.zen` document.
+    pub path: PathBuf,
+    /// Name for this version (a named version is retained indefinitely).
+    pub name: String,
+}
+
+/// Arguments for `zenith restore`.
+#[derive(Debug, Args)]
+pub struct RestoreArgs {
+    /// Path to the `.zen` document.
+    pub path: PathBuf,
+    /// Revision spec (e.g. a version id `v2`, `@head~1`, `@latest:named`, or a name).
+    pub rev: String,
 }

@@ -16,8 +16,8 @@ use std::path::Path;
 use zenith_core::{KdlAdapter, KdlSource as _};
 use zenith_session::adapter::{OsClock, OsFs, OsRng};
 use zenith_session::{
-    Outcome, StorePaths, current_content, list_versions, reconcile, record_state, record_version,
-    resolve_data_dir,
+    Outcome, StorePaths, VersionOutcome, current_content, list_versions, reconcile, record_state,
+    record_version, resolve_data_dir, resolve_version, version_content,
 };
 
 // ── Public result type ────────────────────────────────────────────────────────
@@ -195,24 +195,32 @@ pub enum NavOutcome {
 
 // ── Navigation helpers ────────────────────────────────────────────────────────
 
-/// Read `doc_path` and extract its embedded `doc-id`.
+/// Read `doc_path` and return its raw bytes plus its embedded `doc-id`.
 ///
 /// Returns a human-readable error if the file cannot be read, cannot be parsed,
 /// or has no `doc-id` attribute yet (meaning it has never been edited through
 /// zenith's history pipeline).
-fn doc_id_at(doc_path: &Path) -> Result<String, String> {
+fn read_doc_with_id(doc_path: &Path) -> Result<(Vec<u8>, String), String> {
     let bytes = std::fs::read(doc_path)
         .map_err(|e| format!("cannot read '{}': {e}", doc_path.display()))?;
     let doc = KdlAdapter
         .parse(&bytes)
         .map_err(|e| format!("cannot parse '{}': {}", doc_path.display(), e.message))?;
-    doc.doc_id.ok_or_else(|| {
+    let id = doc.doc_id.ok_or_else(|| {
         format!(
             "'{}' has no history yet (no doc-id); edit it with `zenith tx --apply` or \
              `zenith library add` first",
             doc_path.display()
         )
-    })
+    })?;
+    Ok((bytes, id))
+}
+
+/// Read `doc_path` and extract its embedded `doc-id`.
+///
+/// Delegates to [`read_doc_with_id`]; returns only the id.
+fn doc_id_at(doc_path: &Path) -> Result<String, String> {
+    read_doc_with_id(doc_path).map(|(_, id)| id)
 }
 
 // ── history_view ──────────────────────────────────────────────────────────────
@@ -300,4 +308,84 @@ pub fn redo_edit_in(paths: &StorePaths, doc_path: &Path) -> Result<NavOutcome, S
         }
         None => Ok(NavOutcome::NothingToDo),
     }
+}
+
+// ── name_version ──────────────────────────────────────────────────────────────
+
+/// Save the current on-disk content of `doc_path` as a NAMED Tier-2 version.
+///
+/// Resolves the real data directory automatically. Use [`name_version_in`] in
+/// tests where you want a tempdir-rooted store.
+///
+/// Returns the new (or existing latest) version id (e.g. `"v3"`), or a
+/// human-readable error.
+pub fn name_version(doc_path: &Path, name: &str) -> Result<String, String> {
+    let data_dir = resolve_data_dir().map_err(|e| e.message)?;
+    let paths = StorePaths::new(data_dir);
+    name_version_in(&paths, doc_path, name)
+}
+
+/// Same as [`name_version`] but with an explicit store root (used by tests).
+pub fn name_version_in(paths: &StorePaths, doc_path: &Path, name: &str) -> Result<String, String> {
+    let (bytes, doc_id) = read_doc_with_id(doc_path)?;
+    let fs = OsFs;
+    let clock = OsClock;
+    match record_version(
+        &fs,
+        paths,
+        &clock,
+        &doc_id,
+        &bytes,
+        Some(name),
+        Some("named"),
+    ) {
+        Ok(VersionOutcome::Recorded { id }) => Ok(id),
+        Ok(VersionOutcome::Unchanged) => {
+            // No content change since the last version: still report success by
+            // returning the latest version id via a fresh resolve of "@head".
+            resolve_version(&fs, paths, &doc_id, "@head").map_err(|e| e.message)
+        }
+        Err(e) => Err(e.message),
+    }
+}
+
+// ── restore ───────────────────────────────────────────────────────────────────
+
+/// Outcome of a [`restore`] or [`restore_in`] call.
+pub struct RestoreOutcome {
+    /// The resolved version id that was restored (e.g. `"v2"`).
+    pub version_id: String,
+    /// Non-fatal warning from recording the restore as a new edit, if any.
+    pub warning: Option<String>,
+}
+
+/// Resolve `spec` to a past version, write its content back to `doc_path`, and
+/// record the restore as a new (undoable) edit.
+///
+/// Resolves the real data directory automatically. Use [`restore_in`] in tests
+/// where you want a tempdir-rooted store.
+pub fn restore(doc_path: &Path, spec: &str) -> Result<RestoreOutcome, String> {
+    let data_dir = resolve_data_dir().map_err(|e| e.message)?;
+    let paths = StorePaths::new(data_dir);
+    restore_in(&paths, doc_path, spec)
+}
+
+/// Same as [`restore`] but with an explicit store root (used by tests).
+pub fn restore_in(
+    paths: &StorePaths,
+    doc_path: &Path,
+    spec: &str,
+) -> Result<RestoreOutcome, String> {
+    let doc_id = doc_id_at(doc_path)?;
+    let fs = OsFs;
+    let version_id = resolve_version(&fs, paths, &doc_id, spec).map_err(|e| e.message)?;
+    let content = version_content(&fs, paths, &doc_id, &version_id).map_err(|e| e.message)?;
+    // Record the restore as a new write-through edit (Tier-1 + Tier-2), then write.
+    let recorded = record_edit_in(paths, &content, doc_path, "restore");
+    std::fs::write(doc_path, &recorded.bytes)
+        .map_err(|e| format!("cannot write '{}': {e}", doc_path.display()))?;
+    Ok(RestoreOutcome {
+        version_id,
+        warning: recorded.warning,
+    })
 }
