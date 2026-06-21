@@ -7,7 +7,7 @@ use std::fmt::Write as _;
 use crate::ast::{
     CodeNode, DocumentBody, EllipseNode, FieldNode, Fold, FootnoteNode, FrameNode, GroupNode,
     ImageNode, InstanceNode, LineNode, Node, Override, Page, Point, PolygonNode, PolylineNode,
-    RectNode, SafeZone, SafeZoneType, TextNode, TextSpan, TocNode,
+    RectNode, SafeZone, SafeZoneType, TableCell, TableNode, TableRow, TextNode, TextSpan, TocNode,
 };
 
 use super::{
@@ -165,8 +165,98 @@ fn write_node(node: &Node, out: &mut String, depth: usize) {
         Node::Field(f) => write_field(f, out, depth),
         Node::Toc(t) => write_toc(t, out, depth),
         Node::Footnote(f) => write_footnote(f, out, depth),
+        Node::Table(t) => write_table(t, out, depth),
         Node::Unknown(u) => write_unknown_node(u, out, depth),
     }
+}
+
+/// Emit a `table` node's `column`/`row`/`cell` children.
+fn write_table_cell(c: &TableCell, out: &mut String, depth: usize) {
+    indent(out, depth);
+    out.push_str("cell");
+    if c.colspan != 1 {
+        let _ = write!(out, " colspan={}", c.colspan);
+    }
+    if c.rowspan != 1 {
+        let _ = write!(out, " rowspan={}", c.rowspan);
+    }
+    write_opt_property_value(out, "fill", &c.fill);
+    write_opt_property_value(out, "border", &c.border);
+    write_opt_property_value(out, "border-width", &c.border_width);
+    write_opt_str(out, "h-align", &c.h_align);
+    write_opt_str(out, "v-align", &c.v_align);
+    out.push_str(" {\n");
+    write_children_block(&c.children, out, depth);
+    indent(out, depth);
+    out.push_str("}\n");
+}
+
+fn write_table_row(r: &TableRow, out: &mut String, depth: usize) {
+    indent(out, depth);
+    out.push_str("row {\n");
+    for cell in &r.cells {
+        write_table_cell(cell, out, depth + 1);
+    }
+    indent(out, depth);
+    out.push_str("}\n");
+}
+
+fn write_table(t: &TableNode, out: &mut String, depth: usize) {
+    indent(out, depth);
+    out.push_str("table");
+
+    // Canonical property order: id, name, role, x, y, w, h, header-rows, gap,
+    // cell-padding, border-collapse, fill, border, border-width, header-fill,
+    // header-style, h-align, v-align, opacity, visible, locked, rotate, style,
+    // then unknown props (sorted), then the column/row children block.
+    out.push_str(" id=\"");
+    out.push_str(&t.id);
+    out.push('"');
+    write_opt_str(out, "name", &t.name);
+    write_opt_str(out, "role", &t.role);
+    write_opt_dimension(out, "x", &t.x);
+    write_opt_dimension(out, "y", &t.y);
+    write_opt_dimension(out, "w", &t.w);
+    write_opt_dimension(out, "h", &t.h);
+    if let Some(n) = t.header_rows {
+        let _ = write!(out, " header-rows={n}");
+    }
+    write_opt_property_value(out, "gap", &t.gap);
+    write_opt_property_value(out, "cell-padding", &t.cell_padding);
+    write_opt_str(out, "border-collapse", &t.border_collapse);
+    write_opt_property_value(out, "fill", &t.fill);
+    write_opt_property_value(out, "border", &t.border);
+    write_opt_property_value(out, "border-width", &t.border_width);
+    write_opt_property_value(out, "header-fill", &t.header_fill);
+    write_opt_str(out, "header-style", &t.header_style);
+    write_opt_str(out, "h-align", &t.h_align);
+    write_opt_str(out, "v-align", &t.v_align);
+    write_opt_f64(out, "opacity", &t.opacity);
+    write_opt_bool(out, "visible", &t.visible);
+    write_opt_bool(out, "locked", &t.locked);
+    write_opt_dimension(out, "rotate", &t.rotate);
+    write_opt_str(out, "style", &t.style);
+
+    // Unknown properties in sorted key order (BTreeMap iteration is sorted).
+    for (key, prop) in &t.unknown_props {
+        out.push(' ');
+        out.push_str(key);
+        out.push('=');
+        out.push_str(&fmt_unknown_value(&prop.value));
+    }
+
+    out.push_str(" {\n");
+    for col in &t.columns {
+        indent(out, depth + 1);
+        out.push_str("column");
+        write_opt_dimension(out, "width", &col.width);
+        out.push('\n');
+    }
+    for row in &t.rows {
+        write_table_row(row, out, depth + 1);
+    }
+    indent(out, depth);
+    out.push_str("}\n");
 }
 
 fn write_field(f: &FieldNode, out: &mut String, depth: usize) {

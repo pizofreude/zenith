@@ -351,6 +351,7 @@ fn node_bottom_box(node: &Node) -> Option<(f64, f64, f64, f64, String)> {
         Node::Code(n) => (&n.x, &n.y, &n.w, &n.h, &n.id),
         Node::Image(n) => (&n.x, &n.y, &n.w, &n.h, &n.id),
         Node::Frame(n) => (&n.x, &n.y, &n.w, &n.h, &n.id),
+        Node::Table(n) => (&n.x, &n.y, &n.w, &n.h, &n.id),
         Node::Line(_)
         | Node::Polygon(_)
         | Node::Polyline(_)

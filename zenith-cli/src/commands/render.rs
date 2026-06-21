@@ -498,6 +498,13 @@ fn walk_images(nodes: &[Node], doc: &Document, project_dir: &Path, out: &mut Vec
             Node::Group(g) => {
                 walk_images(&g.children, doc, project_dir, out);
             }
+            Node::Table(t) => {
+                for row in &t.rows {
+                    for cell in &row.cells {
+                        walk_images(&cell.children, doc, project_dir, out);
+                    }
+                }
+            }
             // Leaf nodes that cannot contain children — explicit for exhaustiveness:
             Node::Rect(_)
             | Node::Ellipse(_)

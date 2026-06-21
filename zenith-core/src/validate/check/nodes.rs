@@ -2,7 +2,7 @@
 //! polygon/polyline checks, geometry validation, and the off_canvas geometry
 //! helpers.
 
-use std::collections::{BTreeMap, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashSet};
 
 use crate::ast::node::{
     FieldNode, FootnoteNode, InstanceNode, Node, PolygonNode, PolylineNode, TocNode,
@@ -1475,6 +1475,287 @@ pub(super) fn walk_node(
             );
         }
 
+        Node::Table(t) => {
+            register_id(&t.id, seen_ids, diagnostics);
+            check_style_ref(
+                &t.id,
+                t.style.as_deref(),
+                declared_style_ids,
+                t.source_span,
+                diagnostics,
+            );
+            // `header-style` is a style ref carried for a later unit; validate it
+            // against the declared styles now so authoring errors surface early.
+            check_style_ref(
+                &t.id,
+                t.header_style.as_deref(),
+                declared_style_ids,
+                t.source_span,
+                diagnostics,
+            );
+
+            // Required geometry: x, y, w, h must all be present (mirror frame).
+            check_optional_dim(
+                &t.id,
+                "x",
+                t.x.as_ref(),
+                geom_required,
+                t.source_span,
+                diagnostics,
+            );
+            check_optional_dim(
+                &t.id,
+                "y",
+                t.y.as_ref(),
+                geom_required,
+                t.source_span,
+                diagnostics,
+            );
+            check_optional_dim(
+                &t.id,
+                "w",
+                t.w.as_ref(),
+                geom_required,
+                t.source_span,
+                diagnostics,
+            );
+            check_optional_dim(
+                &t.id,
+                "h",
+                t.h.as_ref(),
+                geom_required,
+                t.source_span,
+                diagnostics,
+            );
+
+            // Token-typed visual props: colors and dimensions.
+            for (prop_name, prop_val) in [
+                ("fill", t.fill.as_ref()),
+                ("border", t.border.as_ref()),
+                ("header-fill", t.header_fill.as_ref()),
+            ] {
+                check_visual_prop(
+                    &t.id,
+                    prop_name,
+                    prop_val,
+                    VisualExpect::Color,
+                    referenced_token_ids,
+                    resolved_tokens,
+                    diagnostics,
+                );
+            }
+            for (prop_name, prop_val) in [
+                ("border-width", t.border_width.as_ref()),
+                ("gap", t.gap.as_ref()),
+                ("cell-padding", t.cell_padding.as_ref()),
+            ] {
+                check_visual_prop(
+                    &t.id,
+                    prop_name,
+                    prop_val,
+                    VisualExpect::Dimension,
+                    referenced_token_ids,
+                    resolved_tokens,
+                    diagnostics,
+                );
+            }
+
+            // Enum-value checks (Warnings on unrecognized values, not errors).
+            if let Some(ha) = t.h_align.as_deref()
+                && !matches!(ha, "start" | "center" | "end")
+            {
+                diagnostics.push(Diagnostic::warning(
+                    "table.invalid_h_align",
+                    format!(
+                        "table '{}': h-align '{ha}' is not one of start/center/end",
+                        t.id
+                    ),
+                    t.source_span,
+                    Some(t.id.clone()),
+                ));
+            }
+            if let Some(va) = t.v_align.as_deref()
+                && !matches!(va, "top" | "middle" | "bottom")
+            {
+                diagnostics.push(Diagnostic::warning(
+                    "table.invalid_v_align",
+                    format!(
+                        "table '{}': v-align '{va}' is not one of top/middle/bottom",
+                        t.id
+                    ),
+                    t.source_span,
+                    Some(t.id.clone()),
+                ));
+            }
+            if let Some(bc) = t.border_collapse.as_deref()
+                && !matches!(bc, "separate" | "collapse")
+            {
+                diagnostics.push(Diagnostic::warning(
+                    "table.invalid_border_collapse",
+                    format!(
+                        "table '{}': border-collapse '{bc}' is not one of separate/collapse",
+                        t.id
+                    ),
+                    t.source_span,
+                    Some(t.id.clone()),
+                ));
+            }
+
+            // Per-cell enum checks, mirroring the table-level checks.
+            for row in &t.rows {
+                for cell in &row.cells {
+                    if let Some(ha) = cell.h_align.as_deref()
+                        && !matches!(ha, "start" | "center" | "end")
+                    {
+                        diagnostics.push(Diagnostic::warning(
+                            "table.invalid_h_align",
+                            format!(
+                                "table '{}': cell h-align '{ha}' is not one of start/center/end",
+                                t.id
+                            ),
+                            cell.source_span,
+                            Some(t.id.clone()),
+                        ));
+                    }
+                    if let Some(va) = cell.v_align.as_deref()
+                        && !matches!(va, "top" | "middle" | "bottom")
+                    {
+                        diagnostics.push(Diagnostic::warning(
+                            "table.invalid_v_align",
+                            format!(
+                                "table '{}': cell v-align '{va}' is not one of top/middle/bottom",
+                                t.id
+                            ),
+                            cell.source_span,
+                            Some(t.id.clone()),
+                        ));
+                    }
+                    // Per-cell token-typed visual props.
+                    check_visual_prop(
+                        &t.id,
+                        "cell fill",
+                        cell.fill.as_ref(),
+                        VisualExpect::Color,
+                        referenced_token_ids,
+                        resolved_tokens,
+                        diagnostics,
+                    );
+                    check_visual_prop(
+                        &t.id,
+                        "cell border",
+                        cell.border.as_ref(),
+                        VisualExpect::Color,
+                        referenced_token_ids,
+                        resolved_tokens,
+                        diagnostics,
+                    );
+                    check_visual_prop(
+                        &t.id,
+                        "cell border-width",
+                        cell.border_width.as_ref(),
+                        VisualExpect::Dimension,
+                        referenced_token_ids,
+                        resolved_tokens,
+                        diagnostics,
+                    );
+                }
+            }
+
+            // Unknown properties.
+            for prop_name in t.unknown_props.keys() {
+                diagnostics.push(Diagnostic::warning(
+                    "node.unknown_property",
+                    format!(
+                        "table '{}': unknown property '{}' (version-relative; \
+                         may be valid in a later schema version)",
+                        t.id, prop_name
+                    ),
+                    t.source_span,
+                    Some(t.id.clone()),
+                ));
+            }
+
+            // ── Cell-span consistency ──────────────────────────────────────
+            // HTML-table cell flow: place each cell in the next free column of
+            // its row, honoring colspan/rowspan via a BTreeSet occupancy grid
+            // keyed by (row, col). A colspan that would run past the column
+            // count, or a rowspan past the last row, is a hard error.
+            let col_count = t.columns.len().max(1);
+            let row_count = t.rows.len();
+            let mut occupied: BTreeSet<(usize, usize)> = BTreeSet::new();
+            for (r, row) in t.rows.iter().enumerate() {
+                let mut col_cursor = 0usize;
+                for cell in &row.cells {
+                    // Advance to the next column free at this row.
+                    while col_cursor < col_count && occupied.contains(&(r, col_cursor)) {
+                        col_cursor += 1;
+                    }
+                    let cs = cell.colspan.max(1) as usize;
+                    let rs = cell.rowspan.max(1) as usize;
+                    if col_cursor + cs > col_count {
+                        diagnostics.push(Diagnostic::error(
+                            "table.cell_overflow",
+                            format!(
+                                "table '{}': cell at row {r} starting column {col_cursor} with \
+                                 colspan {cs} exceeds the column count {col_count}",
+                                t.id
+                            ),
+                            cell.source_span,
+                            Some(t.id.clone()),
+                        ));
+                    }
+                    if r + rs > row_count {
+                        diagnostics.push(Diagnostic::error(
+                            "table.cell_overflow",
+                            format!(
+                                "table '{}': cell at row {r} with rowspan {rs} extends past the \
+                                 last row (row count {row_count})",
+                                t.id
+                            ),
+                            cell.source_span,
+                            Some(t.id.clone()),
+                        ));
+                    }
+                    // Mark the cell's covered slots (clamped to the grid).
+                    for dr in 0..rs {
+                        for dc in 0..cs {
+                            let cr = r + dr;
+                            let cc = col_cursor + dc;
+                            if cr < row_count && cc < col_count {
+                                occupied.insert((cr, cc));
+                            }
+                        }
+                    }
+                    col_cursor += cs;
+                }
+            }
+
+            // Recurse into every cell's children with the normal walk so nested
+            // node ids are registered/validated. Cell content has authored
+            // geometry, so it is NOT treated as flow-positioned.
+            for row in &t.rows {
+                for cell in &row.cells {
+                    for child in &cell.children {
+                        walk_node(
+                            child,
+                            seen_ids,
+                            referenced_token_ids,
+                            resolved_tokens,
+                            declared_asset_ids,
+                            declared_style_ids,
+                            declared_component_ids,
+                            component_local_ids,
+                            all_node_ids,
+                            page_px_bounds,
+                            false,
+                            enclosing_frame,
+                            diagnostics,
+                        );
+                    }
+                }
+            }
+        }
+
         Node::Unknown(u) => {
             diagnostics.push(Diagnostic::warning(
                 "node.unknown_kind",
@@ -1598,6 +1879,13 @@ pub(super) fn node_bbox(node: &Node, page_w: f64, page_h: f64) -> Option<(f64, f
         // field's box defaults to the page live area at compile time (x/w may be
         // omitted), so there is no authored bbox to check against the page here.
         // A toc likewise defaults to the live area; no authored bbox check.
+        Node::Table(n) => {
+            let x = resolve_axis(n.x.as_ref()?, page_w)?;
+            let y = resolve_axis(n.y.as_ref()?, page_h)?;
+            let w = resolve_axis(n.w.as_ref()?, page_w)?;
+            let h = resolve_axis(n.h.as_ref()?, page_h)?;
+            Some((x, y, w, h))
+        }
         Node::Group(_)
         | Node::Instance(_)
         | Node::Field(_)
@@ -1663,6 +1951,7 @@ fn node_rotate_deg(node: &Node) -> Option<f64> {
         Node::Group(n) => n.rotate.as_ref(),
         Node::Polygon(n) => n.rotate.as_ref(),
         Node::Polyline(n) => n.rotate.as_ref(),
+        Node::Table(n) => n.rotate.as_ref(),
         Node::Line(_)
         | Node::Instance(_)
         | Node::Field(_)
@@ -1694,6 +1983,7 @@ pub(super) fn node_role(node: &Node) -> Option<&str> {
         Node::Field(n) => n.role.as_deref(),
         Node::Toc(n) => n.role.as_deref(),
         Node::Footnote(n) => n.role.as_deref(),
+        Node::Table(n) => n.role.as_deref(),
         Node::Unknown(_) => None,
     }
 }
@@ -1715,6 +2005,7 @@ pub(super) fn node_id_and_span(node: &Node) -> (&str, Option<crate::ast::Span>) 
         Node::Field(n) => (&n.id, n.source_span),
         Node::Toc(n) => (&n.id, n.source_span),
         Node::Footnote(n) => (&n.id, n.source_span),
+        Node::Table(n) => (&n.id, n.source_span),
         Node::Unknown(n) => (&n.kind, n.source_span),
     }
 }

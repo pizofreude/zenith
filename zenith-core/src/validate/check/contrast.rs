@@ -305,6 +305,26 @@ pub(super) fn check_text_contrast(
                 );
             }
         }
+        Node::Table(t) => {
+            // Recurse into each cell's children so text inside a table cell is
+            // still judged against the page background. Cell-fill-aware contrast
+            // (text on a table.fill backdrop) is a later-unit concern.
+            for row in &t.rows {
+                for cell in &row.cells {
+                    for (i, child) in cell.children.iter().enumerate() {
+                        check_text_contrast(
+                            child,
+                            page_bg_rgb,
+                            &cell.children[..i],
+                            (page_w, page_h),
+                            resolved_tokens,
+                            style_map,
+                            diagnostics,
+                        );
+                    }
+                }
+            }
+        }
 
         // All other leaf node types carry no text — nothing to check.
         _ => {}

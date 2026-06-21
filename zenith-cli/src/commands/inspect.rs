@@ -319,6 +319,22 @@ fn build_node_entry(node: &Node) -> NodeEntry {
             locked: None,
             children: vec![],
         },
+        Node::Table(n) => NodeEntry {
+            id: n.id.clone(),
+            kind: "table".into(),
+            geometry: bbox_geom(n.x.as_ref(), n.y.as_ref(), n.w.as_ref(), n.h.as_ref()),
+            visible: n.visible,
+            locked: n.locked,
+            // Report each cell's child nodes (flattened in row→cell order) so a
+            // table's content is visible in the inspect tree.
+            children: n
+                .rows
+                .iter()
+                .flat_map(|row| row.cells.iter())
+                .flat_map(|cell| cell.children.iter())
+                .map(build_node_entry)
+                .collect(),
+        },
         Node::Unknown(n) => NodeEntry {
             id: String::new(),
             kind: n.kind.clone(),
@@ -377,6 +393,7 @@ fn node_id_str(node: &Node) -> &str {
         Node::Field(n) => &n.id,
         Node::Toc(n) => &n.id,
         Node::Footnote(n) => &n.id,
+        Node::Table(n) => &n.id,
         Node::Unknown(_) => "",
     }
 }

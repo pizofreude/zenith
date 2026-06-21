@@ -445,6 +445,7 @@ fn node_visible(node: &Node) -> Option<bool> {
         Node::Instance(n) => n.visible,
         Node::Field(n) => n.visible,
         Node::Toc(n) => n.visible,
+        Node::Table(n) => n.visible,
         // A footnote has no `visible` flag.
         Node::Footnote(_) => None,
         Node::Unknown(_) => None,
@@ -465,6 +466,7 @@ fn node_declared_w(node: &Node) -> Option<f64> {
         Node::Image(n) => n.w.as_ref(),
         Node::Field(n) => n.w.as_ref(),
         Node::Toc(n) => n.w.as_ref(),
+        Node::Table(n) => n.w.as_ref(),
         Node::Line(_)
         | Node::Polygon(_)
         | Node::Polyline(_)
@@ -488,6 +490,7 @@ fn node_declared_h(node: &Node) -> Option<f64> {
         Node::Image(n) => n.h.as_ref(),
         Node::Field(n) => n.h.as_ref(),
         Node::Toc(n) => n.h.as_ref(),
+        Node::Table(n) => n.h.as_ref(),
         Node::Line(_)
         | Node::Polygon(_)
         | Node::Polyline(_)
@@ -566,6 +569,12 @@ fn with_flow_box(node: &Node, x: f64, y: f64, w: f64, h: Option<f64>) -> Node {
             n.h = h_dim;
         }
         Node::Toc(n) => {
+            n.x = px(x);
+            n.y = px(y);
+            n.w = px(w);
+            n.h = h_dim;
+        }
+        Node::Table(n) => {
             n.x = px(x);
             n.y = px(y);
             n.w = px(w);
@@ -886,6 +895,7 @@ fn set_node_fill(node: &mut Node, fill: PropertyValue) {
         Node::Field(n) => n.fill = Some(fill),
         Node::Toc(n) => n.fill = Some(fill),
         Node::Footnote(n) => n.fill = Some(fill),
+        Node::Table(n) => n.fill = Some(fill),
         Node::Line(_)
         | Node::Frame(_)
         | Node::Group(_)
@@ -911,6 +921,7 @@ fn set_node_visible(node: &mut Node, v: bool) {
         Node::Instance(n) => n.visible = Some(v),
         Node::Field(n) => n.visible = Some(v),
         Node::Toc(n) => n.visible = Some(v),
+        Node::Table(n) => n.visible = Some(v),
         // A footnote has no `visible` flag; nothing to set.
         Node::Footnote(_) => {}
         Node::Unknown(_) => {}
@@ -934,6 +945,7 @@ fn node_local_id(node: &Node) -> Option<&str> {
         Node::Field(n) => Some(&n.id),
         Node::Toc(n) => Some(&n.id),
         Node::Footnote(n) => Some(&n.id),
+        Node::Table(n) => Some(&n.id),
         Node::Unknown(_) => None,
     }
 }
@@ -949,6 +961,13 @@ pub(super) fn prefix_ids_in_children(children: &mut [Node], prefix: &str) {
         match child {
             Node::Frame(f) => prefix_ids_in_children(&mut f.children, prefix),
             Node::Group(g) => prefix_ids_in_children(&mut g.children, prefix),
+            Node::Table(t) => {
+                for row in &mut t.rows {
+                    for cell in &mut row.cells {
+                        prefix_ids_in_children(&mut cell.children, prefix);
+                    }
+                }
+            }
             _ => {}
         }
     }
@@ -976,6 +995,7 @@ fn prefix_node_id(node: &mut Node, prefix: &str) {
         Node::Field(n) => pre!(n.id),
         Node::Toc(n) => pre!(n.id),
         Node::Footnote(n) => pre!(n.id),
+        Node::Table(n) => pre!(n.id),
         Node::Unknown(_) => {}
     }
 }
@@ -1156,6 +1176,20 @@ fn group_children_center(children: &[Node], base_dx: f64, base_dy: f64) -> Optio
             }
             Node::Group(n) => {
                 // Nested group: use its declared w/h if available, else skip.
+                let (Some(xd), Some(yd), Some(wd), Some(hd)) = (&n.x, &n.y, &n.w, &n.h) else {
+                    continue;
+                };
+                let (Some(x), Some(y), Some(w), Some(h)) = (
+                    dim_to_px(xd.value, &xd.unit),
+                    dim_to_px(yd.value, &yd.unit),
+                    dim_to_px(wd.value, &wd.unit),
+                    dim_to_px(hd.value, &hd.unit),
+                ) else {
+                    continue;
+                };
+                expand!(base_dx + x, base_dy + y, w, h);
+            }
+            Node::Table(n) => {
                 let (Some(xd), Some(yd), Some(wd), Some(hd)) = (&n.x, &n.y, &n.w, &n.h) else {
                     continue;
                 };

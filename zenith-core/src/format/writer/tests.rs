@@ -365,6 +365,21 @@ fn strip_node_span(node: &mut crate::ast::Node) {
         Node::Field(f) => f.source_span = None,
         Node::Toc(t) => t.source_span = None,
         Node::Footnote(f) => f.source_span = None,
+        Node::Table(t) => {
+            t.source_span = None;
+            for col in &mut t.columns {
+                col.source_span = None;
+            }
+            for row in &mut t.rows {
+                row.source_span = None;
+                for cell in &mut row.cells {
+                    cell.source_span = None;
+                    for child in &mut cell.children {
+                        strip_node_span(child);
+                    }
+                }
+            }
+        }
         Node::Unknown(u) => u.source_span = None,
     }
 }
@@ -424,6 +439,65 @@ fn test_syntax_theme_parse_format_round_trip() {
         code2.syntax_theme,
         Some(SyntaxTheme::Light),
         "syntax-theme must survive a format → re-parse round-trip"
+    );
+}
+
+/// **table parse + format round-trip**: a table with columns/rows/cells and a
+/// colspan parses into a `Node::Table`, and a parse → format → parse cycle
+/// preserves the structure (spans excluded).
+#[test]
+fn test_table_parse_format_round_trip() {
+    let src = r##"zenith version=1 {
+  project id="proj.tbl" name="TBL"
+  tokens format="zenith-token-v1" {
+    token id="color.line" type="color" value="#cccccc"
+    token id="color.cellbg" type="color" value="#f0f0f0"
+  }
+  styles {
+  }
+  document id="doc.tbl" title="TBL" {
+    page id="page.tbl" w=(px)640 h=(px)400 {
+      table id="t1" x=(px)40 y=(px)40 w=(px)520 h=(px)240 border=(token)"color.line" border-width=(px)1 fill=(token)"color.cellbg" cell-padding=(px)8 gap=(px)0 h-align="start" v-align="middle" header-rows=1 {
+        column width=(px)160
+        column
+        column width=(px)120
+        row {
+          cell { text id="c11" { span "Name" } }
+          cell colspan=2 { text id="c12" { span "Details" } }
+        }
+        row {
+          cell { text id="c21" { span "Ada" } }
+          cell { text id="c22" { span "Lovelace" } }
+          cell { text id="c23" { span "1815" } }
+        }
+      }
+    }
+  }
+}
+"##;
+    let adapter = KdlAdapter;
+    let doc = adapter.parse(src.as_bytes()).expect("parse must succeed");
+    let table = match &doc.body.pages[0].children[0] {
+        Node::Table(t) => t,
+        other => panic!("expected Table node, got {other:?}"),
+    };
+    assert_eq!(table.id, "t1");
+    assert_eq!(table.columns.len(), 3);
+    assert!(table.columns[1].width.is_none(), "column 2 must be auto");
+    assert_eq!(table.rows.len(), 2);
+    assert_eq!(table.rows[0].cells.len(), 2);
+    assert_eq!(table.rows[0].cells[1].colspan, 2);
+    assert_eq!(table.header_rows, Some(1));
+
+    // Round-trip: parse → format → parse must yield the same AST (spans excluded).
+    let formatted = format_document(&doc).expect("format must succeed");
+    let doc2 = adapter
+        .parse(&formatted)
+        .expect("re-parse after format must succeed");
+    assert_eq!(
+        strip_spans(doc).body.pages[0].children,
+        strip_spans(doc2).body.pages[0].children,
+        "table must survive a parse → format → parse round-trip"
     );
 }
 

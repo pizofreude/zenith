@@ -712,6 +712,14 @@ pub(super) fn collect_local_ids(children: &[crate::ast::node::Node], out: &mut H
             Node::Footnote(n) => {
                 out.insert(n.id.clone());
             }
+            Node::Table(n) => {
+                out.insert(n.id.clone());
+                for row in &n.rows {
+                    for cell in &row.cells {
+                        collect_local_ids(&cell.children, out);
+                    }
+                }
+            }
             Node::Unknown(_) => {}
         }
     }
@@ -763,6 +771,13 @@ fn check_footnote_refs(page: &crate::ast::document::Page, diagnostics: &mut Vec<
                 }
                 Node::Frame(f) => walk(&f.children, footnote_ids, diagnostics),
                 Node::Group(g) => walk(&g.children, footnote_ids, diagnostics),
+                Node::Table(t) => {
+                    for row in &t.rows {
+                        for cell in &row.cells {
+                            walk(&cell.children, footnote_ids, diagnostics);
+                        }
+                    }
+                }
                 _ => {}
             }
         }

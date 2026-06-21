@@ -17,7 +17,8 @@ use crate::ast::{
     node::{
         CodeNode, EllipseNode, FieldNode, FootnoteNode, FrameNode, GroupNode, ImageNode,
         InstanceNode, LineNode, Node, ObjectPosition, Override, Point, PolygonNode, PolylineNode,
-        RectNode, TextNode, TextSpan, TocNode, UnknownNode, UnknownProperty, UnknownValue,
+        RectNode, TableCell, TableColumn, TableNode, TableRow, TextNode, TextSpan, TocNode,
+        UnknownNode, UnknownProperty, UnknownValue,
     },
     style::{Style, StyleBlock, UnknownStyleProp, canonicalize_style_key},
     token::{
@@ -1199,6 +1200,7 @@ fn transform_node(node: &KdlNode) -> Result<Node, ParseError> {
         "field" => transform_field(node).map(Node::Field),
         "toc" => transform_toc(node).map(Node::Toc),
         "footnote" => transform_footnote(node).map(Node::Footnote),
+        "table" => transform_table(node).map(|t| Node::Table(Box::new(t))),
         _ => Ok(Node::Unknown(UnknownNode {
             kind: node.name().value().to_owned(),
             source_span: node_span(node),
@@ -1887,6 +1889,130 @@ fn transform_group(node: &KdlNode) -> Result<GroupNode, ParseError> {
         blur: optional_dimension_prop(node, "blur"),
         style: optional_string_prop(node, "style").map(str::to_owned),
         children: transform_children(node)?,
+        source_span: node_span(node),
+        unknown_props,
+    })
+}
+
+const TABLE_KNOWN_PROPS: &[&str] = &[
+    "id",
+    "name",
+    "role",
+    "x",
+    "y",
+    "w",
+    "h",
+    "header-rows",
+    "header_rows",
+    "gap",
+    "cell-padding",
+    "cell_padding",
+    "border-collapse",
+    "border_collapse",
+    "fill",
+    "border",
+    "border-width",
+    "border_width",
+    "header-fill",
+    "header_fill",
+    "header-style",
+    "header_style",
+    "h-align",
+    "h_align",
+    "v-align",
+    "v_align",
+    "style",
+    "opacity",
+    "visible",
+    "locked",
+    "rotate",
+];
+
+/// Transform a `cell` child node into a [`TableCell`].
+///
+/// `colspan`/`rowspan` default to 1; arbitrary child nodes parse via the same
+/// [`transform_node`] used for frame/group children.
+fn transform_cell(node: &KdlNode) -> Result<TableCell, ParseError> {
+    Ok(TableCell {
+        colspan: optional_u32_prop(node, "colspan").unwrap_or(1),
+        rowspan: optional_u32_prop(node, "rowspan").unwrap_or(1),
+        children: transform_children(node)?,
+        fill: optional_property_value(node, "fill"),
+        border: optional_property_value(node, "border"),
+        border_width: optional_property_value_aliased(node, "border-width", "border_width"),
+        h_align: optional_string_prop_aliased(node, "h-align", "h_align").map(str::to_owned),
+        v_align: optional_string_prop_aliased(node, "v-align", "v_align").map(str::to_owned),
+        source_span: node_span(node),
+    })
+}
+
+/// Transform a `row` child node into a [`TableRow`] by collecting its `cell`
+/// children in source order.
+fn transform_row(node: &KdlNode) -> Result<TableRow, ParseError> {
+    let mut cells: Vec<TableCell> = Vec::new();
+    if let Some(children) = node.children() {
+        for child in children.nodes() {
+            if child.name().value() == "cell" {
+                cells.push(transform_cell(child)?);
+            }
+        }
+    }
+    Ok(TableRow {
+        cells,
+        source_span: node_span(node),
+    })
+}
+
+fn transform_table(node: &KdlNode) -> Result<TableNode, ParseError> {
+    let id = required_string_prop(node, "id")?.to_owned();
+
+    // Collect `column` and `row` children in source order.
+    let mut columns: Vec<TableColumn> = Vec::new();
+    let mut rows: Vec<TableRow> = Vec::new();
+    if let Some(children) = node.children() {
+        for child in children.nodes() {
+            match child.name().value() {
+                "column" => columns.push(TableColumn {
+                    width: optional_dimension_prop(child, "width"),
+                    source_span: node_span(child),
+                }),
+                "row" => rows.push(transform_row(child)?),
+                _ => {}
+            }
+        }
+    }
+
+    let unknown_props = collect_unknown_props(node, TABLE_KNOWN_PROPS);
+
+    Ok(TableNode {
+        id,
+        name: optional_string_prop(node, "name").map(str::to_owned),
+        role: optional_string_prop(node, "role").map(str::to_owned),
+        x: optional_dimension_prop(node, "x"),
+        y: optional_dimension_prop(node, "y"),
+        w: optional_dimension_prop(node, "w"),
+        h: optional_dimension_prop(node, "h"),
+        columns,
+        rows,
+        header_rows: optional_u32_prop(node, "header-rows")
+            .or_else(|| optional_u32_prop(node, "header_rows")),
+        gap: optional_property_value(node, "gap"),
+        cell_padding: optional_property_value_aliased(node, "cell-padding", "cell_padding"),
+        border_collapse: optional_string_prop_aliased(node, "border-collapse", "border_collapse")
+            .map(str::to_owned),
+        fill: optional_property_value(node, "fill"),
+        border: optional_property_value(node, "border"),
+        border_width: optional_property_value_aliased(node, "border-width", "border_width"),
+        header_fill: optional_property_value_aliased(node, "header-fill", "header_fill"),
+        header_style: optional_string_prop_aliased(node, "header-style", "header_style")
+            .map(str::to_owned),
+        h_align: optional_string_prop_aliased(node, "h-align", "h_align").map(str::to_owned),
+        v_align: optional_string_prop_aliased(node, "v-align", "v_align").map(str::to_owned),
+        style: optional_string_prop(node, "style").map(str::to_owned),
+        opacity: optional_f64_prop(node, "opacity"),
+        visible: optional_bool_prop(node, "visible"),
+        locked: optional_bool_prop(node, "locked"),
+        rotate: optional_dimension_prop(node, "rotate"),
         source_span: node_span(node),
         unknown_props,
     })

@@ -30,6 +30,7 @@ fn node_fill_mut(node: &mut Node) -> Option<&mut Option<PropertyValue>> {
         Node::Field(n) => Some(&mut n.fill),
         Node::Toc(n) => Some(&mut n.fill),
         Node::Footnote(n) => Some(&mut n.fill),
+        Node::Table(n) => Some(&mut n.fill),
         Node::Line(_)
         | Node::Frame(_)
         | Node::Group(_)
@@ -58,6 +59,7 @@ fn node_stroke_mut(node: &mut Node) -> Option<&mut Option<PropertyValue>> {
         | Node::Field(_)
         | Node::Toc(_)
         | Node::Footnote(_)
+        | Node::Table(_)
         | Node::Unknown(_) => None,
     }
 }
@@ -81,6 +83,7 @@ fn node_stroke_width_mut(node: &mut Node) -> Option<&mut Option<PropertyValue>> 
         | Node::Field(_)
         | Node::Toc(_)
         | Node::Footnote(_)
+        | Node::Table(_)
         | Node::Unknown(_) => None,
     }
 }
@@ -102,6 +105,7 @@ fn node_opacity_mut(node: &mut Node) -> Option<&mut Option<f64>> {
         Node::Instance(n) => Some(&mut n.opacity),
         Node::Field(n) => Some(&mut n.opacity),
         Node::Toc(n) => Some(&mut n.opacity),
+        Node::Table(n) => Some(&mut n.opacity),
         // A footnote has no `opacity` field.
         Node::Footnote(_) => None,
         Node::Unknown(_) => None,
@@ -131,6 +135,7 @@ fn node_overflow_mut(node: &mut Node) -> Option<&mut Option<String>> {
         | Node::Field(_)
         | Node::Toc(_)
         | Node::Footnote(_)
+        | Node::Table(_)
         | Node::Unknown(_) => None,
     }
 }
@@ -520,6 +525,13 @@ fn collect_text_entries(children: &[Node], out: &mut Vec<(String, bool)>) {
             Node::Text(t) => out.push((t.id.clone(), t.locked == Some(true))),
             Node::Frame(f) => collect_text_entries(&f.children, out),
             Node::Group(g) => collect_text_entries(&g.children, out),
+            Node::Table(t) => {
+                for row in &t.rows {
+                    for cell in &row.cells {
+                        collect_text_entries(&cell.children, out);
+                    }
+                }
+            }
             Node::Rect(_)
             | Node::Ellipse(_)
             | Node::Line(_)

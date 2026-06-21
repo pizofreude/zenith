@@ -434,7 +434,13 @@ fn node_is_container(node: &Node) -> bool {
     // guard rejects it: its expanded subtree re-ids descendants by an
     // instance-id prefix, so duplicating it verbatim (with a single new id) is
     // not a v0-supported operation — the same deferral as Frame/Group.
-    matches!(node, Node::Frame(_) | Node::Group(_) | Node::Instance(_))
+    // `Table` is container-ish: its cells hold descendant ids, so a verbatim
+    // duplicate would clone those ids. Re-id'ing the subtree is deferred, the
+    // same deferral as Frame/Group.
+    matches!(
+        node,
+        Node::Frame(_) | Node::Group(_) | Node::Instance(_) | Node::Table(_)
+    )
 }
 
 /// Set the `id` field on a leaf [`Node`] variant to `new_id`.
@@ -495,7 +501,9 @@ fn node_set_id(node: &mut Node, new_id: String) -> bool {
         // Containers (and the container-ish instance) are handled by the v0
         // guard in apply_duplicate_node; Unknown nodes have no id field and are
         // never reached here.
-        Node::Frame(_) | Node::Group(_) | Node::Instance(_) | Node::Unknown(_) => false,
+        Node::Frame(_) | Node::Group(_) | Node::Instance(_) | Node::Table(_) | Node::Unknown(_) => {
+            false
+        }
     }
 }
 
@@ -623,6 +631,13 @@ fn suffix_ids_in_children(children: &mut [Node], id_suffix: &str) {
         match child {
             Node::Frame(f) => suffix_ids_in_children(&mut f.children, id_suffix),
             Node::Group(g) => suffix_ids_in_children(&mut g.children, id_suffix),
+            Node::Table(t) => {
+                for row in &mut t.rows {
+                    for cell in &mut row.cells {
+                        suffix_ids_in_children(&mut cell.children, id_suffix);
+                    }
+                }
+            }
             _ => {}
         }
     }
@@ -642,6 +657,9 @@ fn node_set_id_any(node: &mut Node, new_id: String) {
         // The instance is an id-bearing container-ish node; set it directly
         // (node_set_id deliberately excludes it as a non-leaf).
         Node::Instance(i) => i.id = new_id,
+        // The table is an id-bearing container; set it directly (node_set_id
+        // excludes it as a non-leaf, like Frame/Group).
+        Node::Table(t) => t.id = new_id,
         // Leaf variants share the existing setter.
         Node::Rect(_)
         | Node::Ellipse(_)

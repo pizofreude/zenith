@@ -190,6 +190,20 @@ fn collect_entries(
                 page_index_by_node_id,
                 entries,
             ),
+            Node::Table(t) => {
+                for row in &t.rows {
+                    for cell in &row.cells {
+                        collect_entries(
+                            &cell.children,
+                            page_1based,
+                            match_role,
+                            match_style,
+                            page_index_by_node_id,
+                            entries,
+                        );
+                    }
+                }
+            }
             Node::Rect(_)
             | Node::Ellipse(_)
             | Node::Line(_)

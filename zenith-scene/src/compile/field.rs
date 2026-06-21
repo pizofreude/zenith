@@ -320,6 +320,13 @@ fn index_nodes(children: &[Node], page_index_1based: usize, map: &mut BTreeMap<S
         match child {
             Node::Frame(f) => index_nodes(&f.children, page_index_1based, map),
             Node::Group(g) => index_nodes(&g.children, page_index_1based, map),
+            Node::Table(t) => {
+                for row in &t.rows {
+                    for cell in &row.cells {
+                        index_nodes(&cell.children, page_index_1based, map);
+                    }
+                }
+            }
             Node::Rect(_)
             | Node::Ellipse(_)
             | Node::Line(_)
@@ -384,7 +391,11 @@ fn collect_node_boxes(
                     map,
                 );
             }
-            Node::Rect(_)
+            // A table records its OWN box (above); its cell content is
+            // translated at render time, so cell children are not added to the
+            // authored-coordinate exclusion map in this unit.
+            Node::Table(_)
+            | Node::Rect(_)
             | Node::Ellipse(_)
             | Node::Line(_)
             | Node::Text(_)
@@ -428,6 +439,7 @@ fn node_rect(node: &Node) -> Option<(f64, f64, f64, f64)> {
         Node::Image(n) => rect(&n.x, &n.y, &n.w, &n.h),
         Node::Field(n) => rect(&n.x, &n.y, &n.w, &n.h),
         Node::Toc(n) => rect(&n.x, &n.y, &n.w, &n.h),
+        Node::Table(n) => rect(&n.x, &n.y, &n.w, &n.h),
         // An `instance` has no intrinsic w/h (its box is the expanded subtree),
         // and line/polygon/polyline have no rectangular box — none can serve as a
         // rectangular exclusion, so they are skipped.
@@ -457,6 +469,7 @@ fn node_id(node: &Node) -> Option<&str> {
         Node::Field(n) => Some(&n.id),
         Node::Toc(n) => Some(&n.id),
         Node::Footnote(n) => Some(&n.id),
+        Node::Table(n) => Some(&n.id),
         Node::Unknown(_) => None,
     }
 }

@@ -57,6 +57,8 @@ fn node_geometry_mut(node: &mut Node) -> Option<GeometryMut<'_>> {
         Node::Field(f) => Some((&mut f.x, &mut f.y, &mut f.w, &mut f.h)),
         // A toc likewise carries a real x/y/w/h box.
         Node::Toc(t) => Some((&mut t.x, &mut t.y, &mut t.w, &mut t.h)),
+        // A table carries a real x/y/w/h box.
+        Node::Table(t) => Some((&mut t.x, &mut t.y, &mut t.w, &mut t.h)),
         // `Instance` is excluded: it carries only an x/y origin, no w/h box, so
         // the four-slot bbox setter does not apply. A set_geometry on an instance
         // honestly surfaces tx.unsupported_property rather than silently dropping
@@ -104,6 +106,7 @@ fn node_rotate_mut(node: &mut Node) -> Option<&mut Option<Dimension>> {
         Node::Group(n) => Some(&mut n.rotate),
         Node::Polygon(n) => Some(&mut n.rotate),
         Node::Polyline(n) => Some(&mut n.rotate),
+        Node::Table(n) => Some(&mut n.rotate),
         // Line has no rotate field.
         // Instance has no rotate field.
         // Field has no rotate field.

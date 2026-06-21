@@ -890,6 +890,113 @@ pub struct TocNode {
     pub unknown_props: BTreeMap<String, UnknownProperty>,
 }
 
+/// A single column declaration in a [`TableNode`] (a `column` child).
+///
+/// `width` absent means an AUTO column: in this unit auto columns share the
+/// leftover table width equally (content-based auto-sizing is a later unit).
+#[derive(Debug, Clone, PartialEq)]
+pub struct TableColumn {
+    /// Explicit column width; `None` = auto (equal share of leftover width).
+    pub width: Option<Dimension>,
+    /// Source declaration span, when available.
+    pub source_span: Option<Span>,
+}
+
+/// A single cell in a [`TableRow`] (a `cell` child).
+///
+/// A cell holds ordinary child nodes (text/rect/image/…) — the same node model
+/// used by `frame`/`group` children — and may span multiple columns/rows via
+/// `colspan`/`rowspan` (HTML-table cell flow).
+#[derive(Debug, Clone, PartialEq)]
+pub struct TableCell {
+    /// Number of columns this cell spans (default 1).
+    pub colspan: u32,
+    /// Number of rows this cell spans (default 1).
+    pub rowspan: u32,
+    /// Cell content — ordinary nodes in source order.
+    pub children: Vec<Node>,
+    /// Per-cell background fill override (token-required color).
+    pub fill: Option<PropertyValue>,
+    /// Per-cell border color override (token-required color).
+    pub border: Option<PropertyValue>,
+    /// Per-cell border width override (token/dimension).
+    pub border_width: Option<PropertyValue>,
+    /// Per-cell horizontal alignment override (`start`/`center`/`end`).
+    pub h_align: Option<String>,
+    /// Per-cell vertical alignment override (`top`/`middle`/`bottom`).
+    pub v_align: Option<String>,
+    /// Source declaration span, when available.
+    pub source_span: Option<Span>,
+}
+
+/// A single row in a [`TableNode`] (a `row` child), holding cells left→right.
+#[derive(Debug, Clone, PartialEq)]
+pub struct TableRow {
+    /// Cells in source order (left→right).
+    pub cells: Vec<TableCell>,
+    /// Source declaration span, when available.
+    pub source_span: Option<Span>,
+}
+
+/// A `table` node — a grid container of `column`/`row`/`cell` children.
+///
+/// This unit renders single-page tables with EXPLICIT/PROPORTIONAL column
+/// widths and SEPARATE borders only. Content-based auto-sizing, border-collapse
+/// mode, header-row styling, and multi-page flow are LATER units; their AST
+/// fields are carried here so the schema stays stable.
+#[derive(Debug, Clone, PartialEq)]
+pub struct TableNode {
+    pub id: String,
+    pub name: Option<String>,
+    pub role: Option<String>,
+    /// Required: table box left edge in page coordinates.
+    pub x: Option<Dimension>,
+    /// Required: table box top edge in page coordinates.
+    pub y: Option<Dimension>,
+    /// Required: table box width.
+    pub w: Option<Dimension>,
+    /// Required: table box height.
+    pub h: Option<Dimension>,
+    /// Column declarations, order = left→right.
+    pub columns: Vec<TableColumn>,
+    /// Row declarations, order = top→bottom.
+    pub rows: Vec<TableRow>,
+    /// First N rows are headers (styling + repeat in later units).
+    pub header_rows: Option<u32>,
+    /// Uniform gutter between cells in px (token or literal).
+    pub gap: Option<PropertyValue>,
+    /// Inset inside each cell in px (token or literal).
+    pub cell_padding: Option<PropertyValue>,
+    /// Border model: `"separate"` (default) or `"collapse"`. Only `"separate"`
+    /// is rendered in this unit.
+    pub border_collapse: Option<String>,
+    /// Default cell background (token-required color).
+    pub fill: Option<PropertyValue>,
+    /// Default cell border color (token-required color).
+    pub border: Option<PropertyValue>,
+    /// Default border width (token/dimension).
+    pub border_width: Option<PropertyValue>,
+    /// Header-row background override (carried; applied in a later unit).
+    pub header_fill: Option<PropertyValue>,
+    /// Header text style ref (carried; applied in a later unit).
+    pub header_style: Option<String>,
+    /// Default horizontal alignment (`start`(default)/`center`/`end`).
+    pub h_align: Option<String>,
+    /// Default vertical alignment (`top`(default)/`middle`/`bottom`).
+    pub v_align: Option<String>,
+    pub style: Option<String>,
+    pub opacity: Option<f64>,
+    pub visible: Option<bool>,
+    pub locked: Option<bool>,
+    /// Rotation — parsed and preserved but DEFERRED at render, consistent with
+    /// the universal rotate deferral on all node types.
+    pub rotate: Option<Dimension>,
+    /// Source declaration span, when available.
+    pub source_span: Option<Span>,
+    /// Unknown properties preserved for forward-compat.
+    pub unknown_props: BTreeMap<String, UnknownProperty>,
+}
+
 /// A renderable content node within a page.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Node {
@@ -915,5 +1022,9 @@ pub enum Node {
     /// A compile-time table-of-contents placeholder; resolved to a
     /// tab-leader text block by the scene compiler.
     Toc(TocNode),
+    // Boxed: `TableNode` is large (many optional visual fields + nested
+    // columns/rows/cells). Boxing keeps `Node` compact for the
+    // `large_enum_variant` lint, mirroring `Rect`/`Text`.
+    Table(Box<TableNode>),
     Unknown(UnknownNode),
 }

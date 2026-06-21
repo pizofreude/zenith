@@ -132,6 +132,13 @@ fn collect_chains<'a>(
             }
             Node::Frame(f) => collect_chains(&f.children, members, source),
             Node::Group(g) => collect_chains(&g.children, members, source),
+            Node::Table(t) => {
+                for row in &t.rows {
+                    for cell in &row.cells {
+                        collect_chains(&cell.children, members, source);
+                    }
+                }
+            }
             _ => {}
         }
     }

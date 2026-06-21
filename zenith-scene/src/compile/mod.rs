@@ -23,6 +23,7 @@ mod footnote;
 mod image;
 mod leaf;
 mod paint;
+mod table;
 mod text;
 mod toc;
 mod util;
@@ -46,6 +47,7 @@ use field::{
 use image::compile_image;
 use leaf::{compile_ellipse, compile_line, compile_polygon, compile_polyline, compile_rect};
 use paint::{resolve_property_color, resolve_property_gradient};
+use table::compile_table;
 use text::{compile_code, compile_text};
 use toc::resolve_toc_to_text;
 
@@ -557,6 +559,7 @@ pub(super) fn node_role(node: &Node) -> Option<&str> {
         Node::Field(n) => n.role.as_deref(),
         Node::Toc(n) => n.role.as_deref(),
         Node::Footnote(n) => n.role.as_deref(),
+        Node::Table(n) => n.role.as_deref(),
         Node::Unknown(_) => None,
     }
 }
@@ -733,6 +736,22 @@ pub(super) fn compile_node(
             diagnostics,
             ctx,
         ),
+        Node::Table(table) => {
+            compile_table(
+                table,
+                resolved,
+                style_map,
+                components,
+                fonts,
+                engine,
+                commands,
+                diagnostics,
+                chains,
+                field_ctx,
+                ctx,
+            );
+            0.0
+        }
         Node::Footnote(_) => {
             // Footnotes are NON-flowing page furniture: they carry no x/y/w/h
             // and are NOT rendered in the normal z-order dispatch. The page-level

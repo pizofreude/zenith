@@ -5049,3 +5049,160 @@ fn toc_with_no_selector_warns() {
         codes(&report)
     );
 }
+
+// ── Table validation ──────────────────────────────────────────────────
+
+use crate::ast::node::{TableCell, TableColumn, TableNode, TableRow};
+
+/// Build a table cell holding a single text child.
+fn cell_with_text(id: &str, colspan: u32) -> TableCell {
+    TableCell {
+        colspan,
+        rowspan: 1,
+        children: vec![minimal_text(id, None)],
+        fill: None,
+        border: None,
+        border_width: None,
+        h_align: None,
+        v_align: None,
+        source_span: None,
+    }
+}
+
+/// Build a 2-column / 2-row table with full geometry and the given overrides.
+fn table_node(
+    id: &str,
+    geometry: bool,
+    h_align: Option<String>,
+    rows: Vec<TableRow>,
+    columns: Vec<TableColumn>,
+) -> Node {
+    Node::Table(Box::new(TableNode {
+        id: id.to_owned(),
+        name: None,
+        role: None,
+        x: if geometry { Some(px(40.0)) } else { None },
+        y: if geometry { Some(px(40.0)) } else { None },
+        w: if geometry { Some(px(400.0)) } else { None },
+        h: if geometry { Some(px(200.0)) } else { None },
+        columns,
+        rows,
+        header_rows: None,
+        gap: None,
+        cell_padding: None,
+        border_collapse: None,
+        fill: None,
+        border: None,
+        border_width: None,
+        header_fill: None,
+        header_style: None,
+        h_align,
+        v_align: None,
+        style: None,
+        opacity: None,
+        visible: None,
+        locked: None,
+        rotate: None,
+        source_span: None,
+        unknown_props: BTreeMap::new(),
+    }))
+}
+
+fn two_cols() -> Vec<TableColumn> {
+    vec![
+        TableColumn {
+            width: Some(px(160.0)),
+            source_span: None,
+        },
+        TableColumn {
+            width: None,
+            source_span: None,
+        },
+    ]
+}
+
+#[test]
+fn table_missing_geometry_errors() {
+    let rows = vec![TableRow {
+        cells: vec![cell_with_text("t.c1", 1), cell_with_text("t.c2", 1)],
+        source_span: None,
+    }];
+    let table = table_node("t.geom", false, None, rows, two_cols());
+    let doc = doc_with(vec![], vec![minimal_page("p1", vec![table])]);
+    let report = validate(&doc);
+    assert!(
+        has_code(&report, "node.missing_geometry"),
+        "table without x/y/w/h must error node.missing_geometry; got {:?}",
+        codes(&report)
+    );
+}
+
+#[test]
+fn table_colspan_overflow_errors() {
+    // Single column, but a cell declares colspan=2 → overflow.
+    let rows = vec![TableRow {
+        cells: vec![cell_with_text("t.c1", 2)],
+        source_span: None,
+    }];
+    let columns = vec![TableColumn {
+        width: Some(px(160.0)),
+        source_span: None,
+    }];
+    let table = table_node("t.overflow", true, None, rows, columns);
+    let doc = doc_with(vec![], vec![minimal_page("p1", vec![table])]);
+    let report = validate(&doc);
+    assert!(
+        has_code(&report, "table.cell_overflow"),
+        "colspan exceeding column count must error table.cell_overflow; got {:?}",
+        codes(&report)
+    );
+}
+
+#[test]
+fn table_bad_h_align_warns() {
+    let rows = vec![TableRow {
+        cells: vec![cell_with_text("t.c1", 1), cell_with_text("t.c2", 1)],
+        source_span: None,
+    }];
+    let table = table_node(
+        "t.align",
+        true,
+        Some("middle".to_owned()), // invalid for h-align
+        rows,
+        two_cols(),
+    );
+    let doc = doc_with(vec![], vec![minimal_page("p1", vec![table])]);
+    let report = validate(&doc);
+    assert!(
+        has_code(&report, "table.invalid_h_align"),
+        "bad h-align must warn table.invalid_h_align; got {:?}",
+        codes(&report)
+    );
+}
+
+#[test]
+fn table_well_formed_is_clean() {
+    let rows = vec![
+        TableRow {
+            cells: vec![cell_with_text("t.c11", 1), cell_with_text("t.c12", 1)],
+            source_span: None,
+        },
+        TableRow {
+            cells: vec![cell_with_text("t.c21", 1), cell_with_text("t.c22", 1)],
+            source_span: None,
+        },
+    ];
+    let table = table_node("t.ok", true, Some("center".to_owned()), rows, two_cols());
+    let doc = doc_with(vec![], vec![minimal_page("p1", vec![table])]);
+    let report = validate(&doc);
+    assert!(
+        !report.has_errors(),
+        "well-formed table must have no errors; got {:?}",
+        codes(&report)
+    );
+    assert!(
+        !has_code(&report, "table.cell_overflow") && !has_code(&report, "table.invalid_h_align"),
+        "well-formed table must not emit table.* warnings; got {:?}",
+        codes(&report)
+    );
+}
