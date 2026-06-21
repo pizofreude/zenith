@@ -1,5 +1,5 @@
 //! Table-node compilation: single-page tables with EXPLICIT and CONTENT-BASED
-//! column widths, CONTENT-BASED row heights, and SEPARATE borders only.
+//! column widths, CONTENT-BASED row heights, and SEPARATE or COLLAPSE borders.
 //!
 //! This unit lays a `table` out as a grid of cells inside its declared
 //! `[x, y, w, h]` box, honoring `colspan`/`rowspan` (HTML-table cell flow).
@@ -7,20 +7,23 @@
 //! measured natural content; rows size to their tallest cell's wrapped content
 //! height at the assigned column width. Both passes reuse the production
 //! text-shaping pipeline (`shape_words`/`pack_lines`) via the measurer helpers
-//! in [`super::text`]. `border-collapse` is carried but only `"separate"`
-//! borders are drawn here.
+//! in [`super::text`]. `border-collapse="separate"` (the default) draws each
+//! cell's four edges independently. `border-collapse="collapse"` deduplicates
+//! shared edges so adjacent cells never double-draw their shared border.
 //!
 //! Each cell emits, in order: an optional background `FillRect` (cell.fill or
-//! table.fill), then an optional border drawn as four independent `StrokeLine`s
-//! (cell or table defaults), then its compiled child content clipped to and
-//! translated into the cell content box (cell padding inset), with the cell's
-//! `h-align`/`v-align` (overriding the table default) shifting the child within
-//! the content box. Opacity cascades (table.opacity × ctx.opacity).
+//! table.fill), then an optional border (four independent `StrokeLine`s in
+//! separate mode; accumulated and deduplicated in collapse mode), then its
+//! compiled child content clipped to and translated into the cell content box
+//! (cell padding inset), with the cell's `h-align`/`v-align` (overriding the
+//! table default) shifting the child within the content box. Opacity cascades
+//! (table.opacity × ctx.opacity).
 
 use std::collections::{BTreeMap, BTreeSet};
 
 use zenith_core::{
-    Diagnostic, FontProvider, Node, PropertyValue, ResolvedToken, Style, TableNode, dim_to_px,
+    Diagnostic, FontProvider, Node, PropertyValue, ResolvedToken, ResolvedValue, Style, TableNode,
+    dim_to_px,
 };
 use zenith_layout::RustybuzzEngine;
 
@@ -38,6 +41,125 @@ use super::{ComponentMap, RenderCtx, compile_node};
 /// Lower bound (px) a shrunk AUTO column is clamped to, so proportional shrink
 /// to fit never collapses a column to zero width (which would hide its border).
 const MIN_AUTO_COL_W: f64 = 2.0;
+
+// ── Collapse-mode edge deduplication ────────────────────────────────────────
+
+/// Sub-pixel quantization grid used for edge-key comparison: 0.01 px resolution.
+/// Two endpoints that differ by less than 0.01 px map to the same integer bucket,
+/// preventing floating-point jitter from creating spurious duplicate edges.
+const QUANTIZE: f64 = 100.0;
+
+/// Quantize a coordinate to an integer on the 0.01 px grid.
+///
+/// The `as i64` cast is a Rust 1.45+ saturating cast: `f64::NAN` maps to `0`,
+/// `f64::INFINITY` to `i64::MAX`, and `f64::NEG_INFINITY` to `i64::MIN`.
+/// Wild coordinates (NaN/inf) therefore land on a degenerate but safe key;
+/// they cannot appear in normal layout output since `dim_to_px` only produces
+/// finite values and the geometry guards above reject non-finite table bounds.
+#[inline]
+fn quantize(v: f64) -> i64 {
+    (v * QUANTIZE).round() as i64
+}
+
+/// A canonical, float-safe key for one border segment in collapse mode.
+///
+/// Endpoints are quantized to a 0.01 px integer grid and stored in canonical
+/// order (`(min, max)` by (ax, ay) first then (bx, by)) so the same physical
+/// edge contributed by two adjacent cells maps to a single key.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+struct EdgeKey {
+    ax: i64,
+    ay: i64,
+    bx: i64,
+    by: i64,
+}
+
+impl EdgeKey {
+    /// Build a canonical `EdgeKey` from two (possibly unordered) endpoints.
+    /// The pair `(ax,ay)` is always the lesser endpoint so the key is symmetric.
+    fn new(x1: f64, y1: f64, x2: f64, y2: f64) -> Self {
+        let (qx1, qy1, qx2, qy2) = (quantize(x1), quantize(y1), quantize(x2), quantize(y2));
+        // Canonical order: lexicographic by (ax, ay) ≤ (bx, by).
+        if (qx1, qy1) <= (qx2, qy2) {
+            EdgeKey {
+                ax: qx1,
+                ay: qy1,
+                bx: qx2,
+                by: qy2,
+            }
+        } else {
+            EdgeKey {
+                ax: qx2,
+                ay: qy2,
+                bx: qx1,
+                by: qy1,
+            }
+        }
+    }
+}
+
+/// The resolved style for one border segment in collapse mode.
+///
+/// We store the original f64 endpoints alongside the resolved color and width
+/// so we can emit the `StrokeLine` with exact coordinates (no rounding drift).
+struct EdgeStyle {
+    x1: f64,
+    y1: f64,
+    x2: f64,
+    y2: f64,
+    color: crate::ir::Color,
+    stroke_width: f64,
+    /// Whether this edge was contributed by a cell with an OWN explicit `border`
+    /// property (not inherited from the table). Used for tie-breaking: explicit
+    /// wins over inherited; if both are the same kind the later-in-placed-order
+    /// writer wins (last-writer rule, BTreeMap insert overwrites).
+    is_explicit: bool,
+}
+
+/// Try to insert `candidate` for `key` into the accumulator, applying the
+/// collapse tie-break rule:
+///
+/// 1. A cell with its OWN explicit `border`/`border_width` wins over a cell
+///    that inherited those values from the table default.
+/// 2. If both are explicit OR both are inherited, the later-in-placed-order
+///    cell wins (last-writer: simply overwrite the existing entry).
+fn try_insert_edge(acc: &mut BTreeMap<EdgeKey, EdgeStyle>, key: EdgeKey, candidate: EdgeStyle) {
+    // Determine whether to overwrite without holding a simultaneous immutable
+    // borrow on `acc` (which would conflict with the mutable borrow needed for
+    // `insert`). We read the `is_explicit` flag we need, then drop the borrow.
+    let should_insert = match acc.get(&key) {
+        None => true,
+        Some(existing) => {
+            // Explicit beats inherited; equal explicitness → last writer wins.
+            candidate.is_explicit || !existing.is_explicit
+        }
+    };
+    if should_insert {
+        acc.insert(key, candidate);
+    }
+}
+
+/// Resolve a `border-width` property to pixels without requiring an owned
+/// `Option<PropertyValue>`. Mirrors the logic in [`resolve_property_dimension_px`]
+/// but accepts an `Option<&PropertyValue>` so callers can use `as_ref().or()`
+/// to pick cell-over-table without cloning.
+fn resolve_border_width(
+    prop: Option<&PropertyValue>,
+    resolved: &BTreeMap<String, ResolvedToken>,
+    default: f64,
+) -> f64 {
+    match prop {
+        Some(PropertyValue::TokenRef(token_id)) => match resolved.get(token_id.as_str()) {
+            Some(rt) => match &rt.value {
+                ResolvedValue::Dimension(dim) => dim_to_px(dim.value, &dim.unit).unwrap_or(default),
+                _ => default,
+            },
+            None => default,
+        },
+        Some(PropertyValue::Dimension(dim)) => dim_to_px(dim.value, &dim.unit).unwrap_or(default),
+        _ => default,
+    }
+}
 
 /// One placed cell after the HTML-table occupancy walk: its top-left grid
 /// position plus resolved column/row spans. Shared by the width, height, and
@@ -332,6 +454,16 @@ pub(super) fn compile_table(
     }
 
     // ── Cell emission (reusing the shared placement walk) ────────────────
+    // When border-collapse="collapse" we accumulate all border edges into a
+    // BTreeMap (deterministic, float-safe key) and emit them in a single pass
+    // after the cell loop. Any other value (including None/"separate"/unknown)
+    // uses the default per-cell four-StrokeLine emission unchanged.
+    let collapse_mode = matches!(table.border_collapse.as_deref(), Some("collapse"));
+
+    // Accumulator for collapse mode: EdgeKey → EdgeStyle.
+    // Populated during the cell loop below; empty (and unused) in separate mode.
+    let mut edge_acc: BTreeMap<EdgeKey, EdgeStyle> = BTreeMap::new();
+
     for pc in &placed {
         // Cell rect: from column `pc.col` left to the right edge of the last
         // spanned column (including interior gaps); similarly for rows.
@@ -356,23 +488,70 @@ pub(super) fn compile_table(
             h: span_h.max(0.0),
         };
 
-        emit_cell(
-            table,
-            pc.cell,
-            &rect,
-            pad,
-            opacity,
-            resolved,
-            style_map,
-            components,
-            fonts,
-            engine,
-            commands,
-            diagnostics,
-            chains,
-            field_ctx,
-            ctx,
-        );
+        if collapse_mode {
+            // Accumulate this cell's four edges into the dedup map; fill and
+            // content are still emitted immediately via emit_cell_no_border.
+            emit_cell_no_border(
+                table,
+                pc.cell,
+                &rect,
+                pad,
+                opacity,
+                resolved,
+                style_map,
+                components,
+                fonts,
+                engine,
+                commands,
+                diagnostics,
+                chains,
+                field_ctx,
+                ctx,
+            );
+            accumulate_cell_edges(
+                table,
+                pc.cell,
+                &rect,
+                opacity,
+                resolved,
+                diagnostics,
+                &mut edge_acc,
+            );
+        } else {
+            emit_cell(
+                table,
+                pc.cell,
+                &rect,
+                pad,
+                opacity,
+                resolved,
+                style_map,
+                components,
+                fonts,
+                engine,
+                commands,
+                diagnostics,
+                chains,
+                field_ctx,
+                ctx,
+            );
+        }
+    }
+
+    // Collapse mode: emit every unique edge exactly once, in BTreeMap order
+    // (deterministic: sorted by quantized endpoint coordinates).
+    for edge in edge_acc.values() {
+        commands.push(SceneCommand::StrokeLine {
+            x1: edge.x1,
+            y1: edge.y1,
+            x2: edge.x2,
+            y2: edge.y2,
+            color: edge.color,
+            stroke_width: edge.stroke_width,
+            stroke_dash: None,
+            stroke_gap: None,
+            stroke_linecap: None,
+        });
     }
 }
 
@@ -459,6 +638,166 @@ fn cached_families<'c>(
         .or_insert_with(|| resolve_text_families(text, resolved, style_map, fonts, diagnostics))
 }
 
+/// Emit one cell in collapse mode: background fill and clipped content only
+/// (border edges are accumulated separately by [`accumulate_cell_edges`]).
+#[allow(clippy::too_many_arguments)]
+fn emit_cell_no_border(
+    table: &TableNode,
+    cell: &zenith_core::TableCell,
+    rect: &CellRect,
+    pad: f64,
+    opacity: f64,
+    resolved: &BTreeMap<String, ResolvedToken>,
+    style_map: &BTreeMap<&str, &Style>,
+    components: &ComponentMap,
+    fonts: &dyn FontProvider,
+    engine: &RustybuzzEngine,
+    commands: &mut Vec<SceneCommand>,
+    diagnostics: &mut Vec<Diagnostic>,
+    chains: &ChainAssignments,
+    field_ctx: &FieldCtx,
+    ctx: RenderCtx,
+) {
+    // ── Background fill: cell.fill else table.fill ────────────────────────
+    let fill_prop: Option<&PropertyValue> = cell.fill.as_ref().or(table.fill.as_ref());
+    if let Some(prop) = fill_prop
+        && let Some(mut color) = resolve_property_color(prop, resolved, diagnostics, &table.id)
+    {
+        color.a = (color.a as f64 * opacity).round() as u8;
+        commands.push(SceneCommand::FillRect {
+            x: rect.x,
+            y: rect.y,
+            w: rect.w,
+            h: rect.h,
+            color,
+        });
+    }
+
+    // ── Content box (cell padding inset) ─────────────────────────────────
+    let content_x = rect.x + pad;
+    let content_y = rect.y + pad;
+    let content_w = (rect.w - 2.0 * pad).max(0.0);
+    let content_h = (rect.h - 2.0 * pad).max(0.0);
+
+    let h_align = cell
+        .h_align
+        .as_deref()
+        .or(table.h_align.as_deref())
+        .unwrap_or("start");
+    let v_align = cell
+        .v_align
+        .as_deref()
+        .or(table.v_align.as_deref())
+        .unwrap_or("top");
+
+    commands.push(SceneCommand::PushClip {
+        x: content_x,
+        y: content_y,
+        w: content_w,
+        h: content_h,
+    });
+
+    for child in &cell.children {
+        let (cw, ch) = child_declared_box(child);
+        let dx_align = match h_align {
+            "center" => ((content_w - cw.unwrap_or(content_w)) / 2.0).max(0.0),
+            "end" => (content_w - cw.unwrap_or(content_w)).max(0.0),
+            _ => 0.0,
+        };
+        let dy_align = match v_align {
+            "middle" => ((content_h - ch.unwrap_or(content_h)) / 2.0).max(0.0),
+            "bottom" => (content_h - ch.unwrap_or(content_h)).max(0.0),
+            _ => 0.0,
+        };
+        let child_ctx = RenderCtx {
+            opacity,
+            dx: content_x + dx_align,
+            dy: content_y + dy_align,
+            baseline_grid: ctx.baseline_grid,
+        };
+        let _ = compile_node(
+            child,
+            resolved,
+            style_map,
+            components,
+            fonts,
+            engine,
+            commands,
+            diagnostics,
+            chains,
+            field_ctx,
+            child_ctx,
+        );
+    }
+
+    commands.push(SceneCommand::PopClip);
+}
+
+/// Accumulate the four border edges of one cell into the collapse-mode dedup map.
+///
+/// Tie-break rule (documented here as the authoritative source):
+///   1. A cell with its OWN explicit `border`/`border_width` property (i.e. the
+///      `TableCell.border` field is `Some`) wins over a cell that inherited those
+///      values from the table-level defaults.
+///   2. If both contributing cells are equally explicit or equally inherited,
+///      the later-in-placed-order cell wins (last writer overwrites).
+///
+/// Only inserts edges when the resolved border color is `Some` AND the resolved
+/// width is > 0 (same guard as the separate-mode path).
+fn accumulate_cell_edges(
+    table: &TableNode,
+    cell: &zenith_core::TableCell,
+    rect: &CellRect,
+    opacity: f64,
+    resolved: &BTreeMap<String, ResolvedToken>,
+    diagnostics: &mut Vec<Diagnostic>,
+    acc: &mut BTreeMap<EdgeKey, EdgeStyle>,
+) {
+    let border_prop: Option<&PropertyValue> = cell.border.as_ref().or(table.border.as_ref());
+    let Some(prop) = border_prop else { return };
+    let Some(mut color) = resolve_property_color(prop, resolved, diagnostics, &table.id) else {
+        return;
+    };
+    color.a = (color.a as f64 * opacity).round() as u8;
+
+    let bw = resolve_border_width(
+        cell.border_width.as_ref().or(table.border_width.as_ref()),
+        resolved,
+        1.0,
+    )
+    .max(0.0);
+    if bw <= 0.0 {
+        return;
+    }
+
+    // Whether this cell contributes an OWN explicit border (not table fallback).
+    let is_explicit = cell.border.is_some();
+
+    let x0 = rect.x;
+    let y0 = rect.y;
+    let x1 = rect.x + rect.w;
+    let y1 = rect.y + rect.h;
+
+    for (ex1, ey1, ex2, ey2) in [
+        (x0, y0, x1, y0), // top
+        (x0, y1, x1, y1), // bottom
+        (x0, y0, x0, y1), // left
+        (x1, y0, x1, y1), // right
+    ] {
+        let key = EdgeKey::new(ex1, ey1, ex2, ey2);
+        let candidate = EdgeStyle {
+            x1: ex1,
+            y1: ey1,
+            x2: ex2,
+            y2: ey2,
+            color,
+            stroke_width: bw,
+            is_explicit,
+        };
+        try_insert_edge(acc, key, candidate);
+    }
+}
+
 /// Emit one cell: background fill, separate border, and clipped/aligned content.
 #[allow(clippy::too_many_arguments)]
 fn emit_cell(
@@ -500,11 +839,12 @@ fn emit_cell(
     {
         color.a = (color.a as f64 * opacity).round() as u8;
         // Width: cell.border-width else table.border-width else 1px.
-        let bw_prop = cell
-            .border_width
-            .clone()
-            .or_else(|| table.border_width.clone());
-        let bw = resolve_property_dimension_px(&bw_prop, resolved, 1.0).max(0.0);
+        let bw = resolve_border_width(
+            cell.border_width.as_ref().or(table.border_width.as_ref()),
+            resolved,
+            1.0,
+        )
+        .max(0.0);
         if bw > 0.0 {
             let x0 = rect.x;
             let y0 = rect.y;
