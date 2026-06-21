@@ -37,6 +37,7 @@ fn write_token(token: &Token, out: &mut String, depth: usize) {
         TokenType::Gradient => "gradient",
         TokenType::Shadow => "shadow",
         TokenType::Filter => "filter",
+        TokenType::Mask => "mask",
         TokenType::Unknown(s) => s.as_str(),
     };
     out.push_str(" type=\"");
@@ -134,6 +135,29 @@ fn write_token(token: &Token, out: &mut String, depth: usize) {
         return;
     }
 
+    // Mask tokens have no scalar `value=`; they emit a brace block with a single
+    // shape child line. Handle and return before the value path.
+    if let TokenValue::Literal(TokenLiteral::Mask(m)) = &token.value {
+        out.push_str(" {\n");
+        indent(out, depth + 1);
+        out.push_str(m.shape.as_shape_name());
+        if let Some(radius) = m.radius {
+            out.push_str(" radius=");
+            out.push_str(&fmt_f64(radius));
+        }
+        if m.feather != 0.0 {
+            out.push_str(" feather=");
+            out.push_str(&fmt_f64(m.feather));
+        }
+        if m.invert {
+            out.push_str(" invert=#true");
+        }
+        out.push('\n');
+        indent(out, depth);
+        out.push_str("}\n");
+        return;
+    }
+
     // value
     out.push_str(" value=");
     match &token.value {
@@ -155,6 +179,7 @@ fn write_token(token: &Token, out: &mut String, depth: usize) {
             TokenLiteral::Gradient(_) => {}
             TokenLiteral::Shadow(_) => {}
             TokenLiteral::Filter(_) => {}
+            TokenLiteral::Mask(_) => {}
         },
         TokenValue::Reference { token_id } => {
             out.push_str("(token)\"");

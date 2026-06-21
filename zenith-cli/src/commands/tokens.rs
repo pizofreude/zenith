@@ -63,6 +63,7 @@ fn token_type_str(tt: &zenith_core::TokenType) -> &'static str {
         zenith_core::TokenType::Gradient => "gradient",
         zenith_core::TokenType::Shadow => "shadow",
         zenith_core::TokenType::Filter => "filter",
+        zenith_core::TokenType::Mask => "mask",
         zenith_core::TokenType::Unknown(_) => "unknown",
     }
 }
@@ -119,6 +120,14 @@ fn resolved_value_str(rv: &ResolvedValue) -> String {
                 })
                 .collect();
             format!("filter({})", ops.join(", "))
+        }
+        ResolvedValue::Mask(m) => {
+            format!(
+                "mask({}, feather={}, invert={})",
+                m.shape.as_shape_name(),
+                m.feather,
+                m.invert
+            )
         }
     }
 }

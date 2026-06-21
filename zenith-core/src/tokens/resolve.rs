@@ -18,8 +18,8 @@
 use std::collections::{BTreeMap, HashMap, HashSet};
 
 use crate::ast::token::{
-    FilterKind, FilterLiteral, GradientKind, GradientLiteral, ShadowLiteral, Token, TokenBlock,
-    TokenLiteral, TokenType, TokenValue,
+    FilterKind, FilterLiteral, GradientKind, GradientLiteral, MaskLiteral, MaskShape,
+    ShadowLiteral, Token, TokenBlock, TokenLiteral, TokenType, TokenValue,
 };
 use crate::ast::value::{Dimension, Unit};
 use crate::diagnostics::Diagnostic;
@@ -49,6 +49,7 @@ pub enum ResolvedValue {
     Gradient(ResolvedGradient),
     Shadow(ResolvedShadow),
     Filter(ResolvedFilter),
+    Mask(ResolvedMask),
 }
 
 impl ResolvedValue {
@@ -133,6 +134,16 @@ pub struct ResolvedFilterOp {
     pub amount: Option<f64>,
     pub shadow: Option<String>,
     pub highlight: Option<String>,
+}
+
+/// A resolved mask: a spatial coverage shape plus a feather and invert flag.
+/// Masks carry no token references, so there is no transitive cross-check pass.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ResolvedMask {
+    pub shape: MaskShape,
+    pub radius: Option<f64>,
+    pub feather: f64,
+    pub invert: bool,
 }
 
 /// A successfully resolved token (type + value pair).
@@ -475,6 +486,7 @@ fn validate_literal(
         TokenType::Gradient => validate_gradient(token_id, literal, span, diagnostics),
         TokenType::Shadow => validate_shadow(token_id, literal, span, diagnostics),
         TokenType::Filter => validate_filter(token_id, literal, span, diagnostics),
+        TokenType::Mask => validate_mask(token_id, literal, span, diagnostics),
         TokenType::Unknown(_) => {
             // Already handled upstream; should not reach here.
             None
@@ -955,6 +967,72 @@ fn validate_filter(
     Some(ResolvedValue::Filter(ResolvedFilter { ops: resolved_ops }))
 }
 
+/// Validate a mask literal: feather must be finite and `>= 0`; radius (when
+/// present) must be finite and `>= 0`. Masks carry no token references, so there
+/// is no transitive cross-check pass.
+fn validate_mask(
+    token_id: &str,
+    literal: &TokenLiteral,
+    span: Option<crate::ast::Span>,
+    diagnostics: &mut Vec<Diagnostic>,
+) -> Option<ResolvedValue> {
+    let TokenLiteral::Mask(MaskLiteral {
+        shape,
+        radius,
+        feather,
+        invert,
+    }) = literal
+    else {
+        diagnostics.push(invalid_value(
+            token_id,
+            &format!(
+                "mask token '{}' must be defined by a shape child node, got {}",
+                token_id,
+                literal_kind_name(literal),
+            ),
+            span,
+        ));
+        return None;
+    };
+
+    if !feather.is_finite() || *feather < 0.0 {
+        diagnostics.push(Diagnostic::error(
+            "mask.invalid_feather",
+            format!(
+                "mask token '{}' has an invalid feather {}; \
+                 feather must be a finite number >= 0",
+                token_id, feather,
+            ),
+            span,
+            Some(token_id.to_owned()),
+        ));
+        return None;
+    }
+
+    if let Some(r) = radius
+        && (!r.is_finite() || *r < 0.0)
+    {
+        diagnostics.push(Diagnostic::error(
+            "mask.invalid_radius",
+            format!(
+                "mask token '{}' has an invalid radius {}; \
+                 radius must be a finite number >= 0",
+                token_id, r,
+            ),
+            span,
+            Some(token_id.to_owned()),
+        ));
+        return None;
+    }
+
+    Some(ResolvedValue::Mask(ResolvedMask {
+        shape: *shape,
+        radius: *radius,
+        feather: *feather,
+        invert: *invert,
+    }))
+}
+
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 fn invalid_value(token_id: &str, message: &str, span: Option<crate::ast::Span>) -> Diagnostic {
@@ -974,6 +1052,7 @@ fn literal_kind_name(lit: &TokenLiteral) -> &'static str {
         TokenLiteral::Gradient(_) => "a gradient literal",
         TokenLiteral::Shadow(_) => "a shadow literal",
         TokenLiteral::Filter(_) => "a filter literal",
+        TokenLiteral::Mask(_) => "a mask literal",
     }
 }
 
@@ -987,6 +1066,7 @@ fn type_name_of(t: &TokenType) -> &str {
         TokenType::Gradient => "gradient",
         TokenType::Shadow => "shadow",
         TokenType::Filter => "filter",
+        TokenType::Mask => "mask",
         TokenType::Unknown(s) => s.as_str(),
     }
 }
@@ -2085,5 +2165,87 @@ mod tests {
             codes(&r.diagnostics)
         );
         assert!(!r.resolved.contains_key("filter.duo"));
+    }
+
+    // ── Mask resolution ───────────────────────────────────────────────────
+
+    fn mask_token(
+        id: &str,
+        shape: MaskShape,
+        radius: Option<f64>,
+        feather: f64,
+        invert: bool,
+    ) -> Token {
+        Token {
+            id: id.to_owned(),
+            token_type: TokenType::Mask,
+            value: TokenValue::Literal(TokenLiteral::Mask(MaskLiteral {
+                shape,
+                radius,
+                feather,
+                invert,
+            })),
+            source_span: None,
+        }
+    }
+
+    #[test]
+    fn resolves_mask_literal() {
+        let b = block(vec![mask_token(
+            "mask.vignette",
+            MaskShape::RoundedRect,
+            Some(40.0),
+            60.0,
+            true,
+        )]);
+        let r = resolve_tokens(&b);
+        assert!(
+            r.diagnostics.is_empty(),
+            "unexpected diagnostics: {:?}",
+            r.diagnostics
+        );
+        assert_eq!(
+            r.resolved["mask.vignette"].value,
+            ResolvedValue::Mask(ResolvedMask {
+                shape: MaskShape::RoundedRect,
+                radius: Some(40.0),
+                feather: 60.0,
+                invert: true,
+            })
+        );
+    }
+
+    #[test]
+    fn mask_negative_feather_produces_invalid_feather() {
+        let b = block(vec![mask_token(
+            "mask.bad",
+            MaskShape::Rect,
+            None,
+            -5.0,
+            false,
+        )]);
+        let r = resolve_tokens(&b);
+        assert!(
+            has_code(&r.diagnostics, "mask.invalid_feather"),
+            "codes: {:?}",
+            codes(&r.diagnostics)
+        );
+        assert!(!r.resolved.contains_key("mask.bad"));
+    }
+
+    #[test]
+    fn mask_wrong_literal_type_produces_invalid_value() {
+        let b = block(vec![literal_token(
+            "mask.bad-shape",
+            TokenType::Mask,
+            TokenLiteral::String("rounded".to_owned()),
+        )]);
+        let r = resolve_tokens(&b);
+        assert!(
+            has_code(&r.diagnostics, "token.invalid_value"),
+            "codes: {:?}",
+            codes(&r.diagnostics)
+        );
+        assert!(!r.resolved.contains_key("mask.bad-shape"));
     }
 }

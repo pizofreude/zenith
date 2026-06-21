@@ -7,7 +7,10 @@ use zenith_core::{Diagnostic, ImageNode, ObjectPosition, ResolvedToken, dim_to_p
 use crate::ir::{FitMode, ImageClip, SceneCommand, SrcRect};
 
 use super::RenderCtx;
-use super::paint::{resolve_property_filter, resolve_property_shadow};
+use super::paint::{
+    NodeEffect, emit_node_with_effects, resolve_property_filter, resolve_property_mask,
+    resolve_property_shadow,
+};
 use super::util::{
     blend_mode_ir, resolve_property_dimension_px, rotation_degrees, unsupported_unit_diag,
 };
@@ -147,41 +150,36 @@ pub(super) fn compile_image(
         });
     }
 
-    // BLUR / SHADOW bracket (behind the image ink). Blur wins over shadow.
+    // BLUR / SHADOW / FILTER effect (behind the image ink). Blur > shadow >
+    // filter; at most one is chosen. The winning effect plus the optional mask
+    // bracket the node's DRAWS (the box-clip + DrawImage) via
+    // `emit_node_with_effects` below.
     let blur_sigma = image
         .blur
         .as_ref()
         .and_then(|d| dim_to_px(d.value, &d.unit))
         .filter(|&s| s > 0.0);
-    let has_blur = blur_sigma.is_some();
-    if let Some(sigma) = blur_sigma {
-        commands.push(SceneCommand::BeginBlur { radius: sigma });
-    }
-    let has_shadow = !has_blur
-        && match image
-            .shadow
-            .as_ref()
-            .and_then(|p| resolve_property_shadow(p, resolved, &image.id))
-        {
-            Some(shadows) => {
-                commands.push(SceneCommand::BeginShadow { shadows });
-                true
-            }
-            None => false,
-        };
-    let has_filter = !has_blur
-        && !has_shadow
-        && match image
+    let effect: Option<NodeEffect> = if let Some(sigma) = blur_sigma {
+        Some(NodeEffect::Blur(sigma))
+    } else if let Some(shadows) = image
+        .shadow
+        .as_ref()
+        .and_then(|p| resolve_property_shadow(p, resolved, &image.id))
+    {
+        Some(NodeEffect::Shadow(shadows))
+    } else {
+        image
             .filter
             .as_ref()
             .and_then(|p| resolve_property_filter(p, resolved, &image.id))
-        {
-            Some(filters) => {
-                commands.push(SceneCommand::BeginFilter { filters });
-                true
-            }
-            None => false,
-        };
+            .map(NodeEffect::Filter)
+    };
+
+    // Resolve the optional node mask against the image's page-absolute box.
+    let mask = image
+        .mask
+        .as_ref()
+        .and_then(|p| resolve_property_mask(p, resolved, (x, y, w, h)));
 
     // Resolve the optional source sub-rectangle. All four dimensions must
     // resolve to px; if any present-but-unresolvable unit is encountered, push
@@ -216,32 +214,29 @@ pub(super) fn compile_image(
     };
 
     // Box-clip (G-22): push the box, draw the image, pop. The image is always
-    // clipped to its declared box ∩ enclosing clips.
-    commands.push(SceneCommand::PushClip { x, y, w, h });
-    commands.push(SceneCommand::DrawImage {
-        x,
-        y,
-        w,
-        h,
-        asset_id: image.asset.clone(),
-        fit,
-        pos_x,
-        pos_y,
-        opacity,
-        clip_shape,
-        src_rect,
-    });
-    commands.push(SceneCommand::PopClip);
+    // clipped to its declared box ∩ enclosing clips. Collected into a local
+    // buffer so the shared helper can bracket it with the effect and/or mask.
+    let draws: Vec<SceneCommand> = vec![
+        SceneCommand::PushClip { x, y, w, h },
+        SceneCommand::DrawImage {
+            x,
+            y,
+            w,
+            h,
+            asset_id: image.asset.clone(),
+            fit,
+            pos_x,
+            pos_y,
+            opacity,
+            clip_shape,
+            src_rect,
+        },
+        SceneCommand::PopClip,
+    ];
 
-    if has_shadow {
-        commands.push(SceneCommand::EndShadow);
-    }
-    if has_blur {
-        commands.push(SceneCommand::EndBlur);
-    }
-    if has_filter {
-        commands.push(SceneCommand::EndFilter);
-    }
+    // Emit the draws into `commands`, bracketed by the winning effect and/or
+    // mask. No effect + no mask → draws appended verbatim (byte-identical).
+    emit_node_with_effects(commands, draws, effect, mask);
 
     if blend.is_some() {
         commands.push(SceneCommand::PopLayer);

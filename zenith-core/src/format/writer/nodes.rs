@@ -467,6 +467,7 @@ fn write_rect(r: &RectNode, out: &mut String, depth: usize) {
     write_opt_property_value(out, "stroke-outer-width", &r.stroke_outer_width);
     write_opt_property_value(out, "shadow", &r.shadow);
     write_opt_property_value(out, "filter", &r.filter);
+    write_opt_property_value(out, "mask", &r.mask);
     write_opt_str(out, "blend-mode", &r.blend_mode);
     write_opt_dimension(out, "blur", &r.blur);
     write_opt_f64(out, "opacity", &r.opacity);
@@ -517,6 +518,7 @@ fn write_image(i: &ImageNode, out: &mut String, depth: usize) {
     write_opt_object_position(out, "object-position-y", &i.object_position_y);
     write_opt_property_value(out, "shadow", &i.shadow);
     write_opt_property_value(out, "filter", &i.filter);
+    write_opt_property_value(out, "mask", &i.mask);
     write_opt_str(out, "blend-mode", &i.blend_mode);
     write_opt_dimension(out, "blur", &i.blur);
     write_opt_f64(out, "opacity", &i.opacity);
@@ -562,6 +564,7 @@ fn write_ellipse(e: &EllipseNode, out: &mut String, depth: usize) {
     write_opt_str(out, "stroke-linecap", &e.stroke_linecap);
     write_opt_property_value(out, "shadow", &e.shadow);
     write_opt_property_value(out, "filter", &e.filter);
+    write_opt_property_value(out, "mask", &e.mask);
     write_opt_str(out, "blend-mode", &e.blend_mode);
     write_opt_dimension(out, "blur", &e.blur);
     write_opt_f64(out, "opacity", &e.opacity);
@@ -768,6 +771,7 @@ fn write_text(t: &TextNode, out: &mut String, depth: usize) {
     write_opt_property_value(out, "font-weight", &t.font_weight);
     write_opt_property_value(out, "shadow", &t.shadow);
     write_opt_property_value(out, "filter", &t.filter);
+    write_opt_property_value(out, "mask", &t.mask);
     write_opt_str(out, "blend-mode", &t.blend_mode);
     write_opt_dimension(out, "blur", &t.blur);
     write_opt_f64(out, "opacity", &t.opacity);

@@ -359,6 +359,15 @@ pub(super) fn walk_node(
                 resolved_tokens,
                 diagnostics,
             );
+            check_visual_prop(
+                &r.id,
+                "mask",
+                r.mask.as_ref(),
+                VisualExpect::Mask,
+                referenced_token_ids,
+                resolved_tokens,
+                diagnostics,
+            );
             if let Some(d) = r.blur.as_ref()
                 && d.value < 0.0
             {
@@ -557,6 +566,15 @@ pub(super) fn walk_node(
                 "filter",
                 e.filter.as_ref(),
                 VisualExpect::Filter,
+                referenced_token_ids,
+                resolved_tokens,
+                diagnostics,
+            );
+            check_visual_prop(
+                &e.id,
+                "mask",
+                e.mask.as_ref(),
+                VisualExpect::Mask,
                 referenced_token_ids,
                 resolved_tokens,
                 diagnostics,
@@ -835,6 +853,15 @@ pub(super) fn walk_node(
                 "filter",
                 t.filter.as_ref(),
                 VisualExpect::Filter,
+                referenced_token_ids,
+                resolved_tokens,
+                diagnostics,
+            );
+            check_visual_prop(
+                &t.id,
+                "mask",
+                t.mask.as_ref(),
+                VisualExpect::Mask,
                 referenced_token_ids,
                 resolved_tokens,
                 diagnostics,
@@ -1412,6 +1439,15 @@ pub(super) fn walk_node(
                 "filter",
                 img.filter.as_ref(),
                 VisualExpect::Filter,
+                referenced_token_ids,
+                resolved_tokens,
+                diagnostics,
+            );
+            check_visual_prop(
+                &img.id,
+                "mask",
+                img.mask.as_ref(),
+                VisualExpect::Mask,
                 referenced_token_ids,
                 resolved_tokens,
                 diagnostics,

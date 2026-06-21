@@ -25,7 +25,8 @@ use crate::ast::{
     style::{Style, StyleBlock, UnknownStyleProp, canonicalize_style_key},
     token::{
         FilterKind, FilterLiteral, FilterOp, GradientKind, GradientLiteral, GradientStopRef,
-        ShadowLayerRef, ShadowLiteral, Token, TokenBlock, TokenLiteral, TokenType, TokenValue,
+        MaskLiteral, MaskShape, ShadowLayerRef, ShadowLiteral, Token, TokenBlock, TokenLiteral,
+        TokenType, TokenValue,
     },
     value::{Dimension, PropertyValue, Unit},
 };
@@ -808,6 +809,19 @@ fn transform_token(node: &KdlNode) -> Result<Token, ParseError> {
         });
     }
 
+    // Mask tokens carry no scalar `value=`; they are built from a single shape
+    // child node. Prefer this child-node form even if a stray `value=` is present.
+    if token_type == TokenType::Mask {
+        let token_value = transform_mask(node);
+        let source_span = node_span(node);
+        return Ok(Token {
+            id,
+            token_type,
+            value: token_value,
+            source_span,
+        });
+    }
+
     let value_entry = node.entry("value").ok_or_else(|| {
         ParseError::spanless(
             ParseErrorCode::InvalidPropertyValue,
@@ -1034,6 +1048,40 @@ fn transform_filter(node: &KdlNode) -> TokenValue {
     }
 
     TokenValue::Literal(TokenLiteral::Filter(FilterLiteral { ops }))
+}
+
+/// Build a mask `TokenValue` from a `token` node's single shape child. The first
+/// child whose name maps via [`MaskShape::from_shape_name`] picks the shape
+/// (rect/rounded/ellipse); `radius` (optional number), `feather` (optional
+/// number, default 0.0), and `invert` (optional bool, default false) are read
+/// off that child. Infallible: a `mask {}` with no recognized shape child
+/// defaults to a full-box `Rect` cover.
+fn transform_mask(node: &KdlNode) -> TokenValue {
+    let mut shape = MaskShape::Rect;
+    let mut radius: Option<f64> = None;
+    let mut feather = 0.0;
+    let mut invert = false;
+
+    if let Some(children) = node.children() {
+        for child in children.nodes() {
+            // The first child whose name maps to a shape wins; others ignored.
+            let Some(kind) = MaskShape::from_shape_name(child.name().value()) else {
+                continue;
+            };
+            shape = kind;
+            radius = optional_f64_prop(child, "radius");
+            feather = optional_f64_prop(child, "feather").unwrap_or(0.0);
+            invert = optional_bool_prop(child, "invert").unwrap_or(false);
+            break;
+        }
+    }
+
+    TokenValue::Literal(TokenLiteral::Mask(MaskLiteral {
+        shape,
+        radius,
+        feather,
+        invert,
+    }))
 }
 
 // ---------------------------------------------------------------------------
@@ -1530,6 +1578,7 @@ const RECT_KNOWN_PROPS: &[&str] = &[
     "stroke_linecap",
     "shadow",
     "filter",
+    "mask",
     "blend-mode",
     "blend_mode",
     "blur",
@@ -1618,6 +1667,7 @@ fn transform_rect(node: &KdlNode) -> Result<RectNode, ParseError> {
         stroke_outer_width,
         shadow: optional_property_value(node, "shadow"),
         filter: optional_property_value(node, "filter"),
+        mask: optional_property_value(node, "mask"),
         blend_mode,
         blur: optional_dimension_prop(node, "blur"),
         opacity: optional_f64_prop(node, "opacity"),
@@ -1656,6 +1706,7 @@ const IMAGE_KNOWN_PROPS: &[&str] = &[
     "object_position_y",
     "shadow",
     "filter",
+    "mask",
     "blend-mode",
     "blend_mode",
     "blur",
@@ -1708,6 +1759,7 @@ fn transform_image(node: &KdlNode) -> Result<ImageNode, ParseError> {
         object_position_y,
         shadow: optional_property_value(node, "shadow"),
         filter: optional_property_value(node, "filter"),
+        mask: optional_property_value(node, "mask"),
         blend_mode: optional_string_prop_aliased(node, "blend-mode", "blend_mode")
             .map(str::to_owned),
         blur: optional_dimension_prop(node, "blur"),
@@ -1744,6 +1796,7 @@ const ELLIPSE_KNOWN_PROPS: &[&str] = &[
     "stroke_linecap",
     "shadow",
     "filter",
+    "mask",
     "blend-mode",
     "blend_mode",
     "blur",
@@ -1790,6 +1843,7 @@ fn transform_ellipse(node: &KdlNode) -> Result<EllipseNode, ParseError> {
         stroke_linecap,
         shadow: optional_property_value(node, "shadow"),
         filter: optional_property_value(node, "filter"),
+        mask: optional_property_value(node, "mask"),
         blend_mode,
         blur: optional_dimension_prop(node, "blur"),
         opacity: optional_f64_prop(node, "opacity"),
@@ -1891,6 +1945,7 @@ const TEXT_KNOWN_PROPS: &[&str] = &[
     "font_weight",
     "shadow",
     "filter",
+    "mask",
     "blend-mode",
     "blend_mode",
     "blur",
@@ -1983,6 +2038,7 @@ fn transform_text(node: &KdlNode) -> Result<TextNode, ParseError> {
         font_weight,
         shadow: optional_property_value(node, "shadow"),
         filter: optional_property_value(node, "filter"),
+        mask: optional_property_value(node, "mask"),
         blend_mode: optional_string_prop_aliased(node, "blend-mode", "blend_mode")
             .map(str::to_owned),
         blur: optional_dimension_prop(node, "blur"),

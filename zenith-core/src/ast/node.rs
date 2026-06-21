@@ -127,6 +127,8 @@ pub struct ImageNode {
     pub shadow: Option<PropertyValue>,
     /// Color/image filter ops, as a `(token)` ref to a `filter` token.
     pub filter: Option<PropertyValue>,
+    /// Spatial coverage mask, as a `(token)` ref to a `mask` token.
+    pub mask: Option<PropertyValue>,
     /// Compositing blend mode: `"normal"` (default) or one of the 11 separable
     /// blends. `None`/`"normal"` render source-over (byte-identical).
     pub blend_mode: Option<String>,
@@ -197,6 +199,8 @@ pub struct RectNode {
     pub shadow: Option<PropertyValue>,
     /// Color/image filter ops, as a `(token)` ref to a `filter` token.
     pub filter: Option<PropertyValue>,
+    /// Spatial coverage mask, as a `(token)` ref to a `mask` token.
+    pub mask: Option<PropertyValue>,
     /// Compositing blend mode: `"normal"` (default) or one of the 11 separable
     /// blends (`multiply`, `screen`, `overlay`, …). `None`/`"normal"` render
     /// source-over (byte-identical to having no blend).
@@ -283,6 +287,8 @@ pub struct EllipseNode {
     pub shadow: Option<PropertyValue>,
     /// Color/image filter ops, as a `(token)` ref to a `filter` token.
     pub filter: Option<PropertyValue>,
+    /// Spatial coverage mask, as a `(token)` ref to a `mask` token.
+    pub mask: Option<PropertyValue>,
     /// Compositing blend mode: `"normal"` (default) or one of the 11 separable
     /// blends. `None`/`"normal"` render source-over (byte-identical).
     pub blend_mode: Option<String>,
@@ -352,6 +358,8 @@ pub struct TextNode {
     pub shadow: Option<PropertyValue>,
     /// Color/image filter ops, as a `(token)` ref to a `filter` token.
     pub filter: Option<PropertyValue>,
+    /// Spatial coverage mask, as a `(token)` ref to a `mask` token.
+    pub mask: Option<PropertyValue>,
     /// Compositing blend mode: `"normal"` (default) or one of the 11 separable
     /// blends. `None`/`"normal"` render source-over (byte-identical).
     pub blend_mode: Option<String>,

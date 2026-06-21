@@ -1719,6 +1719,93 @@ fn test_filter_node_prop_wrong_type() {
     );
 }
 
+/// **Mask round-trip**: a mask token (a `rounded` shape with `radius`,
+/// `feather`, and `invert=#true`) must parse→format→parse byte-stably, emit the
+/// shape brace block, and a rect node referencing it (via `mask=(token)"..."`)
+/// must survive.
+#[test]
+fn test_mask_token_round_trip() {
+    let src = r##"zenith version=1 {
+  project id="proj.mask" name="Mask"
+  tokens format="zenith-token-v1" {
+    token id="mask.vignette" type="mask" {
+      rounded radius=40 feather=60 invert=#true
+    }
+  }
+  styles {
+  }
+  document id="doc.mask" title="Mask" {
+    page id="p" w=(px)100 h=(px)100 {
+      rect id="card" x=(px)0 y=(px)0 w=(px)100 h=(px)40 mask=(token)"mask.vignette"
+    }
+  }
+}
+"##;
+    let adapter = KdlAdapter;
+    let doc1 = adapter.parse(src.as_bytes()).expect("parse 1");
+    let s1 = format_document(&doc1).expect("format 1");
+    let formatted = String::from_utf8(s1.clone()).expect("utf8");
+
+    // The mask emits a brace block with a single shape child.
+    assert!(
+        formatted.contains("type=\"mask\" {"),
+        "expected mask header; got:\n{formatted}"
+    );
+    assert!(
+        formatted.contains("rounded radius=40 feather=60 invert=#true"),
+        "expected rounded shape with radius/feather/invert; got:\n{formatted}"
+    );
+    assert!(
+        formatted.contains(" mask=(token)\"mask.vignette\""),
+        "expected node mask prop; got:\n{formatted}"
+    );
+
+    // Idempotency.
+    let doc2 = adapter.parse(&s1).expect("parse 2");
+    let s2 = format_document(&doc2).expect("format 2");
+    assert_eq!(
+        formatted,
+        String::from_utf8(s2).expect("utf8"),
+        "mask formatting must be idempotent"
+    );
+
+    // AST round-trip (spans stripped).
+    assert_eq!(
+        strip_spans(doc1),
+        strip_spans(doc2),
+        "mask AST must survive format round-trip"
+    );
+}
+
+/// **Mask prop wrong type**: a node `mask=(token)"x"` where `x` is a color token
+/// must produce `token.incompatible_property`.
+#[test]
+fn test_mask_node_prop_wrong_type() {
+    let src = r##"zenith version=1 {
+  project id="proj.mask" name="Mask"
+  tokens format="zenith-token-v1" {
+    token id="color.not-a-mask" type="color" value="#000000"
+  }
+  styles {
+  }
+  document id="doc.mask" title="Mask" {
+    page id="p" w=(px)100 h=(px)100 {
+      rect id="card" x=(px)0 y=(px)0 w=(px)100 h=(px)40 mask=(token)"color.not-a-mask"
+    }
+  }
+}
+"##;
+    let adapter = KdlAdapter;
+    let doc = adapter.parse(src.as_bytes()).expect("parse");
+    let report = crate::validate::validate(&doc);
+
+    let codes: Vec<&str> = report.diagnostics.iter().map(|d| d.code.as_str()).collect();
+    assert!(
+        codes.contains(&"token.incompatible_property"),
+        "a non-mask token in a mask slot must be incompatible; codes: {codes:?}"
+    );
+}
+
 /// **Duotone filter round-trip**: a duotone op carrying both `shadow` and
 /// `highlight` color-token refs (plus `amount`) must parse→format→parse
 /// byte-stably and emit `duotone shadow=(token)"…" highlight=(token)"…" amount=…`.

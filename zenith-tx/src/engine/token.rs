@@ -34,7 +34,11 @@ fn parse_token_literal(token_type: &TokenType, value: &str) -> Option<TokenLiter
                 None
             }
         }
-        TokenType::Gradient | TokenType::Shadow | TokenType::Filter | TokenType::Unknown(_) => None,
+        TokenType::Gradient
+        | TokenType::Shadow
+        | TokenType::Filter
+        | TokenType::Mask
+        | TokenType::Unknown(_) => None,
     }
 }
 
@@ -50,6 +54,7 @@ fn token_type_name(token_type: &TokenType) -> &str {
         TokenType::Gradient => "gradient",
         TokenType::Shadow => "shadow",
         TokenType::Filter => "filter",
+        TokenType::Mask => "mask",
         TokenType::Unknown(s) => s.as_str(),
     }
 }
@@ -86,7 +91,11 @@ pub(super) fn apply_create_token(
 
     // Reject unsupported complex types (gradient / shadow / unknown).
     match &ty {
-        TokenType::Gradient | TokenType::Shadow | TokenType::Filter | TokenType::Unknown(_) => {
+        TokenType::Gradient
+        | TokenType::Shadow
+        | TokenType::Filter
+        | TokenType::Mask
+        | TokenType::Unknown(_) => {
             diagnostics.push(Diagnostic::error(
                 "tx.invalid_value",
                 format!(
@@ -166,7 +175,11 @@ pub(super) fn apply_update_token_value(
 
     // Reject unsupported complex types.
     match &ty {
-        TokenType::Gradient | TokenType::Shadow | TokenType::Filter | TokenType::Unknown(_) => {
+        TokenType::Gradient
+        | TokenType::Shadow
+        | TokenType::Filter
+        | TokenType::Mask
+        | TokenType::Unknown(_) => {
             diagnostics.push(Diagnostic::error(
                 "tx.invalid_value",
                 format!(

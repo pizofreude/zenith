@@ -19,8 +19,8 @@ use tiny_skia::{
 };
 use zenith_core::{AssetKind, AssetProvider, FontProvider};
 use zenith_scene::{
-    BlendMode as IrBlendMode, FilterSpec, FitMode, ImageClip, LineCap as IrLineCap, Scene,
-    SceneCommand, ShadowSpec, StrokeAlign,
+    BlendMode as IrBlendMode, FilterSpec, FitMode, ImageClip, LineCap as IrLineCap, MaskSpec,
+    Scene, SceneCommand, ShadowSpec, StrokeAlign,
 };
 
 use crate::backend::{RasterBackend, RasterImage};
@@ -28,6 +28,7 @@ use crate::error::RenderError;
 
 pub(crate) mod filter;
 mod gradient;
+mod mask;
 mod paths;
 mod pixels;
 mod raster;
@@ -40,6 +41,7 @@ pub(crate) use raster::decode_raster_image as decode_raster_to_pixmap;
 
 use filter::apply_filters;
 use gradient::gradient_shader;
+use mask::attenuate_by_mask;
 use paths::{
     GlyphOutlinePen, build_align_mask, build_poly_path, build_rounded_rect_path, clip_mask,
     intersect_rects,
@@ -119,18 +121,51 @@ impl RasterBackend for TinySkiaBackend {
 
         // The effect type associated with an active offscreen capture. Either a
         // shadow (blurred shadow layers composited behind the crisp ink) or a
-        // Gaussian blur (the ink itself blurred in place). At most one capture
-        // is active at a time (leaf-only, never nests).
+        // Gaussian blur (the ink itself blurred in place) or a color filter.
         enum CaptureEffect {
             Shadow(Vec<ShadowSpec>),
             Blur(f64),
             Filter(Vec<FilterSpec>),
+            Mask(MaskSpec),
         }
 
-        // Active offscreen capture: the target pixmap that buffers the ink of
-        // a shadowed or blurred leaf node. `None` means draws target the real
-        // canvas.
-        let mut capture: Option<(Pixmap, CaptureEffect)> = None;
+        // One entry of the effect-capture stack. Effect captures (blur/shadow/
+        // filter) nest: each Begin* pushes a layer, each End* pops it and
+        // composites the captured ink onto the target below.
+        struct CaptureLayer {
+            /// The offscreen ink buffer. `None` when allocation failed — draws
+            /// fall through to the target below and the matching End* skips
+            /// compositing (keeps Begin*/End* balanced so nesting stays correct).
+            pm: Option<Pixmap>,
+            effect: CaptureEffect,
+        }
+
+        // The effect-capture stack. The innermost active capture (topmost entry
+        // with `Some(pm)`) is the current draw target; an empty stack means
+        // draws target the top blend layer or the real canvas — byte-identical
+        // to before this stack existed.
+        let mut capture_stack: Vec<CaptureLayer> = Vec::new();
+
+        // Resolve the current draw / composite target, innermost-first: the
+        // topmost effect-capture entry that holds a buffer, else the top blend
+        // layer, else the base canvas. With an empty `capture_stack` this is
+        // exactly the old `layer_stack.last() else base` target.
+        fn current_target<'a>(
+            capture_stack: &'a mut [CaptureLayer],
+            layer_stack: &'a mut [(Pixmap, f32, tiny_skia::BlendMode)],
+            base: &'a mut Pixmap,
+        ) -> &'a mut Pixmap {
+            if let Some(layer) = capture_stack.iter_mut().rev().find(|l| l.pm.is_some()) {
+                // safe: just checked is_some
+                if let Some(pm) = layer.pm.as_mut() {
+                    return pm;
+                }
+            }
+            if let Some((pm, _, _)) = layer_stack.last_mut() {
+                return pm;
+            }
+            base
+        }
 
         // Active compositing layers. Each entry is a full-page offscreen pixmap
         // that buffers the ink of a blend-mode node (or its children), plus the
@@ -183,54 +218,57 @@ impl RasterBackend for TinySkiaBackend {
                     continue;
                 }
 
-                // Open an offscreen capture for shadowed ink. v0 shadows are
-                // leaf-only and DO NOT nest; if a capture is already active we
-                // keep the current one (inner draws fold into it) rather than
-                // crash. On allocation failure we fall back to a no-capture
-                // state (nothing is captured; the ink draws crisp, no shadow).
+                // Open an offscreen capture for shadowed ink. Always pushes a
+                // capture layer so Begin/End stay balanced and captures nest.
+                // On allocation failure `pm` is `None` — pushed anyway so the
+                // ink draws crisp (no shadow) and the matching End* is balanced.
                 SceneCommand::BeginShadow { shadows } => {
-                    if capture.is_none()
-                        && let Some(offscreen) = Pixmap::new(width, height)
-                    {
-                        capture = Some((offscreen, CaptureEffect::Shadow(shadows.clone())));
-                    }
+                    let pm = Pixmap::new(width, height);
+                    capture_stack.push(CaptureLayer {
+                        pm,
+                        effect: CaptureEffect::Shadow(shadows.clone()),
+                    });
                     continue;
                 }
 
                 // Close the active shadow capture: paint the blurred shadow
-                // layers onto the current target, then composite the crisp ink.
+                // layers onto the target below this capture, then composite the
+                // crisp ink. After the pop, `current_target` sees the stack
+                // without this layer — the next capture, blend layer, or base.
                 SceneCommand::EndShadow => {
-                    if let Some((ink, CaptureEffect::Shadow(shadows))) = capture.take() {
-                        let shadow_target = layer_stack
-                            .last_mut()
-                            .map(|(pm, _, _)| pm)
-                            .unwrap_or(&mut pixmap);
+                    if let Some(layer) = capture_stack.pop()
+                        && let (Some(ink), CaptureEffect::Shadow(shadows)) =
+                            (layer.pm, layer.effect)
+                    {
+                        let shadow_target =
+                            current_target(&mut capture_stack, &mut layer_stack, &mut pixmap);
                         composite_shadows(shadow_target, &ink, &shadows, width, height);
                     }
                     continue;
                 }
 
                 // Open an offscreen capture for a Gaussian-blurred element.
-                // Mirrors the BeginShadow guard: leaf-only, no nesting, silently
-                // falls back to crisp draw on allocation failure.
+                // Always pushes (nesting); `None` buffer on alloc failure draws
+                // crisp and keeps Begin/End balanced.
                 SceneCommand::BeginBlur { radius } => {
-                    if capture.is_none()
-                        && let Some(offscreen) = Pixmap::new(width, height)
-                    {
-                        capture = Some((offscreen, CaptureEffect::Blur(*radius)));
-                    }
+                    let pm = Pixmap::new(width, height);
+                    capture_stack.push(CaptureLayer {
+                        pm,
+                        effect: CaptureEffect::Blur(*radius),
+                    });
                     continue;
                 }
 
                 // Close the active blur capture: blur the ink in place, then
-                // composite it onto the current target (layer or canvas).
+                // composite it onto the target below this capture.
                 SceneCommand::EndBlur => {
-                    if let Some((mut ink, CaptureEffect::Blur(sigma))) = capture.take() {
+                    if let Some(layer) = capture_stack.pop()
+                        && let (Some(mut ink), CaptureEffect::Blur(sigma)) =
+                            (layer.pm, layer.effect)
+                    {
                         gaussian_blur_premul(&mut ink, sigma);
-                        let blur_target = layer_stack
-                            .last_mut()
-                            .map(|(pm, _, _)| pm)
-                            .unwrap_or(&mut pixmap);
+                        let blur_target =
+                            current_target(&mut capture_stack, &mut layer_stack, &mut pixmap);
                         blur_target.draw_pixmap(
                             0,
                             0,
@@ -243,29 +281,69 @@ impl RasterBackend for TinySkiaBackend {
                     continue;
                 }
 
-                // Open an offscreen capture for a color-filtered element.
-                // Mirrors the BeginBlur guard: leaf-only, no nesting, silently
-                // falls back to crisp draw on allocation failure or empty list.
+                // Open an offscreen capture for a color-filtered element. Always
+                // pushes (nesting). An empty filter list — or allocation failure
+                // — yields a `None` buffer: draws fall through (crisp, no
+                // filter) and the matching EndFilter skips compositing, exactly
+                // as the old empty-list/alloc-failure no-op did.
                 SceneCommand::BeginFilter { filters } => {
-                    if capture.is_none()
-                        && !filters.is_empty()
-                        && let Some(offscreen) = Pixmap::new(width, height)
-                    {
-                        capture = Some((offscreen, CaptureEffect::Filter(filters.clone())));
-                    }
+                    let pm = if filters.is_empty() {
+                        None
+                    } else {
+                        Pixmap::new(width, height)
+                    };
+                    capture_stack.push(CaptureLayer {
+                        pm,
+                        effect: CaptureEffect::Filter(filters.clone()),
+                    });
                     continue;
                 }
 
                 // Close the active filter capture: transform the captured ink
-                // in place, then composite it onto the current target.
+                // in place, then composite it onto the target below this capture.
                 SceneCommand::EndFilter => {
-                    if let Some((mut ink, CaptureEffect::Filter(filters))) = capture.take() {
+                    if let Some(layer) = capture_stack.pop()
+                        && let (Some(mut ink), CaptureEffect::Filter(filters)) =
+                            (layer.pm, layer.effect)
+                    {
                         apply_filters(&mut ink, &filters);
-                        let filter_target = layer_stack
-                            .last_mut()
-                            .map(|(pm, _, _)| pm)
-                            .unwrap_or(&mut pixmap);
+                        let filter_target =
+                            current_target(&mut capture_stack, &mut layer_stack, &mut pixmap);
                         filter_target.draw_pixmap(
+                            0,
+                            0,
+                            ink.as_ref(),
+                            &PixmapPaint::default(),
+                            Transform::identity(),
+                            None,
+                        );
+                    }
+                    continue;
+                }
+
+                // Open an offscreen capture for a masked element. Always pushes
+                // (nesting). On allocation failure `pm` is `None` — draws fall
+                // through (unmasked) and the matching EndMask skips compositing,
+                // keeping Begin/End balanced.
+                SceneCommand::BeginMask { mask } => {
+                    let pm = Pixmap::new(width, height);
+                    capture_stack.push(CaptureLayer {
+                        pm,
+                        effect: CaptureEffect::Mask(*mask),
+                    });
+                    continue;
+                }
+
+                // Close the active mask capture: attenuate the captured ink by
+                // the coverage field, then composite it onto the target below.
+                SceneCommand::EndMask => {
+                    if let Some(layer) = capture_stack.pop()
+                        && let (Some(mut ink), CaptureEffect::Mask(spec)) = (layer.pm, layer.effect)
+                    {
+                        attenuate_by_mask(&mut ink, &spec);
+                        let target =
+                            current_target(&mut capture_stack, &mut layer_stack, &mut pixmap);
+                        target.draw_pixmap(
                             0,
                             0,
                             ink.as_ref(),
@@ -298,13 +376,14 @@ impl RasterBackend for TinySkiaBackend {
                 // layer's opacity and blend operator.
                 SceneCommand::PopLayer => {
                     if let Some((layer_pm, op, bm)) = layer_stack.pop() {
-                        let target_after_pop: &mut Pixmap = match layer_stack.last_mut() {
-                            Some((pm, _, _)) => pm,
-                            None => match capture.as_mut() {
-                                Some((pm, _)) => pm,
-                                None => &mut pixmap,
-                            },
-                        };
+                        // After popping this blend layer, composite onto the new
+                        // current target: the next blend layer down if any, else
+                        // the innermost active capture, else the base canvas.
+                        // `current_target` resolves capture-first, so when a
+                        // capture is open and no blend layer remains it returns
+                        // the capture pixmap — byte-identical to the old order.
+                        let target_after_pop =
+                            current_target(&mut capture_stack, &mut layer_stack, &mut pixmap);
                         target_after_pop.draw_pixmap(
                             0,
                             0,
@@ -324,20 +403,15 @@ impl RasterBackend for TinySkiaBackend {
                 _ => {}
             }
 
-            // The active drawing target, innermost-first: the offscreen shadow
-            // capture when one is open (shadow ink is always the innermost draw
+            // The active drawing target, innermost-first: the topmost effect
+            // capture holding a buffer (capture ink is always the innermost draw
             // target), else the top compositing layer if any, else the real
             // canvas. Computed once per drawing command, after the structural
-            // match above has run (so no borrow overlaps). With no shadow and no
+            // match above has run (so no borrow overlaps). With no capture and no
             // layer active this resolves to `&mut pixmap` exactly as before —
             // the no-layer path is byte-identical.
-            let target: &mut Pixmap = match capture.as_mut() {
-                Some((pm, _)) => pm,
-                None => match layer_stack.last_mut() {
-                    Some((pm, _, _)) => pm,
-                    None => &mut pixmap,
-                },
-            };
+            let target: &mut Pixmap =
+                current_target(&mut capture_stack, &mut layer_stack, &mut pixmap);
 
             match cmd {
                 SceneCommand::FillRect { x, y, w, h, color } => {

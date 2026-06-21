@@ -30,6 +30,7 @@ pub use style::{
 };
 pub use token::{
     FilterKind, FilterLiteral, FilterOp, GradientKind, GradientLiteral, GradientStopRef,
-    ShadowLayerRef, ShadowLiteral, Token, TokenBlock, TokenLiteral, TokenType, TokenValue,
+    MaskLiteral, MaskShape, ShadowLayerRef, ShadowLiteral, Token, TokenBlock, TokenLiteral,
+    TokenType, TokenValue,
 };
 pub use value::{Dimension, PropertyValue, Unit, dim_to_px};

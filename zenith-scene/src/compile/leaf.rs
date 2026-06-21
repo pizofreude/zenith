@@ -18,8 +18,9 @@ use crate::ir::{LineCap, SceneCommand, StrokeAlign};
 use super::RenderCtx;
 use super::chain::ChainAssignments;
 use super::paint::{
-    apply_gradient_opacity, resolve_property_color, resolve_property_filter,
-    resolve_property_gradient, resolve_property_shadow,
+    NodeEffect, apply_gradient_opacity, emit_node_with_effects, resolve_property_color,
+    resolve_property_filter, resolve_property_gradient, resolve_property_mask,
+    resolve_property_shadow,
 };
 use super::style_prop;
 use super::text::{MeasureEnv, compile_text, measure_text_wrapped_height, resolve_text_families};
@@ -202,42 +203,42 @@ pub(super) fn compile_rect(
         });
     }
 
-    // BLUR / SHADOW bracket (innermost, behind fill+stroke). Blur wins over
-    // shadow when both are set: only one capture bracket is opened at a time.
+    // BLUR / SHADOW / FILTER effect (innermost, behind fill+stroke). Blur wins
+    // over shadow over filter when several are set: at most one effect is chosen.
+    // The single winning effect plus the optional mask bracket the node's DRAWS
+    // (FILL + STROKE), emitted via `emit_node_with_effects` below; the
+    // stroke-outer / per-side borders are NOT part of the masked/effected draws
+    // (they land after the effect bracket, exactly as before).
     let blur_sigma = rect
         .blur
         .as_ref()
         .and_then(|d| dim_to_px(d.value, &d.unit))
         .filter(|&s| s > 0.0);
-    let has_blur = blur_sigma.is_some();
-    if let Some(sigma) = blur_sigma {
-        commands.push(SceneCommand::BeginBlur { radius: sigma });
-    }
-    let has_shadow = !has_blur
-        && match rect
-            .shadow
-            .as_ref()
-            .and_then(|p| resolve_property_shadow(p, resolved, &rect.id))
-        {
-            Some(shadows) => {
-                commands.push(SceneCommand::BeginShadow { shadows });
-                true
-            }
-            None => false,
-        };
-    let has_filter = !has_blur
-        && !has_shadow
-        && match rect
-            .filter
+    let effect: Option<NodeEffect> = if let Some(sigma) = blur_sigma {
+        Some(NodeEffect::Blur(sigma))
+    } else if let Some(shadows) = rect
+        .shadow
+        .as_ref()
+        .and_then(|p| resolve_property_shadow(p, resolved, &rect.id))
+    {
+        Some(NodeEffect::Shadow(shadows))
+    } else {
+        rect.filter
             .as_ref()
             .and_then(|p| resolve_property_filter(p, resolved, &rect.id))
-        {
-            Some(filters) => {
-                commands.push(SceneCommand::BeginFilter { filters });
-                true
-            }
-            None => false,
-        };
+            .map(NodeEffect::Filter)
+    };
+
+    // Resolve the optional node mask against the rect's page-absolute box.
+    let mask = rect
+        .mask
+        .as_ref()
+        .and_then(|p| resolve_property_mask(p, resolved, (x, y, w, h)));
+
+    // Collect the node's DRAW commands (fill + stroke) into a local buffer so
+    // the shared helper can bracket them with the effect and/or mask. With no
+    // effect and no mask the helper extends `commands` verbatim → byte-identical.
+    let mut draws: Vec<SceneCommand> = Vec::new();
 
     // FILL (emitted first, under the stroke) — node-local prop overrides
     // style cascade.
@@ -249,7 +250,7 @@ pub(super) fn compile_rect(
         if let Some(mut gradient) = resolve_property_gradient(fill_prop, resolved, &rect.id) {
             apply_gradient_opacity(&mut gradient, color_op, 1.0);
             if is_rounded {
-                commands.push(SceneCommand::FillRoundedRectGradient {
+                draws.push(SceneCommand::FillRoundedRectGradient {
                     x,
                     y,
                     w,
@@ -259,7 +260,7 @@ pub(super) fn compile_rect(
                     gradient,
                 });
             } else {
-                commands.push(SceneCommand::FillRectGradient {
+                draws.push(SceneCommand::FillRectGradient {
                     x,
                     y,
                     w,
@@ -272,7 +273,7 @@ pub(super) fn compile_rect(
         {
             color.a = (color.a as f64 * color_op).round() as u8;
             if is_rounded {
-                commands.push(SceneCommand::FillRoundedRect {
+                draws.push(SceneCommand::FillRoundedRect {
                     x,
                     y,
                     w,
@@ -282,7 +283,7 @@ pub(super) fn compile_rect(
                     color,
                 });
             } else {
-                commands.push(SceneCommand::FillRect { x, y, w, h, color });
+                draws.push(SceneCommand::FillRect { x, y, w, h, color });
             }
         }
     }
@@ -366,7 +367,7 @@ pub(super) fn compile_rect(
         // rather than emit a degenerate rectangle.
         if sw_geom > 0.0 && sh_geom > 0.0 {
             if stroke_is_rounded {
-                commands.push(SceneCommand::StrokeRoundedRect {
+                draws.push(SceneCommand::StrokeRoundedRect {
                     x: sx,
                     y: sy,
                     w: sw_geom,
@@ -380,7 +381,7 @@ pub(super) fn compile_rect(
                     stroke_linecap,
                 });
             } else {
-                commands.push(SceneCommand::StrokeRect {
+                draws.push(SceneCommand::StrokeRect {
                     x: sx,
                     y: sy,
                     w: sw_geom,
@@ -395,15 +396,10 @@ pub(super) fn compile_rect(
         }
     }
 
-    if has_shadow {
-        commands.push(SceneCommand::EndShadow);
-    }
-    if has_blur {
-        commands.push(SceneCommand::EndBlur);
-    }
-    if has_filter {
-        commands.push(SceneCommand::EndFilter);
-    }
+    // Emit the collected draws into `commands`, bracketed by the winning effect
+    // and/or the mask. No effect + no mask → draws appended verbatim, so an
+    // unmasked, uneffected rect is byte-identical to the prior command stream.
+    emit_node_with_effects(commands, draws, effect, mask);
 
     // STROKE-OUTER: a second stroke painted OUTSIDE the rect geometry.
     // Emitted after shadow/blur bracket (so it lands on top of the shadow)
@@ -625,41 +621,38 @@ pub(super) fn compile_ellipse(
         });
     }
 
-    // BLUR / SHADOW bracket (behind fill+stroke). Blur wins when both set.
+    // BLUR / SHADOW / FILTER effect (behind fill+stroke). Blur > shadow > filter;
+    // at most one is chosen. The winning effect plus the optional mask bracket
+    // the node's DRAWS (FILL + STROKE) via `emit_node_with_effects` below.
     let blur_sigma = ellipse
         .blur
         .as_ref()
         .and_then(|d| dim_to_px(d.value, &d.unit))
         .filter(|&s| s > 0.0);
-    let has_blur = blur_sigma.is_some();
-    if let Some(sigma) = blur_sigma {
-        commands.push(SceneCommand::BeginBlur { radius: sigma });
-    }
-    let has_shadow = !has_blur
-        && match ellipse
-            .shadow
-            .as_ref()
-            .and_then(|p| resolve_property_shadow(p, resolved, &ellipse.id))
-        {
-            Some(shadows) => {
-                commands.push(SceneCommand::BeginShadow { shadows });
-                true
-            }
-            None => false,
-        };
-    let has_filter = !has_blur
-        && !has_shadow
-        && match ellipse
+    let effect: Option<NodeEffect> = if let Some(sigma) = blur_sigma {
+        Some(NodeEffect::Blur(sigma))
+    } else if let Some(shadows) = ellipse
+        .shadow
+        .as_ref()
+        .and_then(|p| resolve_property_shadow(p, resolved, &ellipse.id))
+    {
+        Some(NodeEffect::Shadow(shadows))
+    } else {
+        ellipse
             .filter
             .as_ref()
             .and_then(|p| resolve_property_filter(p, resolved, &ellipse.id))
-        {
-            Some(filters) => {
-                commands.push(SceneCommand::BeginFilter { filters });
-                true
-            }
-            None => false,
-        };
+            .map(NodeEffect::Filter)
+    };
+
+    // Resolve the optional node mask against the ellipse's page-absolute box.
+    let mask = ellipse
+        .mask
+        .as_ref()
+        .and_then(|p| resolve_property_mask(p, resolved, (x, y, w, h)));
+
+    // Collect the node's DRAW commands (fill + stroke) into a local buffer.
+    let mut draws: Vec<SceneCommand> = Vec::new();
 
     // FILL (emitted first, under the stroke) — node-local prop overrides
     // style cascade.
@@ -670,7 +663,7 @@ pub(super) fn compile_ellipse(
     if let Some(fill_prop) = fill_prop {
         if let Some(mut gradient) = resolve_property_gradient(fill_prop, resolved, &ellipse.id) {
             apply_gradient_opacity(&mut gradient, color_op, 1.0);
-            commands.push(SceneCommand::FillEllipseGradient {
+            draws.push(SceneCommand::FillEllipseGradient {
                 x,
                 y,
                 w,
@@ -683,7 +676,7 @@ pub(super) fn compile_ellipse(
             resolve_property_color(fill_prop, resolved, diagnostics, &ellipse.id)
         {
             color.a = (color.a as f64 * color_op).round() as u8;
-            commands.push(SceneCommand::FillEllipse {
+            draws.push(SceneCommand::FillEllipse {
                 x,
                 y,
                 w,
@@ -720,7 +713,7 @@ pub(super) fn compile_ellipse(
             resolved,
         );
 
-        commands.push(SceneCommand::StrokeEllipse {
+        draws.push(SceneCommand::StrokeEllipse {
             x,
             y,
             w,
@@ -738,15 +731,9 @@ pub(super) fn compile_ellipse(
     // If neither fill nor stroke is present, the ellipse draws nothing —
     // no diagnostic needed (an invisible ellipse is valid in v0).
 
-    if has_shadow {
-        commands.push(SceneCommand::EndShadow);
-    }
-    if has_blur {
-        commands.push(SceneCommand::EndBlur);
-    }
-    if has_filter {
-        commands.push(SceneCommand::EndFilter);
-    }
+    // Emit the collected draws, bracketed by the winning effect and/or mask.
+    // No effect + no mask → draws appended verbatim (byte-identical).
+    emit_node_with_effects(commands, draws, effect, mask);
 
     if blend.is_some() {
         commands.push(SceneCommand::PopLayer);
@@ -1745,6 +1732,7 @@ fn emit_shape_label(
         font_weight: None,
         shadow: None,
         filter: None,
+        mask: None,
         blend_mode: None,
         blur: None,
         opacity: None,

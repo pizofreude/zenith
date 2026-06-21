@@ -6,7 +6,9 @@ use std::collections::BTreeMap;
 use zenith_core::{Diagnostic, GradientKind, PropertyValue, ResolvedToken, ResolvedValue};
 
 use crate::color::{parse_color, parse_srgb_hex};
-use crate::ir::{Color, FilterSpec, GradientPaint, GradientStop, ShadowSpec};
+use crate::ir::{
+    Color, FilterSpec, GradientPaint, GradientStop, MaskShape, MaskSpec, SceneCommand, ShadowSpec,
+};
 
 /// Build an [`ir::Color`](Color) from a resolved color token, preserving its
 /// CMYK origin when present. Returns `None` only when the resolved value is not
@@ -273,6 +275,118 @@ pub(super) fn resolve_property_filter(
         return None;
     }
     Some(ops)
+}
+
+/// Map a `zenith_core::MaskShape` to the scene-IR [`MaskShape`].
+///
+/// Exhaustive match keeps the scene IR decoupled from the core enum and surfaces
+/// a compile error if a new core variant is ever added.
+fn map_shape(shape: zenith_core::MaskShape) -> MaskShape {
+    match shape {
+        zenith_core::MaskShape::Rect => MaskShape::Rect,
+        zenith_core::MaskShape::RoundedRect => MaskShape::RoundedRect,
+        zenith_core::MaskShape::Ellipse => MaskShape::Ellipse,
+    }
+}
+
+/// Resolve a `mask` `PropertyValue` into a [`MaskSpec`] carrying the node box,
+/// or `None`.
+///
+/// Mirrors [`resolve_property_filter`] but additionally needs the node's
+/// page-absolute box `(x, y, w, h)` so the resolved spec can describe the mask
+/// coverage geometry. Returns `Some` only when `prop` is a `TokenRef` whose
+/// token resolved to a `ResolvedValue::Mask`; the resolved corner radius defaults
+/// to `0.0` when the mask token leaves it unspecified. Returns `None` for any
+/// non-mask prop.
+pub(super) fn resolve_property_mask(
+    prop: &PropertyValue,
+    resolved: &BTreeMap<String, ResolvedToken>,
+    node_box: (f64, f64, f64, f64),
+) -> Option<MaskSpec> {
+    let PropertyValue::TokenRef(token_id) = prop else {
+        return None;
+    };
+    let ResolvedValue::Mask(m) = &resolved.get(token_id.as_str())?.value else {
+        return None;
+    };
+    let (x, y, w, h) = node_box;
+    Some(MaskSpec {
+        shape: map_shape(m.shape),
+        radius: m.radius.unwrap_or(0.0),
+        feather: m.feather,
+        invert: m.invert,
+        x,
+        y,
+        w,
+        h,
+    })
+}
+
+/// The single winning post-draw effect a leaf node carries, in precedence order
+/// blur > shadow > filter (exactly the precedence the leaf resolution applies).
+///
+/// Used by [`emit_node_with_effects`] to emit the correct Begin*/End* bracket
+/// around a node's draws.
+pub(super) enum NodeEffect {
+    Blur(f64),
+    Shadow(Vec<ShadowSpec>),
+    Filter(Vec<FilterSpec>),
+}
+
+/// Emit `draws` into `out`, wrapped by the node's effect and/or mask.
+///
+/// - no effect, no mask  → draws verbatim (BYTE-IDENTICAL to the pre-mask path).
+/// - effect, no mask     → BeginEffect, draws, EndEffect (BYTE-IDENTICAL).
+/// - mask, no effect     → BeginMask, draws, EndMask (soft reveal).
+/// - effect AND mask     → draws (sharp base), then
+///   BeginMask, BeginEffect, draws, EndEffect, EndMask (sharp center where
+///   coverage = 0, effected feathered edges where coverage = 1).
+pub(super) fn emit_node_with_effects(
+    out: &mut Vec<SceneCommand>,
+    draws: Vec<SceneCommand>,
+    effect: Option<NodeEffect>,
+    mask: Option<MaskSpec>,
+) {
+    let (begin, end): (Option<SceneCommand>, Option<SceneCommand>) = match &effect {
+        Some(NodeEffect::Blur(r)) => (
+            Some(SceneCommand::BeginBlur { radius: *r }),
+            Some(SceneCommand::EndBlur),
+        ),
+        Some(NodeEffect::Shadow(s)) => (
+            Some(SceneCommand::BeginShadow { shadows: s.clone() }),
+            Some(SceneCommand::EndShadow),
+        ),
+        Some(NodeEffect::Filter(f)) => (
+            Some(SceneCommand::BeginFilter { filters: f.clone() }),
+            Some(SceneCommand::EndFilter),
+        ),
+        None => (None, None),
+    };
+    match (mask, begin) {
+        (None, None) => out.extend(draws),
+        (None, Some(b)) => {
+            out.push(b);
+            out.extend(draws);
+            if let Some(e) = end {
+                out.push(e);
+            }
+        }
+        (Some(m), None) => {
+            out.push(SceneCommand::BeginMask { mask: m });
+            out.extend(draws);
+            out.push(SceneCommand::EndMask);
+        }
+        (Some(m), Some(b)) => {
+            out.extend(draws.clone()); // sharp base
+            out.push(SceneCommand::BeginMask { mask: m });
+            out.push(b);
+            out.extend(draws);
+            if let Some(e) = end {
+                out.push(e);
+            }
+            out.push(SceneCommand::EndMask);
+        }
+    }
 }
 
 /// Apply the cascaded opacity multiplier to every stop's alpha, matching the

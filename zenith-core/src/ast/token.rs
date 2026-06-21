@@ -14,6 +14,7 @@ pub enum TokenType {
     Gradient,
     Shadow,
     Filter,
+    Mask,
     /// An unrecognized token type (forward-compat; version-relative).
     Unknown(String),
 }
@@ -31,6 +32,7 @@ impl TokenType {
             "gradient" => Self::Gradient,
             "shadow" => Self::Shadow,
             "filter" => Self::Filter,
+            "mask" => Self::Mask,
             other => Self::Unknown(other.to_owned()),
         }
     }
@@ -55,6 +57,54 @@ pub enum TokenLiteral {
     /// A filter definition built from child op nodes. Filters have no scalar
     /// value; they are carried by this dedicated literal variant.
     Filter(FilterLiteral),
+    /// A mask definition built from a single shape child node. Masks have no
+    /// scalar value; they are carried by this dedicated literal variant.
+    Mask(MaskLiteral),
+}
+
+/// The spatial coverage shape of a mask token.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum MaskShape {
+    Rect,
+    RoundedRect,
+    Ellipse,
+}
+
+impl MaskShape {
+    /// Parse a mask shape from its KDL shape-child name, or `None` if
+    /// unrecognized.
+    pub fn from_shape_name(s: &str) -> Option<Self> {
+        match s {
+            "rect" => Some(Self::Rect),
+            "rounded" => Some(Self::RoundedRect),
+            "ellipse" => Some(Self::Ellipse),
+            _ => None,
+        }
+    }
+
+    /// The canonical KDL shape-child name for this mask shape (inverse of
+    /// [`MaskShape::from_shape_name`]).
+    pub fn as_shape_name(&self) -> &'static str {
+        match self {
+            Self::Rect => "rect",
+            Self::RoundedRect => "rounded",
+            Self::Ellipse => "ellipse",
+        }
+    }
+}
+
+/// A mask token literal: a single spatial coverage shape plus a feather and an
+/// invert flag.
+#[derive(Debug, Clone, PartialEq)]
+pub struct MaskLiteral {
+    /// The coverage shape.
+    pub shape: MaskShape,
+    /// RoundedRect corner radius (px); ignored for other shapes.
+    pub radius: Option<f64>,
+    /// Gaussian feather sigma (px, >= 0); 0 = hard edge.
+    pub feather: f64,
+    /// Invert coverage.
+    pub invert: bool,
 }
 
 /// The color/image filter operations, applied in source order.

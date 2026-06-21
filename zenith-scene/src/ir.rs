@@ -215,6 +215,43 @@ pub enum FilterSpec {
     },
 }
 
+// ── Mask ──────────────────────────────────────────────────────────────────────
+
+/// The spatial coverage shape of a node mask.
+///
+/// Mirrors `zenith_core::MaskShape`; the compile step maps core → scene so the
+/// scene IR stays decoupled from the core AST (exactly as [`FilterSpec`] carries
+/// scene-local payloads rather than core token ids).
+#[derive(Debug, Clone, Copy, PartialEq, Serialize)]
+pub enum MaskShape {
+    Rect,
+    RoundedRect,
+    Ellipse,
+}
+
+/// A resolved soft-mask applied to a node's draws.
+///
+/// The mask coverage is the `shape` inscribed in the node box `[x, y, w, h]`
+/// (page-absolute pixels), optionally with a corner `radius` (RoundedRect),
+/// a Gaussian `feather` sigma (`>= 0`), and an `invert` flag. The renderer
+/// brackets the node's draws with [`SceneCommand::BeginMask`] /
+/// [`SceneCommand::EndMask`] and composites the captured ink through the
+/// feathered coverage.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize)]
+pub struct MaskSpec {
+    pub shape: MaskShape,
+    /// Resolved corner radius in pixels (RoundedRect; `0.0` otherwise).
+    pub radius: f64,
+    /// Gaussian feather sigma in pixels (`>= 0`).
+    pub feather: f64,
+    pub invert: bool,
+    /// Node box, page-absolute pixels.
+    pub x: f64,
+    pub y: f64,
+    pub w: f64,
+    pub h: f64,
+}
+
 // ── Fit mode ────────────────────────────────────────────────────────────────
 
 /// How a raster image asset scales to fill its declared box.
@@ -595,6 +632,14 @@ pub enum SceneCommand {
     BeginFilter { filters: Vec<FilterSpec> },
     /// Close the active filter capture: transform the captured ink in place, composite onto the target.
     EndFilter,
+    // ── Soft-mask capture ─────────────────────────────────────────────────
+    /// Open an offscreen capture of the following draw commands; at the
+    /// matching [`SceneCommand::EndMask`] the captured ink is composited back
+    /// through the feathered coverage described by `mask`.
+    BeginMask { mask: MaskSpec },
+    /// Close the active mask capture: composite the captured ink through the
+    /// mask coverage onto the current target.
+    EndMask,
 }
 
 // ── Scene glyph ───────────────────────────────────────────────────────────────

@@ -17,7 +17,10 @@ use crate::ir::{Color, SceneCommand, SceneGlyph};
 
 use super::RenderCtx;
 use super::chain::ChainAssignments;
-use super::paint::{resolve_property_color, resolve_property_filter, resolve_property_shadow};
+use super::paint::{
+    NodeEffect, emit_node_with_effects, resolve_property_color, resolve_property_filter,
+    resolve_property_mask, resolve_property_shadow,
+};
 use super::style_prop;
 use super::util::{
     blend_mode_ir, resolve_property_dimension_px, rotation_degrees, unsupported_unit_diag,
@@ -1352,49 +1355,42 @@ fn render_chain_member(
         });
     }
 
-    // BLUR / SHADOW bracket (innermost). Blur wins over shadow when both set.
+    // BLUR / SHADOW / FILTER effect (innermost). Blur > shadow > filter; at most
+    // one is chosen. The winning effect plus the optional mask bracket the
+    // member's glyph draws via `emit_node_with_effects` below. An empty member
+    // (no assigned lines) carries no effect (matching the prior guard).
     let blur_sigma = text
         .blur
         .as_ref()
         .and_then(|d| dim_to_px(d.value, &d.unit))
         .filter(|&s| s > 0.0);
-    let has_blur = blur_sigma.is_some() && !assignment.lines.is_empty();
-    if has_blur && let Some(sigma) = blur_sigma {
-        commands.push(SceneCommand::BeginBlur { radius: sigma });
-    }
-    let has_shadow = !has_blur
-        && if assignment.lines.is_empty() {
-            false
-        } else {
-            match text
-                .shadow
-                .as_ref()
-                .and_then(|p| resolve_property_shadow(p, resolved, &text.id))
-            {
-                Some(shadows) => {
-                    commands.push(SceneCommand::BeginShadow { shadows });
-                    true
-                }
-                None => false,
-            }
-        };
-    let has_filter = !has_blur
-        && !has_shadow
-        && if assignment.lines.is_empty() {
-            false
-        } else {
-            match text
-                .filter
-                .as_ref()
-                .and_then(|p| resolve_property_filter(p, resolved, &text.id))
-            {
-                Some(filters) => {
-                    commands.push(SceneCommand::BeginFilter { filters });
-                    true
-                }
-                None => false,
-            }
-        };
+    let effect: Option<NodeEffect> = if assignment.lines.is_empty() {
+        None
+    } else if let Some(sigma) = blur_sigma {
+        Some(NodeEffect::Blur(sigma))
+    } else if let Some(shadows) = text
+        .shadow
+        .as_ref()
+        .and_then(|p| resolve_property_shadow(p, resolved, &text.id))
+    {
+        Some(NodeEffect::Shadow(shadows))
+    } else {
+        text.filter
+            .as_ref()
+            .and_then(|p| resolve_property_filter(p, resolved, &text.id))
+            .map(NodeEffect::Filter)
+    };
+
+    // Resolve the optional node mask against the member's box. The box height
+    // falls back to the laid-out content height when `h` is absent.
+    let mask = text.mask.as_ref().and_then(|p| {
+        let mask_h = box_h_opt.unwrap_or(assignment.lines.len() as f64 * emit_metrics.line_height);
+        resolve_property_mask(p, resolved, (text_x, text_y, box_w, mask_h))
+    });
+
+    // Collect the member's glyph draws into a local buffer so the helper can
+    // bracket them with the effect and/or mask (byte-identical when neither set).
+    let mut draws: Vec<SceneCommand> = Vec::new();
 
     // Honor the node's direction for line layout. The chain pre-pass shapes the
     // source's spans with the source direction (see [`super::chain`]); here the
@@ -1421,19 +1417,13 @@ fn render_chain_member(
         // paragraph flows on into the next box.
         !assignment.is_last_member,
         chain_direction,
-        commands,
+        &mut draws,
         glyph_stroke,
     );
 
-    if has_shadow {
-        commands.push(SceneCommand::EndShadow);
-    }
-    if has_blur {
-        commands.push(SceneCommand::EndBlur);
-    }
-    if has_filter {
-        commands.push(SceneCommand::EndFilter);
-    }
+    // Emit the collected glyph draws, bracketed by the winning effect and/or
+    // mask. No effect + no mask → draws appended verbatim (byte-identical).
+    emit_node_with_effects(commands, draws, effect, mask);
 
     if blend.is_some() {
         commands.push(SceneCommand::PopLayer);
@@ -2627,49 +2617,46 @@ pub(super) fn compile_text_sized(
         });
     }
 
-    // BLUR / SHADOW bracket. Blur wins over shadow when both set.
+    // BLUR / SHADOW / FILTER effect. Blur > shadow > filter; at most one is
+    // chosen. The winning effect plus the optional mask bracket the node's glyph
+    // draws via `emit_node_with_effects` below; the draws themselves are emitted
+    // unchanged into `commands` (then split off into a local buffer at the end of
+    // the draw region), so an unmasked, uneffected text node is byte-identical.
+    // An empty node (no shaped spans) carries no effect (matching the prior guard).
     let blur_sigma = text
         .blur
         .as_ref()
         .and_then(|d| dim_to_px(d.value, &d.unit))
         .filter(|&s| s > 0.0);
-    let has_blur = blur_sigma.is_some() && !shaped_spans.is_empty();
-    if has_blur && let Some(sigma) = blur_sigma {
-        commands.push(SceneCommand::BeginBlur { radius: sigma });
-    }
-    let has_shadow = !has_blur
-        && if shaped_spans.is_empty() {
-            false
-        } else {
-            match text
-                .shadow
-                .as_ref()
-                .and_then(|p| resolve_property_shadow(p, resolved, &text.id))
-            {
-                Some(shadows) => {
-                    commands.push(SceneCommand::BeginShadow { shadows });
-                    true
-                }
-                None => false,
-            }
-        };
-    let has_filter = !has_blur
-        && !has_shadow
-        && if shaped_spans.is_empty() {
-            false
-        } else {
-            match text
-                .filter
-                .as_ref()
-                .and_then(|p| resolve_property_filter(p, resolved, &text.id))
-            {
-                Some(filters) => {
-                    commands.push(SceneCommand::BeginFilter { filters });
-                    true
-                }
-                None => false,
-            }
-        };
+    let effect: Option<NodeEffect> = if shaped_spans.is_empty() {
+        None
+    } else if let Some(sigma) = blur_sigma {
+        Some(NodeEffect::Blur(sigma))
+    } else if let Some(shadows) = text
+        .shadow
+        .as_ref()
+        .and_then(|p| resolve_property_shadow(p, resolved, &text.id))
+    {
+        Some(NodeEffect::Shadow(shadows))
+    } else {
+        text.filter
+            .as_ref()
+            .and_then(|p| resolve_property_filter(p, resolved, &text.id))
+            .map(NodeEffect::Filter)
+    };
+
+    // Resolve the optional node mask against the text box. Width/height fall back
+    // to the laid-out extents when the box dimensions are absent.
+    let mask = text.mask.as_ref().and_then(|p| {
+        let mask_w = box_w_opt.unwrap_or(total_advance);
+        let mask_h = box_h_opt.unwrap_or(first_line_height);
+        resolve_property_mask(p, resolved, (text_x, text_y, mask_w, mask_h))
+    });
+
+    // Mark where the node's glyph draws begin in `commands`; they are split off
+    // into a local buffer after the draw region and re-emitted through the
+    // effect/mask helper.
+    let draw_start = commands.len();
 
     // Tracks actual line count after emit; set by whichever path runs.
     // Used solely by the overflow="fit" check below.
@@ -3328,15 +3315,11 @@ pub(super) fn compile_text_sized(
         }
     }
 
-    if has_shadow {
-        commands.push(SceneCommand::EndShadow);
-    }
-    if has_blur {
-        commands.push(SceneCommand::EndBlur);
-    }
-    if has_filter {
-        commands.push(SceneCommand::EndFilter);
-    }
+    // Split off the node's glyph draws (appended since `draw_start`) and
+    // re-emit them through the effect/mask helper. No effect + no mask → the
+    // draws are appended back verbatim in the same order (byte-identical).
+    let draws = commands.split_off(draw_start);
+    emit_node_with_effects(commands, draws, effect, mask);
 
     if blend.is_some() {
         commands.push(SceneCommand::PopLayer);
