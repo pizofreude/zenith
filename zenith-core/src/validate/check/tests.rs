@@ -5066,6 +5066,7 @@ fn cell_with_text(id: &str, colspan: u32) -> TableCell {
         h_align: None,
         v_align: None,
         source_span: None,
+        unknown_props: BTreeMap::new(),
     }
 }
 
@@ -5114,10 +5115,12 @@ fn two_cols() -> Vec<TableColumn> {
         TableColumn {
             width: Some(px(160.0)),
             source_span: None,
+            unknown_props: BTreeMap::new(),
         },
         TableColumn {
             width: None,
             source_span: None,
+            unknown_props: BTreeMap::new(),
         },
     ]
 }
@@ -5127,6 +5130,7 @@ fn table_missing_geometry_errors() {
     let rows = vec![TableRow {
         cells: vec![cell_with_text("t.c1", 1), cell_with_text("t.c2", 1)],
         source_span: None,
+        unknown_props: BTreeMap::new(),
     }];
     let table = table_node("t.geom", false, None, rows, two_cols());
     let doc = doc_with(vec![], vec![minimal_page("p1", vec![table])]);
@@ -5144,10 +5148,12 @@ fn table_colspan_overflow_errors() {
     let rows = vec![TableRow {
         cells: vec![cell_with_text("t.c1", 2)],
         source_span: None,
+        unknown_props: BTreeMap::new(),
     }];
     let columns = vec![TableColumn {
         width: Some(px(160.0)),
         source_span: None,
+        unknown_props: BTreeMap::new(),
     }];
     let table = table_node("t.overflow", true, None, rows, columns);
     let doc = doc_with(vec![], vec![minimal_page("p1", vec![table])]);
@@ -5164,6 +5170,7 @@ fn table_bad_h_align_warns() {
     let rows = vec![TableRow {
         cells: vec![cell_with_text("t.c1", 1), cell_with_text("t.c2", 1)],
         source_span: None,
+        unknown_props: BTreeMap::new(),
     }];
     let table = table_node(
         "t.align",
@@ -5187,10 +5194,12 @@ fn table_well_formed_is_clean() {
         TableRow {
             cells: vec![cell_with_text("t.c11", 1), cell_with_text("t.c12", 1)],
             source_span: None,
+            unknown_props: BTreeMap::new(),
         },
         TableRow {
             cells: vec![cell_with_text("t.c21", 1), cell_with_text("t.c22", 1)],
             source_span: None,
+            unknown_props: BTreeMap::new(),
         },
     ];
     let table = table_node("t.ok", true, Some("center".to_owned()), rows, two_cols());
@@ -5229,14 +5238,17 @@ fn table_cell_text_without_geometry_is_clean() {
         h_align: None,
         v_align: None,
         source_span: None,
+        unknown_props: BTreeMap::new(),
     };
     let columns = vec![TableColumn {
         width: Some(px(160.0)),
         source_span: None,
+        unknown_props: BTreeMap::new(),
     }];
     let rows = vec![TableRow {
         cells: vec![cell],
         source_span: None,
+        unknown_props: BTreeMap::new(),
     }];
     let table = table_node("t.auto", true, None, rows, columns);
     let doc = doc_with(vec![], vec![minimal_page("p1", vec![table])]);
@@ -5246,4 +5258,144 @@ fn table_cell_text_without_geometry_is_clean() {
         "cell text without x/y/w/h must NOT emit node.missing_geometry; got {:?}",
         codes(&report)
     );
+}
+
+#[test]
+fn table_cell_unknown_property_warns() {
+    // A cell with an unrecognized property produces node.unknown_property.
+    let mut unknown_props = BTreeMap::new();
+    unknown_props.insert(
+        "future-cell-prop".to_owned(),
+        crate::ast::node::UnknownProperty {
+            value: crate::ast::node::UnknownValue::String("yes".to_owned()),
+        },
+    );
+    let cell = TableCell {
+        colspan: 1,
+        rowspan: 1,
+        children: vec![],
+        fill: None,
+        border: None,
+        border_width: None,
+        h_align: None,
+        v_align: None,
+        source_span: None,
+        unknown_props,
+    };
+    let rows = vec![TableRow {
+        cells: vec![cell],
+        source_span: None,
+        unknown_props: BTreeMap::new(),
+    }];
+    let columns = vec![TableColumn {
+        width: Some(px(160.0)),
+        source_span: None,
+        unknown_props: BTreeMap::new(),
+    }];
+    let table = table_node("t.cell.unk", true, None, rows, columns);
+    let doc = doc_with(vec![], vec![minimal_page("p1", vec![table])]);
+    let report = validate(&doc);
+    assert!(
+        has_code(&report, "node.unknown_property"),
+        "cell with unknown property must warn node.unknown_property; got {:?}",
+        codes(&report)
+    );
+    assert!(!report.has_errors());
+}
+
+#[test]
+fn table_row_unknown_property_warns() {
+    // A row with an unrecognized property produces node.unknown_property.
+    let mut row_unknown_props = BTreeMap::new();
+    row_unknown_props.insert(
+        "future-row-prop".to_owned(),
+        crate::ast::node::UnknownProperty {
+            value: crate::ast::node::UnknownValue::Integer(7),
+        },
+    );
+    let rows = vec![TableRow {
+        cells: vec![cell_with_text("t.r.c1", 1), cell_with_text("t.r.c2", 1)],
+        source_span: None,
+        unknown_props: row_unknown_props,
+    }];
+    let table = table_node("t.row.unk", true, None, rows, two_cols());
+    let doc = doc_with(vec![], vec![minimal_page("p1", vec![table])]);
+    let report = validate(&doc);
+    assert!(
+        has_code(&report, "node.unknown_property"),
+        "row with unknown property must warn node.unknown_property; got {:?}",
+        codes(&report)
+    );
+    assert!(!report.has_errors());
+}
+
+#[test]
+fn table_column_unknown_property_warns() {
+    // A column with an unrecognized property produces node.unknown_property.
+    let mut col_unknown_props = BTreeMap::new();
+    col_unknown_props.insert(
+        "future-col-prop".to_owned(),
+        crate::ast::node::UnknownProperty {
+            value: crate::ast::node::UnknownValue::Bool(true),
+        },
+    );
+    let columns = vec![
+        TableColumn {
+            width: Some(px(160.0)),
+            source_span: None,
+            unknown_props: col_unknown_props,
+        },
+        TableColumn {
+            width: None,
+            source_span: None,
+            unknown_props: BTreeMap::new(),
+        },
+    ];
+    let rows = vec![TableRow {
+        cells: vec![cell_with_text("t.col.c1", 1), cell_with_text("t.col.c2", 1)],
+        source_span: None,
+        unknown_props: BTreeMap::new(),
+    }];
+    let table = table_node("t.col.unk", true, None, rows, columns);
+    let doc = doc_with(vec![], vec![minimal_page("p1", vec![table])]);
+    let report = validate(&doc);
+    assert!(
+        has_code(&report, "node.unknown_property"),
+        "column with unknown property must warn node.unknown_property; got {:?}",
+        codes(&report)
+    );
+    assert!(!report.has_errors());
+}
+
+#[test]
+fn table_clean_no_unknown_property_warning() {
+    // A well-formed table with no unknown props on table/columns/rows/cells
+    // must NOT produce any node.unknown_property warning.
+    let rows = vec![
+        TableRow {
+            cells: vec![
+                cell_with_text("t.clean.c11", 1),
+                cell_with_text("t.clean.c12", 1),
+            ],
+            source_span: None,
+            unknown_props: BTreeMap::new(),
+        },
+        TableRow {
+            cells: vec![
+                cell_with_text("t.clean.c21", 1),
+                cell_with_text("t.clean.c22", 1),
+            ],
+            source_span: None,
+            unknown_props: BTreeMap::new(),
+        },
+    ];
+    let table = table_node("t.clean", true, Some("center".to_owned()), rows, two_cols());
+    let doc = doc_with(vec![], vec![minimal_page("p1", vec![table])]);
+    let report = validate(&doc);
+    assert!(
+        !has_code(&report, "node.unknown_property"),
+        "clean table must not emit node.unknown_property; got {:?}",
+        codes(&report)
+    );
+    assert!(!report.has_errors());
 }

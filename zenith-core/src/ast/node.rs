@@ -900,6 +900,8 @@ pub struct TableColumn {
     pub width: Option<Dimension>,
     /// Source declaration span, when available.
     pub source_span: Option<Span>,
+    /// Unknown properties preserved for forward-compat.
+    pub unknown_props: BTreeMap<String, UnknownProperty>,
 }
 
 /// A single cell in a [`TableRow`] (a `cell` child).
@@ -927,6 +929,8 @@ pub struct TableCell {
     pub v_align: Option<String>,
     /// Source declaration span, when available.
     pub source_span: Option<Span>,
+    /// Unknown properties preserved for forward-compat.
+    pub unknown_props: BTreeMap<String, UnknownProperty>,
 }
 
 /// A single row in a [`TableNode`] (a `row` child), holding cells left→right.
@@ -936,6 +940,8 @@ pub struct TableRow {
     pub cells: Vec<TableCell>,
     /// Source declaration span, when available.
     pub source_span: Option<Span>,
+    /// Unknown properties preserved for forward-compat.
+    pub unknown_props: BTreeMap<String, UnknownProperty>,
 }
 
 /// A `table` node — a grid container of `column`/`row`/`cell` children.

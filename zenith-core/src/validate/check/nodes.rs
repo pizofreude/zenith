@@ -1661,7 +1661,7 @@ pub(super) fn walk_node(
                 }
             }
 
-            // Unknown properties.
+            // Unknown properties on the table node itself.
             for prop_name in t.unknown_props.keys() {
                 diagnostics.push(Diagnostic::warning(
                     "node.unknown_property",
@@ -1673,6 +1673,52 @@ pub(super) fn walk_node(
                     t.source_span,
                     Some(t.id.clone()),
                 ));
+            }
+
+            // Unknown properties on each column declaration.
+            for col in &t.columns {
+                for prop_name in col.unknown_props.keys() {
+                    diagnostics.push(Diagnostic::warning(
+                        "node.unknown_property",
+                        format!(
+                            "table '{}': column has unknown property '{}' (version-relative; \
+                             may be valid in a later schema version)",
+                            t.id, prop_name
+                        ),
+                        col.source_span,
+                        Some(t.id.clone()),
+                    ));
+                }
+            }
+
+            // Unknown properties on each row and cell.
+            for row in &t.rows {
+                for prop_name in row.unknown_props.keys() {
+                    diagnostics.push(Diagnostic::warning(
+                        "node.unknown_property",
+                        format!(
+                            "table '{}': row has unknown property '{}' (version-relative; \
+                             may be valid in a later schema version)",
+                            t.id, prop_name
+                        ),
+                        row.source_span,
+                        Some(t.id.clone()),
+                    ));
+                }
+                for cell in &row.cells {
+                    for prop_name in cell.unknown_props.keys() {
+                        diagnostics.push(Diagnostic::warning(
+                            "node.unknown_property",
+                            format!(
+                                "table '{}': cell has unknown property '{}' (version-relative; \
+                                 may be valid in a later schema version)",
+                                t.id, prop_name
+                            ),
+                            cell.source_span,
+                            Some(t.id.clone()),
+                        ));
+                    }
+                }
             }
 
             // ── Cell-span consistency ──────────────────────────────────────

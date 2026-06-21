@@ -558,8 +558,223 @@ fn test_table_flows_parse_format_round_trip() {
         .expect("re-parse after format must succeed");
     assert_eq!(
         strip_spans(doc).body.pages,
-        strip_spans(doc2).body.pages,
+        strip_spans(doc2.clone()).body.pages,
         "table flows must survive a parse → format → parse round-trip"
+    );
+}
+
+/// **Table cell unknown-property round-trip**: a `cell` carrying an unknown
+/// property survives parse → format → parse with the property intact.
+#[test]
+fn test_table_cell_unknown_property_round_trip() {
+    let src = r##"zenith version=1 {
+  project id="proj.cunk" name="CUnk"
+  tokens format="zenith-token-v1" {
+  }
+  styles {
+  }
+  document id="doc.cunk" title="CUnk" {
+    page id="p" w=(px)400 h=(px)300 {
+      table id="t" x=(px)10 y=(px)10 w=(px)380 h=(px)280 {
+        column width=(px)190
+        column width=(px)190
+        row {
+          cell future-cell-attr="yes" { text id="c1" { span "A" } }
+          cell { text id="c2" { span "B" } }
+        }
+      }
+    }
+  }
+}
+"##;
+    let adapter = KdlAdapter;
+    let doc = adapter.parse(src.as_bytes()).expect("parse must succeed");
+    let table = match &doc.body.pages[0].children[0] {
+        Node::Table(t) => t,
+        other => panic!("expected Table, got {other:?}"),
+    };
+    assert!(
+        table.rows[0].cells[0]
+            .unknown_props
+            .contains_key("future-cell-attr"),
+        "unknown cell attr must be parsed into unknown_props"
+    );
+    let formatted = format_document(&doc).expect("format must succeed");
+    assert!(
+        String::from_utf8_lossy(&formatted).contains("future-cell-attr"),
+        "formatted output must contain the unknown cell property"
+    );
+    let doc2 = adapter
+        .parse(&formatted)
+        .expect("re-parse after format must succeed");
+    assert_eq!(
+        strip_spans(doc).body.pages,
+        strip_spans(doc2.clone()).body.pages,
+        "cell unknown property must survive parse → format → parse"
+    );
+    // Idempotence: format twice → identical bytes.
+    let formatted2 = format_document(&doc2).expect("format 2 must succeed");
+    assert_eq!(
+        formatted, formatted2,
+        "cell unknown property formatting must be idempotent"
+    );
+}
+
+/// **Table column unknown-property round-trip**: a `column` carrying an unknown
+/// property survives parse → format → parse with the property intact.
+#[test]
+fn test_table_column_unknown_property_round_trip() {
+    let src = r##"zenith version=1 {
+  project id="proj.colunk" name="ColUnk"
+  tokens format="zenith-token-v1" {
+  }
+  styles {
+  }
+  document id="doc.colunk" title="ColUnk" {
+    page id="p" w=(px)400 h=(px)300 {
+      table id="t" x=(px)10 y=(px)10 w=(px)380 h=(px)280 {
+        column width=(px)190 future-col-hint=#true
+        column width=(px)190
+        row {
+          cell { text id="c1" { span "A" } }
+          cell { text id="c2" { span "B" } }
+        }
+      }
+    }
+  }
+}
+"##;
+    let adapter = KdlAdapter;
+    let doc = adapter.parse(src.as_bytes()).expect("parse must succeed");
+    let table = match &doc.body.pages[0].children[0] {
+        Node::Table(t) => t,
+        other => panic!("expected Table, got {other:?}"),
+    };
+    assert!(
+        table.columns[0]
+            .unknown_props
+            .contains_key("future-col-hint"),
+        "unknown column attr must be parsed into unknown_props"
+    );
+    let formatted = format_document(&doc).expect("format must succeed");
+    assert!(
+        String::from_utf8_lossy(&formatted).contains("future-col-hint"),
+        "formatted output must contain the unknown column property"
+    );
+    let doc2 = adapter
+        .parse(&formatted)
+        .expect("re-parse after format must succeed");
+    assert_eq!(
+        strip_spans(doc).body.pages,
+        strip_spans(doc2.clone()).body.pages,
+        "column unknown property must survive parse → format → parse"
+    );
+    // Idempotence: format twice → identical bytes.
+    let formatted2 = format_document(&doc2).expect("format 2 must succeed");
+    assert_eq!(
+        formatted, formatted2,
+        "column unknown property formatting must be idempotent"
+    );
+}
+
+/// **Table row unknown-property round-trip**: a `row` carrying an unknown
+/// property survives parse → format → parse with the property intact.
+#[test]
+fn test_table_row_unknown_property_round_trip() {
+    let src = r##"zenith version=1 {
+  project id="proj.rowunk" name="RowUnk"
+  tokens format="zenith-token-v1" {
+  }
+  styles {
+  }
+  document id="doc.rowunk" title="RowUnk" {
+    page id="p" w=(px)400 h=(px)300 {
+      table id="t" x=(px)10 y=(px)10 w=(px)380 h=(px)280 {
+        column width=(px)380
+        row future-row-meta=42 {
+          cell { text id="c1" { span "A" } }
+        }
+      }
+    }
+  }
+}
+"##;
+    let adapter = KdlAdapter;
+    let doc = adapter.parse(src.as_bytes()).expect("parse must succeed");
+    let table = match &doc.body.pages[0].children[0] {
+        Node::Table(t) => t,
+        other => panic!("expected Table, got {other:?}"),
+    };
+    assert!(
+        table.rows[0].unknown_props.contains_key("future-row-meta"),
+        "unknown row attr must be parsed into unknown_props"
+    );
+    let formatted = format_document(&doc).expect("format must succeed");
+    assert!(
+        String::from_utf8_lossy(&formatted).contains("future-row-meta"),
+        "formatted output must contain the unknown row property"
+    );
+    let doc2 = adapter
+        .parse(&formatted)
+        .expect("re-parse after format must succeed");
+    assert_eq!(
+        strip_spans(doc).body.pages,
+        strip_spans(doc2.clone()).body.pages,
+        "row unknown property must survive parse → format → parse"
+    );
+    // Idempotence: format twice → identical bytes.
+    let formatted2 = format_document(&doc2).expect("format 2 must succeed");
+    assert_eq!(
+        formatted, formatted2,
+        "row unknown property formatting must be idempotent"
+    );
+}
+
+/// **Table clean round-trip**: a well-formed table with NO unknown props on any
+/// cell/row/column must round-trip byte-identically and produce no
+/// node.unknown_property diagnostic.
+#[test]
+fn test_table_clean_round_trips_without_unknown_property() {
+    let src = r##"zenith version=1 {
+  project id="proj.tclean" name="TClean"
+  tokens format="zenith-token-v1" {
+  }
+  styles {
+  }
+  document id="doc.tclean" title="TClean" {
+    page id="p" w=(px)400 h=(px)300 {
+      table id="t" x=(px)10 y=(px)10 w=(px)380 h=(px)280 {
+        column width=(px)190
+        column width=(px)190
+        row {
+          cell { text id="c11" { span "A" } }
+          cell { text id="c12" { span "B" } }
+        }
+        row {
+          cell { text id="c21" { span "C" } }
+          cell { text id="c22" { span "D" } }
+        }
+      }
+    }
+  }
+}
+"##;
+    let adapter = KdlAdapter;
+    let doc = adapter.parse(src.as_bytes()).expect("parse must succeed");
+    let formatted = format_document(&doc).expect("format must succeed");
+    let doc2 = adapter
+        .parse(&formatted)
+        .expect("re-parse after format must succeed");
+    assert_eq!(
+        strip_spans(doc).body.pages,
+        strip_spans(doc2.clone()).body.pages,
+        "clean table must round-trip"
+    );
+    // Idempotence.
+    let formatted2 = format_document(&doc2).expect("format 2 must succeed");
+    assert_eq!(
+        formatted, formatted2,
+        "clean table formatting must be idempotent"
     );
 }
 

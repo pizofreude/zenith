@@ -1894,6 +1894,23 @@ fn transform_group(node: &KdlNode) -> Result<GroupNode, ParseError> {
     })
 }
 
+const CELL_KNOWN_PROPS: &[&str] = &[
+    "colspan",
+    "rowspan",
+    "fill",
+    "border",
+    "border-width",
+    "border_width",
+    "h-align",
+    "h_align",
+    "v-align",
+    "v_align",
+];
+
+const ROW_KNOWN_PROPS: &[&str] = &[];
+
+const COLUMN_KNOWN_PROPS: &[&str] = &["width"];
+
 const TABLE_KNOWN_PROPS: &[&str] = &[
     "id",
     "name",
@@ -1934,6 +1951,7 @@ const TABLE_KNOWN_PROPS: &[&str] = &[
 /// `colspan`/`rowspan` default to 1; arbitrary child nodes parse via the same
 /// [`transform_node`] used for frame/group children.
 fn transform_cell(node: &KdlNode) -> Result<TableCell, ParseError> {
+    let unknown_props = collect_unknown_props(node, CELL_KNOWN_PROPS);
     Ok(TableCell {
         colspan: optional_u32_prop(node, "colspan").unwrap_or(1),
         rowspan: optional_u32_prop(node, "rowspan").unwrap_or(1),
@@ -1944,6 +1962,7 @@ fn transform_cell(node: &KdlNode) -> Result<TableCell, ParseError> {
         h_align: optional_string_prop_aliased(node, "h-align", "h_align").map(str::to_owned),
         v_align: optional_string_prop_aliased(node, "v-align", "v_align").map(str::to_owned),
         source_span: node_span(node),
+        unknown_props,
     })
 }
 
@@ -1958,9 +1977,11 @@ fn transform_row(node: &KdlNode) -> Result<TableRow, ParseError> {
             }
         }
     }
+    let unknown_props = collect_unknown_props(node, ROW_KNOWN_PROPS);
     Ok(TableRow {
         cells,
         source_span: node_span(node),
+        unknown_props,
     })
 }
 
@@ -1976,6 +1997,7 @@ fn transform_table(node: &KdlNode) -> Result<TableNode, ParseError> {
                 "column" => columns.push(TableColumn {
                     width: optional_dimension_prop(child, "width"),
                     source_span: node_span(child),
+                    unknown_props: collect_unknown_props(child, COLUMN_KNOWN_PROPS),
                 }),
                 "row" => rows.push(transform_row(child)?),
                 _ => {}

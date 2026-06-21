@@ -185,6 +185,15 @@ fn write_table_cell(c: &TableCell, out: &mut String, depth: usize) {
     write_opt_property_value(out, "border-width", &c.border_width);
     write_opt_str(out, "h-align", &c.h_align);
     write_opt_str(out, "v-align", &c.v_align);
+
+    // Unknown properties in sorted key order (BTreeMap iteration is sorted).
+    for (key, prop) in &c.unknown_props {
+        out.push(' ');
+        out.push_str(key);
+        out.push('=');
+        out.push_str(&fmt_unknown_value(&prop.value));
+    }
+
     out.push_str(" {\n");
     write_children_block(&c.children, out, depth);
     indent(out, depth);
@@ -193,7 +202,17 @@ fn write_table_cell(c: &TableCell, out: &mut String, depth: usize) {
 
 fn write_table_row(r: &TableRow, out: &mut String, depth: usize) {
     indent(out, depth);
-    out.push_str("row {\n");
+    out.push_str("row");
+
+    // Unknown properties in sorted key order (BTreeMap iteration is sorted).
+    for (key, prop) in &r.unknown_props {
+        out.push(' ');
+        out.push_str(key);
+        out.push('=');
+        out.push_str(&fmt_unknown_value(&prop.value));
+    }
+
+    out.push_str(" {\n");
     for cell in &r.cells {
         write_table_cell(cell, out, depth + 1);
     }
@@ -251,6 +270,13 @@ fn write_table(t: &TableNode, out: &mut String, depth: usize) {
         indent(out, depth + 1);
         out.push_str("column");
         write_opt_dimension(out, "width", &col.width);
+        // Unknown properties in sorted key order (BTreeMap iteration is sorted).
+        for (key, prop) in &col.unknown_props {
+            out.push(' ');
+            out.push_str(key);
+            out.push('=');
+            out.push_str(&fmt_unknown_value(&prop.value));
+        }
         out.push('\n');
     }
     for row in &t.rows {
