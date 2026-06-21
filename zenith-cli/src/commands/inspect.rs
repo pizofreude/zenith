@@ -356,12 +356,12 @@ fn build_node_entry(node: &Node) -> NodeEntry {
             children: vec![],
         },
         Node::Unknown(n) => NodeEntry {
-            id: String::new(),
+            id: n.id.clone().unwrap_or_default(),
             kind: n.kind.clone(),
             geometry: None,
             visible: None,
             locked: None,
-            children: vec![],
+            children: n.children.iter().map(build_node_entry).collect(),
         },
     }
 }
@@ -386,7 +386,7 @@ fn search_nodes(nodes: &[Node], id: &str) -> Option<NodeEntry> {
         if node_id == id {
             return Some(build_node_entry(node));
         }
-        // Recurse into Frame/Group children via node_children.
+        // Recurse into Frame/Group/Unknown children via node_children.
         if let Some(children) = node_children(node)
             && let Some(found) = search_nodes(children, id)
         {
@@ -426,7 +426,7 @@ fn node_id_str(node: &Node) -> &str {
         Node::Table(n) => &n.id,
         Node::Shape(n) => &n.id,
         Node::Connector(n) => &n.id,
-        Node::Unknown(_) => "",
+        Node::Unknown(n) => n.id.as_deref().unwrap_or(""),
     }
 }
 
@@ -437,6 +437,7 @@ fn node_children(node: &Node) -> Option<&[Node]> {
         Node::Frame(FrameNode { children, .. }) | Node::Group(GroupNode { children, .. }) => {
             Some(children)
         }
+        Node::Unknown(n) => Some(&n.children),
         _ => None,
     }
 }
@@ -907,5 +908,65 @@ mod tests {
         let err = result.unwrap_err();
         assert_eq!(err.exit_code, 2);
         assert!(err.message.contains("no.such.node"));
+    }
+
+    // ── Unknown (library) node descent ────────────────────────────────────────
+
+    // A doc with an unknown node kind (`mystery`) carrying an `id` and a known
+    // `rect` child, so we can assert that inspect surfaces the unknown node with
+    // its id and descends into its children.
+    const UNKNOWN_INSPECT_DOC: &str = r##"zenith version=1 {
+  project id="proj.u" name="Unknown Inspect"
+  tokens format="zenith-token-v1" {}
+  styles {}
+  document id="doc.u" title="Unknown Inspect" {
+    page id="page.u" w=(px)640 h=(px)400 {
+      mystery id="lib.1" {
+        rect id="inner" x=(px)0 y=(px)0 w=(px)50 h=(px)50
+      }
+    }
+  }
+}
+"##;
+
+    #[test]
+    fn doc_tree_unknown_node_shows_id_and_children() {
+        let doc = KdlAdapter.parse(UNKNOWN_INSPECT_DOC.as_bytes()).unwrap();
+        let pages = build_doc_tree(&doc.body.pages);
+        let unknown = &pages[0].children[0];
+        assert_eq!(unknown.id, "lib.1", "unknown node must expose its id");
+        assert_eq!(unknown.kind, "mystery", "unknown node keeps its kind");
+        assert_eq!(
+            unknown.children.len(),
+            1,
+            "unknown node subtree must include its child"
+        );
+        assert_eq!(unknown.children[0].id, "inner");
+        assert_eq!(unknown.children[0].kind, "rect");
+    }
+
+    #[test]
+    fn find_unknown_node_by_id() {
+        let doc = KdlAdapter.parse(UNKNOWN_INSPECT_DOC.as_bytes()).unwrap();
+        let found = find_node_tree(&doc.body.pages, "lib.1");
+        assert!(found.is_some(), "unknown node must be findable by id");
+        let e = found.unwrap();
+        assert_eq!(e.id, "lib.1");
+        assert_eq!(e.kind, "mystery");
+        assert_eq!(e.children.len(), 1, "subtree must include the child");
+        assert_eq!(e.children[0].id, "inner");
+    }
+
+    #[test]
+    fn find_known_node_inside_unknown() {
+        let doc = KdlAdapter.parse(UNKNOWN_INSPECT_DOC.as_bytes()).unwrap();
+        let found = find_node_tree(&doc.body.pages, "inner");
+        assert!(
+            found.is_some(),
+            "known rect nested in an unknown node must be findable"
+        );
+        let e = found.unwrap();
+        assert_eq!(e.id, "inner");
+        assert_eq!(e.kind, "rect");
     }
 }

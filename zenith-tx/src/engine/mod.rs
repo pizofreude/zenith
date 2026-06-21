@@ -460,6 +460,7 @@ pub(super) fn subtree_contains(node: &Node, id: &str) -> bool {
                 .iter()
                 .any(|c| c.children.iter().any(|ch| subtree_contains(ch, id)))
         }),
+        Node::Unknown(u) => u.children.iter().any(|c| subtree_contains(c, id)),
         _ => false,
     }
 }
@@ -524,6 +525,9 @@ fn find_in_children_any_mut<'a>(children: &'a mut [Node], id: &str) -> Option<&'
             {
                 Some(Hit::Descend(i))
             }
+            Node::Unknown(u) if u.children.iter().any(|c| subtree_contains(c, id)) => {
+                Some(Hit::Descend(i))
+            }
             _ => None,
         }
     });
@@ -545,6 +549,7 @@ fn find_in_children_any_mut<'a>(children: &'a mut [Node], id: &str) -> Option<&'
                 }
                 None
             }
+            Some(Node::Unknown(u)) => find_in_children_any_mut(&mut u.children, id),
             _ => None, // unreachable: phase-1 confirmed a container at i
         },
     }
@@ -576,6 +581,11 @@ pub(super) fn find_node_shared<'a>(children: &'a [Node], id: &str) -> Option<&'a
                     }
                 }
             }
+            Node::Unknown(u) => {
+                if let Some(found) = find_node_shared(&u.children, id) {
+                    return Some(found);
+                }
+            }
             _ => {}
         }
     }
@@ -602,7 +612,7 @@ pub(super) fn node_id_of(node: &Node) -> Option<&str> {
         Node::Table(t) => Some(&t.id),
         Node::Shape(s) => Some(&s.id),
         Node::Connector(c) => Some(&c.id),
-        Node::Unknown(_) => None,
+        Node::Unknown(u) => u.id.as_deref(),
     }
 }
 

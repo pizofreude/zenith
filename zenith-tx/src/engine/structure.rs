@@ -78,7 +78,8 @@ pub(super) fn apply_reorder(
 }
 
 /// Reorder the node with `id` within whatever children slice directly contains
-/// it, according to `kind`. Recurses into `Group` and `Frame` containers.
+/// it, according to `kind`. Recurses into `Group`, `Frame`, `Table`, and
+/// `Unknown` containers.
 fn reorder_in(children: &mut [Node], id: &str, kind: ReorderKind) -> MoveOutcome {
     if let Some(i) = children.iter().position(|n| node_id_of(n) == Some(id)) {
         let len = children.len();
@@ -134,6 +135,10 @@ fn reorder_in(children: &mut [Node], id: &str, kind: ReorderKind) -> MoveOutcome
                     }
                 }
             }
+            Node::Unknown(u) => match reorder_in(&mut u.children, id, kind) {
+                MoveOutcome::NotFound => {}
+                other => return other,
+            },
             _ => {}
         }
     }
@@ -252,8 +257,9 @@ fn find_container_in_children_mut<'a>(
     }
 }
 
-/// Remove the node with `id` from `children` or any nested `group`/`frame`
-/// container within it, returning the removed node, or `None` if absent.
+/// Remove the node with `id` from `children` or any nested container
+/// (`group`, `frame`, `table` cell, or `unknown`) within it, returning the
+/// removed node, or `None` if absent.
 fn remove_node_by_id(children: &mut Vec<Node>, id: &str) -> Option<Node> {
     if let Some(i) = children.iter().position(|n| node_id_of(n) == Some(id)) {
         return Some(children.remove(i));
@@ -274,6 +280,7 @@ fn remove_node_by_id(children: &mut Vec<Node>, id: &str) -> Option<Node> {
                 }
                 found
             }
+            Node::Unknown(u) => remove_node_by_id(&mut u.children, id),
             _ => None,
         };
         if nested.is_some() {
@@ -470,10 +477,10 @@ fn node_is_container(node: &Node) -> bool {
 /// Mirrors [`node_id_of`] (the shared-borrow id reader). Only leaf variants
 /// are covered; `Frame` and `Group` are deliberately excluded because
 /// [`apply_duplicate_node`] rejects containers before calling this helper.
-/// Returns `false` only if called on an `Unknown` node (which has no id field)
-/// — that path is also unreachable from `apply_duplicate_node` because an
-/// `Unknown` node cannot be found by `node_id_of`, so it can never be the
-/// source.
+/// Returns `false` for containers and for an `Unknown` node (whose id lives in
+/// an `Option<String>`, set via [`node_set_id_any`], not this leaf setter). That
+/// path is unreachable from `apply_duplicate_node`, which rejects containers up
+/// front and never duplicates an unknown node verbatim.
 fn node_set_id(node: &mut Node, new_id: String) -> bool {
     match node {
         Node::Rect(r) => {
@@ -529,8 +536,9 @@ fn node_set_id(node: &mut Node, new_id: String) -> bool {
             true
         }
         // Containers (and the container-ish instance) are handled by the v0
-        // guard in apply_duplicate_node; Unknown nodes have no id field and are
-        // never reached here.
+        // guard in apply_duplicate_node. An Unknown node's id lives in an
+        // `Option<String>` (not the leaf `id: String` this setter writes); its
+        // re-id path goes through `node_set_id_any`, so it returns false here.
         Node::Frame(_) | Node::Group(_) | Node::Instance(_) | Node::Table(_) | Node::Unknown(_) => {
             false
         }
@@ -573,6 +581,7 @@ fn duplicate_in_children(children: &mut Vec<Node>, id: &str, new_id: &str) -> bo
                 .iter_mut()
                 .flat_map(|row| row.cells.iter_mut().map(|cell| &mut cell.children))
                 .collect(),
+            Node::Unknown(u) => vec![&mut u.children],
             _ => Vec::new(),
         };
         for list in lists {
@@ -654,7 +663,7 @@ pub(super) fn apply_duplicate_node(
 // ── DuplicatePage ─────────────────────────────────────────────────────────────
 
 /// Recursively append `id_suffix` to the id of every node in `children`,
-/// descending into `group`/`frame` containers.
+/// descending into `group`/`frame`/`table`/`unknown` containers.
 ///
 /// Mirrors the ordered recursion of [`duplicate_in_children`]: a plain in-order
 /// walk over the slice with no HashMap, so the result is deterministic. Ids are
@@ -678,6 +687,7 @@ fn suffix_ids_in_children(children: &mut [Node], id_suffix: &str) {
                     }
                 }
             }
+            Node::Unknown(u) => suffix_ids_in_children(&mut u.children, id_suffix),
             _ => {}
         }
     }
@@ -688,8 +698,9 @@ fn suffix_ids_in_children(children: &mut [Node], id_suffix: &str) {
 /// [`node_set_id`] deliberately excludes `Frame`/`Group` because the leaf-only
 /// `duplicate_node` path never re-ids a container. `duplicate_page` does need to
 /// re-id containers, so this sibling covers every variant that [`node_id_of`]
-/// can read an id from. `Unknown` has no id field and is a no-op (it is also
-/// never reached: `node_id_of` returns `None` for it, so the caller skips it).
+/// can read an id from. `Unknown` nodes that carry an `id` attribute are re-id'd
+/// here; those without one are a no-op (the caller skips them: `node_id_of`
+/// returns `None`, so no suffix is computed and this function is not called).
 fn node_set_id_any(node: &mut Node, new_id: String) {
     match node {
         Node::Frame(f) => f.id = new_id,
@@ -716,7 +727,15 @@ fn node_set_id_any(node: &mut Node, new_id: String) {
         | Node::Connector(_) => {
             node_set_id(node, new_id);
         }
-        Node::Unknown(_) => {}
+        // An unknown node is id-bearing when authored with an `id` attribute;
+        // re-id it on page-duplicate so cloned subtrees stay unique. When it has
+        // no id this is a no-op (the caller also skips it: `node_id_of` returns
+        // `None`, so no suffix is computed).
+        Node::Unknown(u) => {
+            if u.id.is_some() {
+                u.id = Some(new_id);
+            }
+        }
     }
 }
 

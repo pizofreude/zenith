@@ -517,6 +517,38 @@ pub const STYLE_PROP_DOC: &str = r##"zenith version=1 {
   }
 }"##;
 
+/// A known `rect id="inner"` nested inside an unknown (`mystery`) node that
+/// carries its own `id`. Used to prove the tx finders descend into unknown
+/// children and that the unknown node itself is targetable by id.
+pub const UNKNOWN_WITH_INNER_DOC: &str = r##"zenith version=1 {
+  project id="proj" name="Test"
+  tokens format="zenith-token-v1" { }
+  styles { }
+  document id="doc1" title="T" {
+    page id="pg1" w=(px)400 h=(px)300 {
+      mystery id="lib1" {
+        rect id="inner" x=(px)0 y=(px)0 w=(px)50 h=(px)50
+      }
+    }
+  }
+}"##;
+
+/// A page whose single page-level node is an unknown (`mystery`) node, used as
+/// the would-be parent in a reparent-into-unknown rejection test.
+pub const UNKNOWN_PARENT_DOC: &str = r##"zenith version=1 {
+  project id="proj" name="Test"
+  tokens format="zenith-token-v1" { }
+  styles { }
+  document id="doc1" title="T" {
+    page id="pg1" w=(px)400 h=(px)300 {
+      mystery id="lib1" {
+        rect id="inner" x=(px)0 y=(px)0 w=(px)50 h=(px)50
+      }
+      rect id="outer" x=(px)0 y=(px)0 w=(px)100 h=(px)100
+    }
+  }
+}"##;
+
 /// Three rects unevenly placed on the x axis: positions 0, 30, 100, widths 20.
 /// Span = (100+20) - 0 = 120. Σsizes = 60. gap = (120-60)/2 = 30.
 /// Distributed leading edges: 0, 0+20+30=50, 50+20+30=100.
