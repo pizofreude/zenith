@@ -1,0 +1,28 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "io.github.farhan-syah/zenith",
+  "description": "Author, validate, and render deterministic .zen design documents (KDL → PNG/PDF). Exposes validate, inspect, tokens, fmt, render, tx, merge, and theme as MCP tools.",
+  "version": "0.1.0",
+  "repository": {
+    "url": "https://github.com/farhan-syah/zenith",
+    "source": "github"
+  },
+  "packages": [
+    {
+      "registryType": "cargo",
+      "registryBaseUrl": "https://crates.io",
+      "identifier": "zenith-tool",
+      "version": "0.1.0",
+      "transport": {
+        "type": "stdio"
+      },
+      "runtimeArguments": [
+        {
+          "type": "positional",
+          "value": "mcp",
+          "description": "Run the installed `zenith` binary as an MCP server over stdio."
+        }
+      ]
+    }
+  ]
+}
