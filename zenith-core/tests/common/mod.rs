@@ -24,6 +24,7 @@ pub use zenith_core::{
     TokenLiteral, TokenType, TokenValue, Unit, UnknownNode, UnknownStyleProp, ValidationReport,
     validate,
 };
+pub use zenith_core::{KdlAdapter, KdlSource};
 
 // ── Builder helpers ────────────────────────────────────────────────────────
 
@@ -314,5 +315,133 @@ pub fn color_token_hex(id: &str, hex: &str) -> Token {
         token_type: TokenType::Color,
         value: TokenValue::Literal(TokenLiteral::String(hex.to_owned())),
         source_span: None,
+    }
+}
+
+// ── Span-stripping helpers (shared by the format/writer round-trip suite) ────
+//
+// Round-trip tests compare a parsed `Document` against the same document after a
+// format → re-parse cycle. Source spans are byte-position metadata that
+// legitimately differ between the original source and the reformatted canonical
+// form, so they are cleared before comparison. These operate purely on the
+// public AST surface.
+
+/// Strip all source spans from a Document to enable span-agnostic equality.
+pub fn strip_spans(mut doc: Document) -> Document {
+    // Assets
+    doc.assets.source_span = None;
+    for decl in &mut doc.assets.assets {
+        decl.source_span = None;
+    }
+    // Tokens
+    for token in &mut doc.tokens.tokens {
+        token.source_span = None;
+    }
+    // Styles
+    doc.styles.source_span = None;
+    for style in &mut doc.styles.styles {
+        style.source_span = None;
+    }
+    // Components
+    for comp in &mut doc.components {
+        comp.source_span = None;
+        for node in &mut comp.children {
+            strip_node_span(node);
+        }
+    }
+    // Masters
+    for master in &mut doc.masters {
+        master.source_span = None;
+        for node in &mut master.children {
+            strip_node_span(node);
+        }
+    }
+    // Libraries
+    for library in &mut doc.libraries {
+        library.source_span = None;
+    }
+    // Actions
+    for action in &mut doc.actions {
+        action.source_span = None;
+    }
+    // Sections
+    for section in &mut doc.sections {
+        section.source_span = None;
+    }
+    // Provenance
+    for prov in &mut doc.provenance {
+        prov.source_span = None;
+    }
+    // Pages and nodes
+    for page in &mut doc.body.pages {
+        page.source_span = None;
+        for zone in &mut page.safe_zones {
+            zone.source_span = None;
+        }
+        for fold in &mut page.folds {
+            fold.source_span = None;
+        }
+        for node in &mut page.children {
+            strip_node_span(node);
+        }
+    }
+    doc
+}
+
+/// Recursively clear `source_span` from a node and all its descendants.
+pub fn strip_node_span(node: &mut Node) {
+    match node {
+        Node::Rect(r) => r.source_span = None,
+        Node::Ellipse(e) => e.source_span = None,
+        Node::Line(l) => l.source_span = None,
+        Node::Text(t) => t.source_span = None,
+        Node::Code(c) => c.source_span = None,
+        Node::Frame(f) => {
+            f.source_span = None;
+            for child in &mut f.children {
+                strip_node_span(child);
+            }
+        }
+        Node::Group(g) => {
+            g.source_span = None;
+            for child in &mut g.children {
+                strip_node_span(child);
+            }
+        }
+        Node::Image(i) => i.source_span = None,
+        Node::Polygon(p) => p.source_span = None,
+        Node::Polyline(p) => p.source_span = None,
+        Node::Instance(i) => {
+            i.source_span = None;
+            for ov in &mut i.overrides {
+                ov.source_span = None;
+            }
+        }
+        Node::Field(f) => f.source_span = None,
+        Node::Toc(t) => t.source_span = None,
+        Node::Footnote(f) => f.source_span = None,
+        Node::Table(t) => {
+            t.source_span = None;
+            for col in &mut t.columns {
+                col.source_span = None;
+            }
+            for row in &mut t.rows {
+                row.source_span = None;
+                for cell in &mut row.cells {
+                    cell.source_span = None;
+                    for child in &mut cell.children {
+                        strip_node_span(child);
+                    }
+                }
+            }
+        }
+        Node::Shape(s) => s.source_span = None,
+        Node::Connector(c) => c.source_span = None,
+        Node::Unknown(u) => {
+            u.source_span = None;
+            for child in &mut u.children {
+                strip_node_span(child);
+            }
+        }
     }
 }
