@@ -9,6 +9,7 @@ pub mod fmt;
 pub mod inspect;
 pub mod library;
 pub mod merge;
+pub mod plugin;
 pub mod render;
 pub mod theme;
 pub mod tokens;
