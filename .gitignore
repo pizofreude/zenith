@@ -10,9 +10,7 @@
 # Conformance scratch (sim .zen + rendered PNGs) — regenerable, promoted to tests later.
 /conformance/
 
-# Agent/editor local instructions and caches
-AGENTS.md
-CLAUDE.md
+# Agent/editor local caches and scratch (AGENTS.md + CLAUDE.md are tracked, public docs)
 .codex/
 .claude/
 .agents/

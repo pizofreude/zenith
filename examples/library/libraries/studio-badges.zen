@@ -1,0 +1,30 @@
+zenith version=1 {
+  project id="@studio/badges" name="Studio Badges"
+  libraries {
+    library id="@studio/badges" version="0.1.0"
+  }
+  tokens format="zenith-token-v1" {
+    token id="badge.fill" type="color" value="#fde68a"
+    token id="badge.stroke" type="color" value="#b45309"
+    token id="badge.ink" type="color" value="#7c2d12"
+    token id="badge.bw" type="dimension" value=(px)2
+    token id="badge.pad" type="dimension" value=(px)12
+    token id="badge.ff" type="fontFamily" value="Noto Sans"
+    token id="badge.fs" type="dimension" value=(px)22
+  }
+  styles {
+    style id="badge.label" {
+      font-family (token)"badge.ff"
+      font-size (token)"badge.fs"
+      fill (token)"badge.ink"
+    }
+  }
+  components {
+    component id="pill" {
+      shape id="shape" kind="terminator" x=(px)0 y=(px)0 w=(px)180 h=(px)60 fill=(token)"badge.fill" stroke=(token)"badge.stroke" stroke-width=(token)"badge.bw" padding=(token)"badge.pad" text-style="badge.label" { span "NEW" }
+    }
+  }
+  document id="pack.preview" title="Studio Badges pack preview" {
+    page id="pack.pg" name="Preview" w=(px)100 h=(px)100 {}
+  }
+}

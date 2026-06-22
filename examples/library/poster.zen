@@ -1,0 +1,15 @@
+zenith version=1 {
+  project id="proj.poster" name="Library Target Poster"
+  tokens format="zenith-token-v1" {
+    token id="color.bg" type="color" value="#1e293b"
+    token id="color.ink" type="color" value="#f8fafc"
+    token id="font.body" type="fontFamily" value="Noto Sans"
+    token id="size.title" type="dimension" value=(px)40
+  }
+  styles {}
+  document id="doc.poster" title="Library Target Poster" {
+    page id="page.poster" w=(px)480 h=(px)320 background=(token)"color.bg" {
+      text id="text.title" x=(px)40 y=(px)200 w=(px)400 h=(px)80 fill=(token)"color.ink" font-family=(token)"font.body" font-size=(token)"size.title" { span "Spring Sale" }
+    }
+  }
+}
