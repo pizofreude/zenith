@@ -4,7 +4,34 @@
 //! strings and a [`tempfile::TempDir`] as the output directory, following the
 //! pattern established by `tx_pipeline.rs`.
 
+use tempfile::TempDir;
 use zenith_cli::commands::merge::run as merge_run;
+
+// ── Shared fixture helper ─────────────────────────────────────────────────────
+
+/// Write a minimal valid PNG of `w × h` pixels into `dir/<name>.png` and
+/// return the relative filename (e.g. `"a.png"`). The pixmap is filled with an
+/// OPAQUE color derived from `name`, so two differently-named fixtures produce
+/// visibly different renders — this is what lets the image-swap tests prove a
+/// per-row asset actually reached the raster (a transparent fixture would
+/// render identically regardless of the swap).
+fn write_test_png(dir: &TempDir, name: &str, w: u32, h: u32) -> String {
+    let filename = format!("{name}.png");
+    let path = dir.path().join(&filename);
+    let mut pixmap =
+        tiny_skia::Pixmap::new(w, h).expect("Pixmap::new must succeed for positive dimensions");
+    // Distinct opaque color per fixture name (simple deterministic hash).
+    let seed = name.bytes().fold(0u32, |acc, b| {
+        acc.wrapping_mul(31).wrapping_add(u32::from(b))
+    });
+    let r = (seed & 0xff) as u8;
+    let g = ((seed >> 8) & 0xff) as u8;
+    let b = ((seed >> 16) & 0xff) as u8;
+    pixmap.fill(tiny_skia::Color::from_rgba8(r, g, b, 255));
+    let png_bytes = pixmap.encode_png().expect("encode_png must succeed");
+    std::fs::write(&path, &png_bytes).expect("could not write PNG fixture");
+    filename
+}
 
 // ── Minimal template document ──────────────────────────────────────────────────
 
@@ -211,5 +238,235 @@ fn data_role_on_non_text_node_returns_merge_error() {
         err.message.contains("non-text"),
         "error message must mention non-text; got: {}",
         err.message
+    );
+}
+
+// ── (f) Image column binding — two rows → two distinct PNGs ──────────────────
+
+/// A template with a `role="data.photo"` image node receives two rows with two
+/// distinct PNG files; both rows render successfully, and their output PNGs are
+/// different (because they embed different images).
+#[test]
+fn image_column_two_rows_produce_distinct_pngs() {
+    let project_dir = TempDir::new().expect("tempdir for project");
+    let out_dir = TempDir::new().expect("tempdir for output");
+
+    // Write two distinct PNG fixtures.  Different dimensions guarantee
+    // different pixel data even though the renderer renders them into the same
+    // box (the raster frame will differ).
+    let img_a = write_test_png(&project_dir, "photo_a", 32, 32);
+    let img_b = write_test_png(&project_dir, "photo_b", 64, 64);
+
+    // Template: one image node with role="data.photo"; a template asset
+    // ("asset.placeholder") is declared so the document parses cleanly.
+    // The merge engine will AddAsset a per-row asset and SetAsset the image
+    // node to point at it.
+    let placeholder = write_test_png(&project_dir, "placeholder", 8, 8);
+    let template = format!(
+        r##"zenith version=1 {{
+  project id="proj.imgmerge" name="Image Merge"
+  assets {{
+    asset id="asset.placeholder" kind="image" src="{placeholder}"
+  }}
+  tokens format="zenith-token-v1" {{
+    token id="color.bg" type="color" value="#ffffff"
+  }}
+  styles {{}}
+  document id="doc.imgmerge" title="Image Merge" {{
+    page id="page.imgmerge" w=(px)200 h=(px)200 {{
+      rect id="rect.bg" x=(px)0 y=(px)0 w=(px)200 h=(px)200 fill=(token)"color.bg"
+      image id="img.photo" asset="asset.placeholder" x=(px)10 y=(px)10 w=(px)180 h=(px)180 fit="stretch" role="data.photo"
+    }}
+  }}
+}}"##
+    );
+
+    let csv = format!("photo\n{img_a}\n{img_b}\n");
+    let report = merge_run(
+        &template,
+        &csv,
+        Some(project_dir.path()),
+        out_dir.path(),
+        None,
+    )
+    .expect("merge must succeed");
+
+    assert_eq!(
+        report.written.len(),
+        2,
+        "two rows must produce two PNGs; failed: {:?}",
+        report.failed
+    );
+    assert!(
+        report.failed.is_empty(),
+        "no rows should fail; got: {:?}",
+        report.failed
+    );
+
+    // Both files must be valid PNGs.
+    for name in &report.written {
+        let path = out_dir.path().join(name);
+        let bytes = std::fs::read(&path)
+            .unwrap_or_else(|e| panic!("could not read {}: {}", path.display(), e));
+        assert!(
+            bytes.len() >= 4 && &bytes[0..4] == b"\x89PNG",
+            "{} must be a valid PNG",
+            name
+        );
+    }
+
+    // The two output PNGs must differ (different source images).
+    let bytes_a = std::fs::read(out_dir.path().join(&report.written[0])).unwrap();
+    let bytes_b = std::fs::read(out_dir.path().join(&report.written[1])).unwrap();
+    assert_ne!(
+        bytes_a, bytes_b,
+        "rows with different images must produce different output PNGs"
+    );
+}
+
+// ── (g) Missing image file → that row fails, others succeed ──────────────────
+
+/// Row 0 has a valid image; row 1 references a path that does not exist on
+/// disk.  Row 1 must appear in `failed` and its PNG must NOT be written; row 0
+/// must still succeed.
+#[test]
+fn missing_image_file_fails_only_that_row() {
+    let project_dir = TempDir::new().expect("tempdir for project");
+    let out_dir = TempDir::new().expect("tempdir for output");
+
+    let good_img = write_test_png(&project_dir, "good", 16, 16);
+    let placeholder = write_test_png(&project_dir, "placeholder", 8, 8);
+
+    let template = format!(
+        r##"zenith version=1 {{
+  project id="proj.missingimg" name="Missing Img"
+  assets {{
+    asset id="asset.placeholder" kind="image" src="{placeholder}"
+  }}
+  tokens format="zenith-token-v1" {{
+    token id="color.bg" type="color" value="#ffffff"
+  }}
+  styles {{}}
+  document id="doc.missingimg" title="Missing Img" {{
+    page id="page.missingimg" w=(px)200 h=(px)200 {{
+      rect id="rect.bg" x=(px)0 y=(px)0 w=(px)200 h=(px)200 fill=(token)"color.bg"
+      image id="img.photo" asset="asset.placeholder" x=(px)10 y=(px)10 w=(px)180 h=(px)180 fit="stretch" role="data.photo"
+    }}
+  }}
+}}"##
+    );
+
+    // Row 0: valid file.  Row 1: file does not exist on disk.
+    let csv = format!("photo\n{good_img}\n__does_not_exist__.png\n");
+    let report = merge_run(
+        &template,
+        &csv,
+        Some(project_dir.path()),
+        out_dir.path(),
+        None,
+    )
+    .expect("merge run must not return Err (per-row failure is in report.failed)");
+
+    // Row 0 must succeed.
+    assert!(
+        report.written.contains(&"row-0001.png".to_owned()),
+        "row 0 (valid image) must succeed; written: {:?}",
+        report.written
+    );
+
+    // Row 1 must be in failed.
+    let row1_failed = report.failed.iter().any(|f| f.row == 1);
+    assert!(
+        row1_failed,
+        "row 1 (missing image) must be in failed; failed: {:?}",
+        report
+            .failed
+            .iter()
+            .map(|f| (f.row, &f.reason))
+            .collect::<Vec<_>>()
+    );
+
+    // The failed row's reason must mention the missing asset.
+    let row1_reason = report
+        .failed
+        .iter()
+        .find(|f| f.row == 1)
+        .map(|f| f.reason.as_str())
+        .unwrap_or("");
+    assert!(
+        row1_reason.contains("asset.missing") || row1_reason.contains("not found"),
+        "failure reason must mention asset.missing or not found; got: {}",
+        row1_reason
+    );
+
+    // Row 1's PNG must NOT have been written.
+    let row1_png = out_dir.path().join("row-0002.png");
+    assert!(
+        !row1_png.exists(),
+        "row-0002.png must NOT have been written for the missing-image row"
+    );
+}
+
+// ── (h) Empty image cell → template image used, row renders ──────────────────
+
+/// When the image column cell is empty for a row, the template image is left
+/// in place (no op is emitted for that node); the row must render successfully.
+#[test]
+fn empty_image_cell_uses_template_image_and_renders() {
+    let project_dir = TempDir::new().expect("tempdir for project");
+    let out_dir = TempDir::new().expect("tempdir for output");
+
+    let placeholder = write_test_png(&project_dir, "placeholder", 8, 8);
+
+    let template = format!(
+        r##"zenith version=1 {{
+  project id="proj.emptyimg" name="Empty Img"
+  assets {{
+    asset id="asset.placeholder" kind="image" src="{placeholder}"
+  }}
+  tokens format="zenith-token-v1" {{
+    token id="color.bg" type="color" value="#ffffff"
+  }}
+  styles {{}}
+  document id="doc.emptyimg" title="Empty Img" {{
+    page id="page.emptyimg" w=(px)200 h=(px)200 {{
+      rect id="rect.bg" x=(px)0 y=(px)0 w=(px)200 h=(px)200 fill=(token)"color.bg"
+      image id="img.photo" asset="asset.placeholder" x=(px)10 y=(px)10 w=(px)180 h=(px)180 fit="stretch" role="data.photo"
+    }}
+  }}
+}}"##
+    );
+
+    // Single row with an empty photo cell. A second (unbound) column keeps the
+    // row from being read as a blank line (which the CSV reader would drop).
+    let csv = "photo,note\n,placeholder-row\n";
+    let report = merge_run(
+        &template,
+        csv,
+        Some(project_dir.path()),
+        out_dir.path(),
+        None,
+    )
+    .expect("merge must succeed");
+
+    assert_eq!(
+        report.written.len(),
+        1,
+        "one row with empty image cell must still produce one PNG; failed: {:?}",
+        report.failed
+    );
+    assert!(
+        report.failed.is_empty(),
+        "empty image cell must not fail the row; got: {:?}",
+        report.failed
+    );
+
+    // Output must be a valid PNG.
+    let path = out_dir.path().join(&report.written[0]);
+    let bytes =
+        std::fs::read(&path).unwrap_or_else(|e| panic!("could not read {}: {}", path.display(), e));
+    assert!(
+        bytes.len() >= 4 && &bytes[0..4] == b"\x89PNG",
+        "output must be a valid PNG"
     );
 }
