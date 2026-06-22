@@ -1,9 +1,13 @@
-# Variants & mail-merge (`zenith merge`)
+# Data mail-merge (`zenith merge`)
 
 Turn **one template + a data table into many rendered designs** — deterministically. This is
 the high-volume path: localized posts (one row per language), personalized graphics (one row
 per recipient), campaign/product variants, certificates, badges, price cards. One template,
 N rows, N PNGs, each reproducible.
+
+> Not the same as `zenith variant`. This (`merge`) varies **content** across CSV rows. To render
+> one design at multiple **sizes/formats** (square/story/banner), use the `variants` block +
+> `zenith variant` — see `references/format-variants.md`.
 
 ## How it works
 
