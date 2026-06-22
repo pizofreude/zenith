@@ -530,70 +530,116 @@ pub fn run(
             }
         }
 
-        // Compile page 0.
-        let compile_result = compile_page(&row_doc, &fonts, 0);
+        // Determine page count; a row document with no pages is a hard failure.
+        let page_count = row_doc.body.pages.len();
+        if page_count == 0 {
+            failed.push(RowFailure {
+                row: row_idx,
+                reason: "row document has no pages".to_owned(),
+            });
+            continue;
+        }
 
-        // Block on Error-severity compile diagnostics (e.g. text.fit_failed).
-        let hard_diags: Vec<String> = compile_result
-            .diagnostics
-            .iter()
-            .filter(|d| d.severity == Severity::Error)
-            .map(|d| format!("error[{}]: {}", d.code, d.message))
+        // Derive the row stem once (hoist name logic before per-page work).
+        let row_stem = match name_by_index {
+            Some(col_idx) => sanitize_filename(record.get(col_idx).unwrap_or("")),
+            None => format!("row-{:04}", row_idx + 1),
+        };
+
+        // Build all output filenames for this row upfront.
+        let page_filenames: Vec<String> = (0..page_count)
+            .map(|pi| page_filename(&row_stem, pi, page_count))
             .collect();
-        if !hard_diags.is_empty() {
-            failed.push(RowFailure {
-                row: row_idx,
-                reason: format!("compile error(s): {}", hard_diags.join("; ")),
-            });
-            continue;
-        }
 
-        // Determine output filename.
-        let filename = match name_by_index {
-            Some(col_idx) => {
-                let cell = record.get(col_idx).unwrap_or("");
-                format!("{}.png", sanitize_filename(cell))
-            }
-            None => format!("row-{:04}.png", row_idx + 1),
-        };
-
-        // Collision check.
-        if used_names.contains(&filename) {
-            failed.push(RowFailure {
-                row: row_idx,
-                reason: format!("output filename collision: {}", filename),
-            });
-            continue;
-        }
-        used_names.insert(filename.clone());
-
-        // Render to PNG bytes, using row-scoped assets when image bindings exist.
-        let png_bytes = match &row_assets {
-            Some(ra) => render_png(&compile_result.scene, &fonts, ra),
-            None => render_png(&compile_result.scene, &fonts, &template_assets),
-        };
-        let png_bytes = match png_bytes {
-            Ok(b) => b,
-            Err(e) => {
+        // Pre-flight collision check: if ANY filename is already taken, fail
+        // the whole row without writing anything.
+        let mut collided = false;
+        for fname in &page_filenames {
+            if used_names.contains(fname) {
                 failed.push(RowFailure {
                     row: row_idx,
-                    reason: format!("render error: {}", e),
+                    reason: format!("output filename collision: {fname}"),
                 });
+                collided = true;
+                break;
+            }
+        }
+        if collided {
+            continue;
+        }
+
+        // Compile and render every page; collect failures.
+        let mut page_failures: Vec<String> = Vec::new();
+        let mut page_pngs: Vec<(String, Vec<u8>)> = Vec::new();
+
+        for (page_index, page_fname) in page_filenames.iter().enumerate() {
+            let compile_result = compile_page(&row_doc, &fonts, page_index);
+
+            // Block on Error-severity compile diagnostics.
+            let hard_diags: Vec<String> = compile_result
+                .diagnostics
+                .iter()
+                .filter(|d| d.severity == Severity::Error)
+                .map(|d| format!("error[{}]: {}", d.code, d.message))
+                .collect();
+            if !hard_diags.is_empty() {
+                page_failures.push(format!(
+                    "page {}: compile error(s): {}",
+                    page_index + 1,
+                    hard_diags.join("; ")
+                ));
                 continue;
             }
-        };
 
-        // Write immediately (stream — never accumulate all PNGs in memory).
-        let out_path = out_dir.join(&filename);
-        if let Err(e) = std::fs::write(&out_path, &png_bytes) {
+            // Render to PNG bytes, using row-scoped assets when image bindings exist.
+            let png_result = match &row_assets {
+                Some(ra) => render_png(&compile_result.scene, &fonts, ra),
+                None => render_png(&compile_result.scene, &fonts, &template_assets),
+            };
+            match png_result {
+                Ok(bytes) => {
+                    page_pngs.push((page_fname.clone(), bytes));
+                }
+                Err(e) => {
+                    page_failures.push(format!("page {}: render error: {}", page_index + 1, e));
+                }
+            }
+        }
+
+        // If any page failed, the whole row fails atomically — write nothing.
+        if !page_failures.is_empty() {
             failed.push(RowFailure {
                 row: row_idx,
-                reason: format!("write error '{}': {}", out_path.display(), e),
+                reason: page_failures.join("; "),
             });
             continue;
         }
 
-        written.push(filename);
+        // All pages rendered successfully — write them out in page order.
+        // Defer registering names into `used_names`/`written` until every write
+        // succeeds; otherwise a mid-row write failure would leave partial entries
+        // in `written` and permanently reserve those names in `used_names`.
+        let mut write_failed = false;
+        let mut newly_written: Vec<String> = Vec::new();
+        for (fname, bytes) in page_pngs {
+            let out_path = out_dir.join(&fname);
+            if let Err(e) = std::fs::write(&out_path, &bytes) {
+                failed.push(RowFailure {
+                    row: row_idx,
+                    reason: format!("write error '{}': {}", out_path.display(), e),
+                });
+                write_failed = true;
+                break;
+            }
+            newly_written.push(fname);
+        }
+        if write_failed {
+            continue;
+        }
+        for fname in newly_written {
+            used_names.insert(fname.clone());
+            written.push(fname);
+        }
     }
 
     Ok(MergeReport { written, failed })
@@ -608,6 +654,19 @@ pub fn run(
 /// ensures they can never diverge.
 fn row_asset_id(row_idx: usize, column: &str) -> String {
     format!("merge.row.{}.asset.{}", row_idx, column)
+}
+
+/// Output filename for one page of one row.
+///
+/// Single-page templates keep the bare stem (preserves existing behavior);
+/// multi-page templates use the `-page-N` suffix (1-based), matching
+/// `zenith render --all-pages`.
+fn page_filename(stem: &str, page_index: usize, page_count: usize) -> String {
+    if page_count == 1 {
+        format!("{stem}.png")
+    } else {
+        format!("{stem}-page-{}.png", page_index + 1)
+    }
 }
 
 fn severity_label(sev: &Severity) -> &'static str {

@@ -407,6 +407,160 @@ fn missing_image_file_fails_only_that_row() {
     );
 }
 
+// ── (i) Two-page template × two CSV rows → four PNGs ─────────────────────────
+
+/// Template with two pages, each carrying a `role="data.name"` text node in a
+/// generously-sized box so any reasonable value fits without overflow.
+const TWO_PAGE_TEMPLATE: &str = r##"zenith version=1 {
+  project id="proj.twopage" name="Two Page"
+  tokens format="zenith-token-v1" {
+    token id="color.bg" type="color" value="#ffffff"
+    token id="color.ink" type="color" value="#111111"
+  }
+  styles {}
+  document id="doc.twopage" title="Two Page" {
+    page id="page.one" w=(px)400 h=(px)200 {
+      rect id="rect.bg1" x=(px)0 y=(px)0 w=(px)400 h=(px)200 fill=(token)"color.bg"
+      text id="text.name1" x=(px)10 y=(px)10 w=(px)380 h=(px)180 fill=(token)"color.ink" role="data.name" {
+        span "PLACEHOLDER"
+      }
+    }
+    page id="page.two" w=(px)400 h=(px)200 {
+      rect id="rect.bg2" x=(px)0 y=(px)0 w=(px)400 h=(px)200 fill=(token)"color.bg"
+      text id="text.name2" x=(px)10 y=(px)10 w=(px)380 h=(px)180 fill=(token)"color.ink" role="data.name" {
+        span "PLACEHOLDER"
+      }
+    }
+  }
+}
+"##;
+
+/// Template with two pages; page 2 has a `role="data.name"` text node with
+/// `overflow="fit"` on a tiny box, so a long value on that page triggers
+/// `text.fit_failed`.
+const TWO_PAGE_OVERFLOW_FIT_TEMPLATE: &str = r##"zenith version=1 {
+  project id="proj.twopagefit" name="Two Page Fit"
+  tokens format="zenith-token-v1" {
+    token id="color.bg" type="color" value="#ffffff"
+    token id="color.ink" type="color" value="#111111"
+  }
+  styles {}
+  document id="doc.twopagefit" title="Two Page Fit" {
+    page id="page.one" w=(px)400 h=(px)200 {
+      rect id="rect.bg1" x=(px)0 y=(px)0 w=(px)400 h=(px)200 fill=(token)"color.bg"
+      text id="text.name1" x=(px)10 y=(px)10 w=(px)380 h=(px)180 fill=(token)"color.ink" role="data.name" {
+        span "PLACEHOLDER"
+      }
+    }
+    page id="page.two" w=(px)400 h=(px)200 {
+      rect id="rect.bg2" x=(px)0 y=(px)0 w=(px)400 h=(px)200 fill=(token)"color.bg"
+      text id="text.name2" x=(px)10 y=(px)10 w=(px)60 h=(px)40 overflow="fit" fill=(token)"color.ink" role="data.name" {
+        span "X"
+      }
+    }
+  }
+}
+"##;
+
+#[test]
+fn two_page_template_two_rows_produces_four_pngs() {
+    let csv = "name\nAlice\nBob\n";
+    let tmp = tempfile::TempDir::new().expect("tempdir");
+    let report =
+        merge_run(TWO_PAGE_TEMPLATE, csv, None, tmp.path(), None).expect("merge must succeed");
+
+    assert_eq!(
+        report.written.len(),
+        4,
+        "2 rows × 2 pages must produce 4 PNGs; failed: {:?}",
+        report.failed
+    );
+    assert!(
+        report.failed.is_empty(),
+        "no rows should fail; got: {:?}",
+        report.failed
+    );
+
+    // Names must follow the -page-N suffix convention in row-ascending order.
+    assert_eq!(
+        report.written,
+        vec![
+            "row-0001-page-1.png",
+            "row-0001-page-2.png",
+            "row-0002-page-1.png",
+            "row-0002-page-2.png",
+        ]
+    );
+
+    // Every file must start with PNG magic bytes.
+    for name in &report.written {
+        let path = tmp.path().join(name);
+        let bytes = std::fs::read(&path)
+            .unwrap_or_else(|e| panic!("could not read {}: {}", path.display(), e));
+        assert!(
+            bytes.len() >= 4 && &bytes[0..4] == b"\x89PNG",
+            "{} must be a valid PNG; got {} bytes",
+            name,
+            bytes.len()
+        );
+    }
+}
+
+// ── (j) Multi-page compile failure → whole row fails atomically ───────────────
+
+#[test]
+fn multipage_compile_failure_fails_whole_row() {
+    // Row 0 has a short name that fits on both pages.
+    // Row 1 has a very long name; page 2 has overflow="fit" on a 60×40 box,
+    // so it cannot fit — triggering text.fit_failed.
+    let csv = "name\nHi\nThe quick brown fox jumps over the lazy dog and keeps on going forever\n";
+    let tmp = tempfile::TempDir::new().expect("tempdir");
+    let report = merge_run(TWO_PAGE_OVERFLOW_FIT_TEMPLATE, csv, None, tmp.path(), None)
+        .expect("merge run itself must not error");
+
+    // Row 0 (short name) must succeed with two pages.
+    assert!(
+        report.written.contains(&"row-0001-page-1.png".to_owned()),
+        "row 0 page 1 must succeed; written: {:?}",
+        report.written
+    );
+    assert!(
+        report.written.contains(&"row-0001-page-2.png".to_owned()),
+        "row 0 page 2 must succeed; written: {:?}",
+        report.written
+    );
+
+    // Row 1 must appear in failed with the page number in the reason.
+    let row1_failure = report.failed.iter().find(|f| f.row == 1);
+    assert!(
+        row1_failure.is_some(),
+        "row 1 (long name) must be in failed; failed: {:?}",
+        report
+            .failed
+            .iter()
+            .map(|f| (f.row, &f.reason))
+            .collect::<Vec<_>>()
+    );
+    let row1_reason = &row1_failure.unwrap().reason;
+    assert!(
+        row1_reason.contains("page 2"),
+        "failure reason must mention 'page 2'; got: {}",
+        row1_reason
+    );
+
+    // Row 1's pages must NOT have been written (atomic failure).
+    let row1_p1 = tmp.path().join("row-0002-page-1.png");
+    let row1_p2 = tmp.path().join("row-0002-page-2.png");
+    assert!(
+        !row1_p1.exists(),
+        "row-0002-page-1.png must NOT have been written"
+    );
+    assert!(
+        !row1_p2.exists(),
+        "row-0002-page-2.png must NOT have been written"
+    );
+}
+
 // ── (h) Empty image cell → template image used, row renders ──────────────────
 
 /// When the image column cell is empty for a row, the template image is left
