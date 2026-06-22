@@ -20,6 +20,7 @@ pub mod commands;
 pub mod history;
 pub mod json_types;
 pub mod library;
+pub mod mcp;
 pub mod selfupdate;
 
 use std::io::Write as _;
@@ -794,6 +795,127 @@ pub fn run() -> ExitCode {
                 ExitCode::from(2)
             }
         },
+
+        Command::Theme(args) => match args.command {
+            cli::ThemeSub::New(a) => {
+                let scheme = match a.scheme.as_str() {
+                    "light" => zenith_core::theme::Scheme::Light,
+                    "dark" => zenith_core::theme::Scheme::Dark,
+                    other => {
+                        eprintln!("error: --scheme must be 'light' or 'dark', got '{other}'");
+                        return ExitCode::from(2);
+                    }
+                };
+                let input = commands::theme::ThemeInput {
+                    name: &a.name,
+                    scheme,
+                    primary: &a.primary,
+                    secondary: a.secondary.as_deref(),
+                    accent: a.accent.as_deref(),
+                    neutral: a.neutral.as_deref(),
+                    info: a.info.as_deref(),
+                    success: a.success.as_deref(),
+                    warning: a.warning.as_deref(),
+                    error: a.error.as_deref(),
+                    shape: commands::theme::Shape {
+                        radius_box: a.radius_box,
+                        radius_field: a.radius_field,
+                        radius_selector: a.radius_selector,
+                        border: a.border,
+                        depth: a.depth,
+                        noise: a.noise,
+                    },
+                };
+                match commands::theme::new(&input) {
+                    Ok(source) => {
+                        if let Some(path) = &a.out {
+                            if let Err(e) = std::fs::write(path, &source) {
+                                eprintln!("error writing '{}': {}", path.display(), e);
+                                return ExitCode::from(2);
+                            }
+                            println!("wrote {}", path.display());
+                        } else {
+                            print!("{source}");
+                        }
+                        ExitCode::SUCCESS
+                    }
+                    Err(e) => {
+                        eprintln!("error: {}", e.message);
+                        ExitCode::from(e.exit_code)
+                    }
+                }
+            }
+        },
+
+        Command::Plugin(args) => {
+            let project_root = std::path::Path::new(".");
+            match args.command {
+                cli::PluginSub::Install(a) => {
+                    let targets = targets_from_flags(&a.agents);
+                    let code = commands::plugin::run_install(
+                        project_root,
+                        targets,
+                        scope_from_arg(a.scope),
+                        a.force,
+                        a.dry_run,
+                    );
+                    ExitCode::from(code)
+                }
+                cli::PluginSub::Uninstall(a) => {
+                    let targets = targets_from_flags(&a.agents);
+                    let code = commands::plugin::run_uninstall(
+                        project_root,
+                        targets,
+                        scope_from_arg(a.scope),
+                        a.dry_run,
+                    );
+                    ExitCode::from(code)
+                }
+                cli::PluginSub::List => ExitCode::from(commands::plugin::run_list(project_root)),
+            }
+        }
+
+        Command::Mcp(_) => ExitCode::from(mcp::run()),
+    }
+}
+
+/// Map the CLI scope flag to the plugin module's [`Scope`](commands::plugin::Scope).
+fn scope_from_arg(scope: cli::ScopeArg) -> commands::plugin::Scope {
+    match scope {
+        cli::ScopeArg::User => commands::plugin::Scope::User,
+        cli::ScopeArg::Project => commands::plugin::Scope::Project,
+    }
+}
+
+/// Translate the per-agent boolean flags into a [`Targets`](commands::plugin::Targets)
+/// selection. `--all` wins; no flag set means auto-detect.
+fn targets_from_flags(f: &cli::AgentFlags) -> commands::plugin::Targets {
+    use commands::plugin::{Agent, Targets};
+    if f.all {
+        return Targets::All;
+    }
+    let mut agents = Vec::new();
+    let mut push = |on: bool, a: Agent| {
+        if on {
+            agents.push(a);
+        }
+    };
+    push(f.claude, Agent::ClaudeCode);
+    push(f.codex, Agent::Codex);
+    push(f.opencode, Agent::OpenCode);
+    push(f.cursor, Agent::Cursor);
+    push(f.windsurf, Agent::Windsurf);
+    push(f.aider, Agent::Aider);
+    push(f.zed, Agent::Zed);
+    push(f.gemini, Agent::Gemini);
+    push(f.copilot, Agent::Copilot);
+    push(f.continue_dev, Agent::Continue);
+    push(f.kiro, Agent::Kiro);
+    push(f.antigravity, Agent::Antigravity);
+    if agents.is_empty() {
+        Targets::Auto
+    } else {
+        Targets::Agents(agents)
     }
 }
 
