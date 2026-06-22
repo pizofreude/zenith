@@ -1,10 +1,73 @@
 //! Scalar literal, alias-chain, cycle, reference, type-mismatch, duplicate-id,
-//! and invalid-value resolution tests.
+//! and invalid-value token-resolution integration tests.
+//!
+//! Exercises the public token-resolution API (`zenith_core::resolve_tokens`)
+//! against built `TokenBlock`s, checking resolved values and diagnostics.
 
-use super::super::{ResolvedValue, resolve_tokens};
-use super::{alias_token, block, codes, gradient_token, has_code, literal_token};
-use crate::ast::token::{TokenLiteral, TokenType};
-use crate::ast::value::{Dimension, Unit};
+use zenith_core::{
+    Diagnostic, GradientKind, GradientLiteral, GradientStopRef, ResolvedValue, Severity, Token,
+    TokenBlock, TokenLiteral, TokenType, TokenValue, resolve_tokens,
+};
+use zenith_core::{Dimension, Unit};
+
+// ── Builder helpers ───────────────────────────────────────────────────
+
+fn literal_token(id: &str, token_type: TokenType, literal: TokenLiteral) -> Token {
+    Token {
+        id: id.to_owned(),
+        token_type,
+        value: TokenValue::Literal(literal),
+        source_span: None,
+    }
+}
+
+fn alias_token(id: &str, token_type: TokenType, target: &str) -> Token {
+    Token {
+        id: id.to_owned(),
+        token_type,
+        value: TokenValue::Reference {
+            token_id: target.to_owned(),
+        },
+        source_span: None,
+    }
+}
+
+fn block(tokens: Vec<Token>) -> TokenBlock {
+    TokenBlock {
+        format: "zenith-token-v1".to_owned(),
+        tokens,
+    }
+}
+
+fn has_code(diagnostics: &[Diagnostic], code: &str) -> bool {
+    diagnostics.iter().any(|d| d.code == code)
+}
+
+fn codes(diagnostics: &[Diagnostic]) -> Vec<&str> {
+    diagnostics.iter().map(|d| d.code.as_str()).collect()
+}
+
+fn gradient_token(id: &str, angle_deg: f64, stops: Vec<(f64, &str)>) -> Token {
+    Token {
+        id: id.to_owned(),
+        token_type: TokenType::Gradient,
+        value: TokenValue::Literal(TokenLiteral::Gradient(GradientLiteral {
+            kind: GradientKind::Linear,
+            angle_deg,
+            center_x: None,
+            center_y: None,
+            radius: None,
+            stops: stops
+                .into_iter()
+                .map(|(offset, color)| GradientStopRef {
+                    offset,
+                    color_token: color.to_owned(),
+                })
+                .collect(),
+        })),
+        source_span: None,
+    }
+}
 
 // ── Literal resolution tests ──────────────────────────────────────────
 
@@ -480,7 +543,7 @@ fn unknown_type_produces_warning_and_is_not_resolved() {
         .iter()
         .find(|d| d.code == "token.unknown_type")
         .expect("should exist");
-    assert_eq!(unknown_diag.severity, crate::diagnostics::Severity::Warning);
+    assert_eq!(unknown_diag.severity, Severity::Warning);
     assert!(!r.resolved.contains_key("gradient.hero"));
 }
 

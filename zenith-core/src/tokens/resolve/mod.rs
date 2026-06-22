@@ -10,9 +10,6 @@ mod driver;
 mod types;
 mod validate;
 
-#[cfg(test)]
-mod tests;
-
 pub use driver::resolve_tokens;
 pub use types::{
     ResolvedFilter, ResolvedFilterOp, ResolvedGradient, ResolvedMask, ResolvedShadow,
