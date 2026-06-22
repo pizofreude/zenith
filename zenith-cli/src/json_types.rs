@@ -83,3 +83,24 @@ pub struct TxOutputJson {
     pub diagnostics: Vec<DiagnosticJson>,
     pub changed: bool,
 }
+
+/// Per-row result in the `merge --json` batch report.
+#[derive(Debug, Serialize)]
+pub struct MergeRowResult {
+    pub row: usize,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub key: Option<String>,
+    pub status: &'static str,
+    pub outputs: Vec<String>,
+    pub diagnostics: Vec<DiagnosticJson>,
+}
+
+/// Top-level JSON envelope for `merge --json`.
+#[derive(Debug, Serialize)]
+pub struct MergeOutput {
+    pub schema: &'static str,
+    pub total_rows: usize,
+    pub written: usize,
+    pub failed: usize,
+    pub rows: Vec<MergeRowResult>,
+}

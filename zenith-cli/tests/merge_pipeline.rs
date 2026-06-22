@@ -101,19 +101,20 @@ fn two_row_csv_writes_two_pngs_with_default_names() {
     let tmp = tempfile::TempDir::new().expect("tempdir");
     let report = merge_run(TEMPLATE_DOC, csv, None, tmp.path(), None).expect("merge must succeed");
 
-    assert_eq!(report.written.len(), 2, "two rows must produce two PNGs");
+    let written = report.written();
+    assert_eq!(written.len(), 2, "two rows must produce two PNGs");
     assert!(
-        report.failed.is_empty(),
+        report.failed().is_empty(),
         "no rows should fail; got: {:?}",
-        report.failed
+        report.rows
     );
 
     // Default names must be row-0001.png and row-0002.png.
-    assert_eq!(report.written[0], "row-0001.png");
-    assert_eq!(report.written[1], "row-0002.png");
+    assert_eq!(written[0], "row-0001.png");
+    assert_eq!(written[1], "row-0002.png");
 
     // Both files must start with the PNG magic bytes.
-    for name in &report.written {
+    for name in &written {
         let path = tmp.path().join(name);
         let bytes = std::fs::read(&path)
             .unwrap_or_else(|e| panic!("could not read {}: {}", path.display(), e));
@@ -135,18 +136,19 @@ fn name_by_column_produces_named_files() {
     let report =
         merge_run(TEMPLATE_DOC, csv, None, tmp.path(), Some("name")).expect("merge must succeed");
 
-    assert_eq!(report.written.len(), 2);
+    let written = report.written();
+    assert_eq!(written.len(), 2);
     assert!(
-        report.failed.is_empty(),
+        report.failed().is_empty(),
         "no rows should fail; got: {:?}",
-        report.failed
+        report.rows
     );
 
     // Names come from the `name` column, sanitized, with .png extension.
-    assert_eq!(report.written[0], "Alice.png");
-    assert_eq!(report.written[1], "Bob.png");
+    assert_eq!(written[0], "Alice.png");
+    assert_eq!(written[1], "Bob.png");
 
-    for name in &report.written {
+    for name in &written {
         let path = tmp.path().join(name);
         let bytes = std::fs::read(&path)
             .unwrap_or_else(|e| panic!("could not read {}: {}", path.display(), e));
@@ -171,20 +173,20 @@ fn overflow_fit_failure_goes_to_failed_not_written() {
 
     // Row 0 ("Hi") should succeed.
     assert!(
-        report.written.contains(&"row-0001.png".to_owned()),
+        report.written().contains(&"row-0001.png".to_owned()),
         "short value must succeed; written: {:?}",
-        report.written
+        report.written()
     );
 
     // Row 1 (long value) must appear in failed with no PNG on disk.
-    let row1_failed = report.failed.iter().any(|f| f.row == 1);
+    let row1_failed = report.failed().iter().any(|r| r.row == 1);
     assert!(
         row1_failed,
         "long-value row must be in failed; failed: {:?}",
         report
-            .failed
+            .failed()
             .iter()
-            .map(|f| (f.row, &f.reason))
+            .map(|r| (r.row, r.failure.as_deref().unwrap_or("")))
             .collect::<Vec<_>>()
     );
 
@@ -291,20 +293,21 @@ fn image_column_two_rows_produce_distinct_pngs() {
     )
     .expect("merge must succeed");
 
+    let written = report.written();
     assert_eq!(
-        report.written.len(),
+        written.len(),
         2,
         "two rows must produce two PNGs; failed: {:?}",
-        report.failed
+        report.rows
     );
     assert!(
-        report.failed.is_empty(),
+        report.failed().is_empty(),
         "no rows should fail; got: {:?}",
-        report.failed
+        report.rows
     );
 
     // Both files must be valid PNGs.
-    for name in &report.written {
+    for name in &written {
         let path = out_dir.path().join(name);
         let bytes = std::fs::read(&path)
             .unwrap_or_else(|e| panic!("could not read {}: {}", path.display(), e));
@@ -316,8 +319,8 @@ fn image_column_two_rows_produce_distinct_pngs() {
     }
 
     // The two output PNGs must differ (different source images).
-    let bytes_a = std::fs::read(out_dir.path().join(&report.written[0])).unwrap();
-    let bytes_b = std::fs::read(out_dir.path().join(&report.written[1])).unwrap();
+    let bytes_a = std::fs::read(out_dir.path().join(&written[0])).unwrap();
+    let bytes_b = std::fs::read(out_dir.path().join(&written[1])).unwrap();
     assert_ne!(
         bytes_a, bytes_b,
         "rows with different images must produce different output PNGs"
@@ -369,29 +372,29 @@ fn missing_image_file_fails_only_that_row() {
 
     // Row 0 must succeed.
     assert!(
-        report.written.contains(&"row-0001.png".to_owned()),
+        report.written().contains(&"row-0001.png".to_owned()),
         "row 0 (valid image) must succeed; written: {:?}",
-        report.written
+        report.written()
     );
 
     // Row 1 must be in failed.
-    let row1_failed = report.failed.iter().any(|f| f.row == 1);
+    let row1_failed = report.failed().iter().any(|r| r.row == 1);
     assert!(
         row1_failed,
         "row 1 (missing image) must be in failed; failed: {:?}",
         report
-            .failed
+            .failed()
             .iter()
-            .map(|f| (f.row, &f.reason))
+            .map(|r| (r.row, r.failure.as_deref().unwrap_or("")))
             .collect::<Vec<_>>()
     );
 
     // The failed row's reason must mention the missing asset.
     let row1_reason = report
-        .failed
-        .iter()
-        .find(|f| f.row == 1)
-        .map(|f| f.reason.as_str())
+        .failed()
+        .into_iter()
+        .find(|r| r.row == 1)
+        .and_then(|r| r.failure.as_deref())
         .unwrap_or("");
     assert!(
         row1_reason.contains("asset.missing") || row1_reason.contains("not found"),
@@ -469,21 +472,22 @@ fn two_page_template_two_rows_produces_four_pngs() {
     let report =
         merge_run(TWO_PAGE_TEMPLATE, csv, None, tmp.path(), None).expect("merge must succeed");
 
+    let written = report.written();
     assert_eq!(
-        report.written.len(),
+        written.len(),
         4,
         "2 rows × 2 pages must produce 4 PNGs; failed: {:?}",
-        report.failed
+        report.rows
     );
     assert!(
-        report.failed.is_empty(),
+        report.failed().is_empty(),
         "no rows should fail; got: {:?}",
-        report.failed
+        report.rows
     );
 
     // Names must follow the -page-N suffix convention in row-ascending order.
     assert_eq!(
-        report.written,
+        written,
         vec![
             "row-0001-page-1.png",
             "row-0001-page-2.png",
@@ -493,7 +497,7 @@ fn two_page_template_two_rows_produces_four_pngs() {
     );
 
     // Every file must start with PNG magic bytes.
-    for name in &report.written {
+    for name in &written {
         let path = tmp.path().join(name);
         let bytes = std::fs::read(&path)
             .unwrap_or_else(|e| panic!("could not read {}: {}", path.display(), e));
@@ -520,28 +524,28 @@ fn multipage_compile_failure_fails_whole_row() {
 
     // Row 0 (short name) must succeed with two pages.
     assert!(
-        report.written.contains(&"row-0001-page-1.png".to_owned()),
+        report.written().contains(&"row-0001-page-1.png".to_owned()),
         "row 0 page 1 must succeed; written: {:?}",
-        report.written
+        report.written()
     );
     assert!(
-        report.written.contains(&"row-0001-page-2.png".to_owned()),
+        report.written().contains(&"row-0001-page-2.png".to_owned()),
         "row 0 page 2 must succeed; written: {:?}",
-        report.written
+        report.written()
     );
 
     // Row 1 must appear in failed with the page number in the reason.
-    let row1_failure = report.failed.iter().find(|f| f.row == 1);
+    let row1_failure = report.failed().into_iter().find(|r| r.row == 1);
     assert!(
         row1_failure.is_some(),
         "row 1 (long name) must be in failed; failed: {:?}",
         report
-            .failed
+            .failed()
             .iter()
-            .map(|f| (f.row, &f.reason))
+            .map(|r| (r.row, r.failure.as_deref().unwrap_or("")))
             .collect::<Vec<_>>()
     );
-    let row1_reason = &row1_failure.unwrap().reason;
+    let row1_reason = row1_failure.unwrap().failure.as_deref().unwrap_or("");
     assert!(
         row1_reason.contains("page 2"),
         "failure reason must mention 'page 2'; got: {}",
@@ -603,24 +607,106 @@ fn empty_image_cell_uses_template_image_and_renders() {
     )
     .expect("merge must succeed");
 
+    let written = report.written();
     assert_eq!(
-        report.written.len(),
+        written.len(),
         1,
         "one row with empty image cell must still produce one PNG; failed: {:?}",
-        report.failed
+        report.rows
     );
     assert!(
-        report.failed.is_empty(),
+        report.failed().is_empty(),
         "empty image cell must not fail the row; got: {:?}",
-        report.failed
+        report.rows
     );
 
     // Output must be a valid PNG.
-    let path = out_dir.path().join(&report.written[0]);
+    let path = out_dir.path().join(&written[0]);
     let bytes =
         std::fs::read(&path).unwrap_or_else(|e| panic!("could not read {}: {}", path.display(), e));
     assert!(
         bytes.len() >= 4 && &bytes[0..4] == b"\x89PNG",
         "output must be a valid PNG"
+    );
+}
+
+// ── (k) JSON batch report with mixed ok/failed rows ───────────────────────────
+
+/// Two-row run using TWO_PAGE_OVERFLOW_FIT_TEMPLATE with --name-by name,
+/// asserting the MergeReport structure and the written()/failed() accessors:
+/// - row 0 ("alice", short name) succeeds and produces 2 pages.
+/// - row 1 ("bob_long_name_overflow", very long) fails on page 2 of the fit box.
+#[test]
+fn json_batch_report_mixed_run() {
+    // Row 0: short value fits on both pages.
+    // Row 1: long value cannot fit the 60×40 overflow=fit box on page 2.
+    let csv =
+        "name\nalice\nThe quick brown fox jumps over the lazy dog and keeps on going forever\n";
+    let tmp = tempfile::TempDir::new().expect("tempdir");
+    let report = merge_run(
+        TWO_PAGE_OVERFLOW_FIT_TEMPLATE,
+        csv,
+        None,
+        tmp.path(),
+        Some("name"),
+    )
+    .expect("merge run itself must not error");
+
+    // Two rows total.
+    assert_eq!(report.rows.len(), 2, "must have exactly 2 row results");
+
+    // Row 0: success, key == "alice", two output pages.
+    let r0 = &report.rows[0];
+    assert_eq!(r0.row, 0);
+    assert_eq!(r0.key.as_deref(), Some("alice"));
+    assert!(
+        r0.failure.is_none(),
+        "row 0 must succeed; failure: {:?}",
+        r0.failure
+    );
+    assert_eq!(
+        r0.outputs,
+        vec!["alice-page-1.png", "alice-page-2.png"],
+        "row 0 must produce two named pages"
+    );
+
+    // Row 1: failure, outputs empty.
+    let r1 = &report.rows[1];
+    assert_eq!(r1.row, 1);
+    assert!(r1.failure.is_some(), "row 1 must fail");
+    assert!(r1.outputs.is_empty(), "row 1 must have no outputs");
+
+    // Accessors agree.
+    assert_eq!(
+        report.written().len(),
+        2,
+        "written() must return row-0's two pages"
+    );
+    assert_eq!(
+        report.failed().len(),
+        1,
+        "failed() must return exactly row 1"
+    );
+
+    // Verify the two page files exist on disk.
+    for fname in &r0.outputs {
+        let path = tmp.path().join(fname);
+        let bytes = std::fs::read(&path)
+            .unwrap_or_else(|e| panic!("could not read {}: {}", path.display(), e));
+        assert!(
+            bytes.len() >= 4 && &bytes[0..4] == b"\x89PNG",
+            "{} must be a valid PNG",
+            fname
+        );
+    }
+
+    // Row 1's pages must NOT exist on disk (atomic failure).
+    assert!(
+        !tmp.path()
+            .join(
+                "The quick brown fox jumps over the lazy dog and keeps on going forever-page-1.png"
+            )
+            .exists(),
+        "row 1 page 1 must not have been written"
     );
 }

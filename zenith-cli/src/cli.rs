@@ -204,6 +204,10 @@ pub struct MergeArgs {
     /// CSV column to name each output file by (default: row-NNNN.png).
     #[arg(long, value_name = "COL")]
     pub name_by: Option<String>,
+
+    /// Emit a machine-readable JSON batch report (per-row provenance).
+    #[arg(long)]
+    pub json: bool,
 }
 
 /// Arguments for `zenith render`.

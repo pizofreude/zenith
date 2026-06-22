@@ -395,15 +395,24 @@ pub fn run() -> ExitCode {
                 args.name_by.as_deref(),
             ) {
                 Ok(report) => {
-                    println!(
-                        "wrote {} file(s) to '{}'",
-                        report.written.len(),
-                        args.out_dir.display()
-                    );
-                    for f in &report.failed {
-                        eprintln!("row {}: {}", f.row + 1, f.reason);
+                    if args.json {
+                        println!(
+                            "{}",
+                            serialize_pretty(&commands::merge::to_json_output(&report))
+                        );
+                    } else {
+                        let n_written = report.rows.iter().filter(|r| r.failure.is_none()).count();
+                        println!(
+                            "wrote {} file(s) to '{}'",
+                            n_written,
+                            args.out_dir.display()
+                        );
+                        for r in report.failed() {
+                            eprintln!("row {}: {}", r.row + 1, r.failure.as_deref().unwrap_or(""));
+                        }
                     }
-                    if report.failed.is_empty() {
+                    let n_failed = report.rows.iter().filter(|r| r.failure.is_some()).count();
+                    if n_failed == 0 {
                         ExitCode::SUCCESS
                     } else {
                         ExitCode::from(1u8)

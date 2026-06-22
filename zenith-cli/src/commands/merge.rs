@@ -14,6 +14,8 @@ use zenith_render::render_png;
 use zenith_scene::compile_page;
 use zenith_tx::{Op, OpSpan, Transaction, TxStatus, run_transaction};
 
+use crate::json_types::{DiagnosticJson, MergeOutput, MergeRowResult};
+
 use crate::commands::render::{
     build_asset_provider, build_font_provider, collect_missing_asset_diagnostics,
 };
@@ -44,22 +46,38 @@ impl MergeError {
 
 // ── Report types ──────────────────────────────────────────────────────────────
 
-/// One per-row failure.
+/// Result for one CSV data row.
 #[derive(Debug)]
-pub struct RowFailure {
-    /// 0-based row index in the CSV (header row not counted).
+pub struct RowResult {
+    /// 0-based CSV data row index.
     pub row: usize,
-    /// Human-readable reason.
-    pub reason: String,
+    /// The --name-by cell value, or None.
+    pub key: Option<String>,
+    /// Filenames written (empty on failure), page order.
+    pub outputs: Vec<String>,
+    /// None = ok; Some(reason) = failed.
+    pub failure: Option<String>,
 }
 
-/// Summary of a completed merge run.
+/// Summary of a completed merge run. `rows` is the single source of truth,
+/// in CSV order.
 #[derive(Debug)]
 pub struct MergeReport {
-    /// Filenames (not full paths) of PNGs successfully written, in row order.
-    pub written: Vec<String>,
-    /// Rows that were skipped due to per-row errors.
-    pub failed: Vec<RowFailure>,
+    pub rows: Vec<RowResult>,
+}
+
+impl MergeReport {
+    /// All successfully-written filenames, in row→page order.
+    pub fn written(&self) -> Vec<String> {
+        self.rows
+            .iter()
+            .flat_map(|r| r.outputs.iter().cloned())
+            .collect()
+    }
+    /// References to the rows that failed, in CSV order.
+    pub fn failed(&self) -> Vec<&RowResult> {
+        self.rows.iter().filter(|r| r.failure.is_some()).collect()
+    }
 }
 
 // ── Internal binding types ────────────────────────────────────────────────────
@@ -359,21 +377,22 @@ pub fn run(
     })?;
 
     // ── 7. Iterate CSV rows ───────────────────────────────────────────────
-    let mut written: Vec<String> = Vec::new();
-    let mut failed: Vec<RowFailure> = Vec::new();
+    let mut rows: Vec<RowResult> = Vec::new();
     let mut used_names: BTreeSet<String> = BTreeSet::new();
 
     for (row_idx, record_result) in reader.records().enumerate() {
         let record = match record_result {
             Ok(r) => r,
             Err(e) => {
-                failed.push(RowFailure {
-                    row: row_idx,
-                    reason: format!("CSV read error: {}", e),
-                });
+                push_failure(&mut rows, row_idx, None, format!("CSV read error: {}", e));
                 continue;
             }
         };
+
+        // Extract the row key once, as early as possible after the record is
+        // obtained, so it is available to every failure path that follows.
+        let row_key: Option<String> =
+            name_by_index.map(|col_idx| record.get(col_idx).unwrap_or("").to_owned());
 
         // Build Transaction ops: ReplaceText ops first, then asset ops.
         let mut ops: Vec<Op> = bindings
@@ -426,10 +445,12 @@ pub fn run(
         let tx_result = match run_transaction(&doc, &tx) {
             Ok(r) => r,
             Err(e) => {
-                failed.push(RowFailure {
-                    row: row_idx,
-                    reason: format!("transaction engine error: {}", e.message),
-                });
+                push_failure(
+                    &mut rows,
+                    row_idx,
+                    row_key,
+                    format!("transaction engine error: {}", e.message),
+                );
                 continue;
             }
         };
@@ -439,12 +460,21 @@ pub fn run(
             let msgs: Vec<String> = tx_result
                 .diagnostics
                 .iter()
-                .map(|d| format!("{}[{}]: {}", severity_label(&d.severity), d.code, d.message))
+                .map(|d| {
+                    format!(
+                        "{}[{}]: {}",
+                        crate::json_types::severity_str(&d.severity),
+                        d.code,
+                        d.message
+                    )
+                })
                 .collect();
-            failed.push(RowFailure {
-                row: row_idx,
-                reason: format!("transaction rejected: {}", msgs.join("; ")),
-            });
+            push_failure(
+                &mut rows,
+                row_idx,
+                row_key,
+                format!("transaction rejected: {}", msgs.join("; ")),
+            );
             continue;
         }
 
@@ -452,10 +482,12 @@ pub fn run(
         let row_doc = match KdlAdapter.parse(tx_result.source_after.as_bytes()) {
             Ok(d) => d,
             Err(e) => {
-                failed.push(RowFailure {
-                    row: row_idx,
-                    reason: format!("post-transaction parse error: {}", e.message),
-                });
+                push_failure(
+                    &mut rows,
+                    row_idx,
+                    row_key,
+                    format!("post-transaction parse error: {}", e.message),
+                );
                 continue;
             }
         };
@@ -469,10 +501,12 @@ pub fn run(
             None
         } else {
             let Some(dir) = project_dir else {
-                failed.push(RowFailure {
-                    row: row_idx,
-                    reason: "internal: project directory unexpectedly missing".to_owned(),
-                });
+                push_failure(
+                    &mut rows,
+                    row_idx,
+                    row_key,
+                    "internal: project directory unexpectedly missing".to_owned(),
+                );
                 continue;
             };
             // Start with template assets.
@@ -492,15 +526,17 @@ pub fn run(
                         row_provider.register(&asset_id, AssetKind::Image, bytes.into());
                     }
                     Err(e) => {
-                        failed.push(RowFailure {
-                            row: row_idx,
-                            reason: format!(
+                        push_failure(
+                            &mut rows,
+                            row_idx,
+                            row_key.clone(),
+                            format!(
                                 "error[asset.missing]: asset '{}' file not found: '{}': {}",
                                 asset_id,
                                 img_path.display(),
                                 e
                             ),
-                        });
+                        );
                         row_asset_missing = true;
                         break;
                     }
@@ -522,10 +558,12 @@ pub fn run(
                 .map(|d| format!("error[{}]: {}", d.code, d.message))
                 .collect();
             if !hard.is_empty() {
-                failed.push(RowFailure {
-                    row: row_idx,
-                    reason: format!("asset error(s): {}", hard.join("; ")),
-                });
+                push_failure(
+                    &mut rows,
+                    row_idx,
+                    row_key,
+                    format!("asset error(s): {}", hard.join("; ")),
+                );
                 continue;
             }
         }
@@ -533,10 +571,12 @@ pub fn run(
         // Determine page count; a row document with no pages is a hard failure.
         let page_count = row_doc.body.pages.len();
         if page_count == 0 {
-            failed.push(RowFailure {
-                row: row_idx,
-                reason: "row document has no pages".to_owned(),
-            });
+            push_failure(
+                &mut rows,
+                row_idx,
+                row_key,
+                "row document has no pages".to_owned(),
+            );
             continue;
         }
 
@@ -556,10 +596,12 @@ pub fn run(
         let mut collided = false;
         for fname in &page_filenames {
             if used_names.contains(fname) {
-                failed.push(RowFailure {
-                    row: row_idx,
-                    reason: format!("output filename collision: {fname}"),
-                });
+                push_failure(
+                    &mut rows,
+                    row_idx,
+                    row_key.clone(),
+                    format!("output filename collision: {fname}"),
+                );
                 collided = true;
                 break;
             }
@@ -608,26 +650,24 @@ pub fn run(
 
         // If any page failed, the whole row fails atomically — write nothing.
         if !page_failures.is_empty() {
-            failed.push(RowFailure {
-                row: row_idx,
-                reason: page_failures.join("; "),
-            });
+            push_failure(&mut rows, row_idx, row_key, page_failures.join("; "));
             continue;
         }
 
         // All pages rendered successfully — write them out in page order.
-        // Defer registering names into `used_names`/`written` until every write
-        // succeeds; otherwise a mid-row write failure would leave partial entries
-        // in `written` and permanently reserve those names in `used_names`.
+        // Defer registering names into `used_names` until every write succeeds;
+        // otherwise a mid-row write failure would permanently reserve those names.
         let mut write_failed = false;
         let mut newly_written: Vec<String> = Vec::new();
         for (fname, bytes) in page_pngs {
             let out_path = out_dir.join(&fname);
             if let Err(e) = std::fs::write(&out_path, &bytes) {
-                failed.push(RowFailure {
-                    row: row_idx,
-                    reason: format!("write error '{}': {}", out_path.display(), e),
-                });
+                push_failure(
+                    &mut rows,
+                    row_idx,
+                    row_key.clone(),
+                    format!("write error '{}': {}", out_path.display(), e),
+                );
                 write_failed = true;
                 break;
             }
@@ -636,16 +676,34 @@ pub fn run(
         if write_failed {
             continue;
         }
-        for fname in newly_written {
+        for fname in &newly_written {
             used_names.insert(fname.clone());
-            written.push(fname);
         }
+        rows.push(RowResult {
+            row: row_idx,
+            key: row_key,
+            outputs: newly_written,
+            failure: None,
+        });
     }
 
-    Ok(MergeReport { written, failed })
+    Ok(MergeReport { rows })
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
+
+/// Push a failure [`RowResult`] and prepare for `continue`.
+///
+/// Extracted to remove the 8-way repetition of the identical struct literal
+/// inside the per-row loop body.
+fn push_failure(rows: &mut Vec<RowResult>, row: usize, key: Option<String>, reason: String) {
+    rows.push(RowResult {
+        row,
+        key,
+        outputs: Vec::new(),
+        failure: Some(reason),
+    });
+}
 
 /// Canonical asset-id used for per-row image bindings.
 ///
@@ -669,10 +727,33 @@ fn page_filename(stem: &str, page_index: usize, page_count: usize) -> String {
     }
 }
 
-fn severity_label(sev: &Severity) -> &'static str {
-    match sev {
-        Severity::Error => "error",
-        Severity::Warning => "warning",
-        Severity::Advisory => "advisory",
+/// Convert a completed [`MergeReport`] into the JSON-serialisable envelope.
+pub fn to_json_output(report: &MergeReport) -> MergeOutput {
+    let n_written = report.rows.iter().filter(|r| r.failure.is_none()).count();
+    let n_failed = report.rows.iter().filter(|r| r.failure.is_some()).count();
+    MergeOutput {
+        schema: "zenith-merge-v1",
+        total_rows: report.rows.len(),
+        written: n_written,
+        failed: n_failed,
+        rows: report
+            .rows
+            .iter()
+            .map(|r| MergeRowResult {
+                row: r.row,
+                key: r.key.clone(),
+                status: if r.failure.is_none() { "ok" } else { "failed" },
+                outputs: r.outputs.clone(),
+                diagnostics: match &r.failure {
+                    None => Vec::new(),
+                    Some(reason) => vec![DiagnosticJson {
+                        code: "merge.row.failed".to_owned(),
+                        severity: "error".to_owned(),
+                        message: reason.clone(),
+                        subject_id: None,
+                    }],
+                },
+            })
+            .collect(),
     }
 }
