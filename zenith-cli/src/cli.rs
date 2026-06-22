@@ -34,24 +34,50 @@ pub struct Cli {
 #[derive(Debug, Subcommand)]
 pub enum Command {
     /// Validate a `.zen` document and report diagnostics.
+    ///
+    /// Validate a .zen document and report diagnostics. Hard (Error) diagnostics
+    /// block rendering — always validate and fix them before `render`. Exit code is non-zero when
+    /// hard diagnostics are present.
     Validate(ValidateArgs),
 
     /// Format a `.zen` document in-place (idempotent).
     Fmt(FmtArgs),
 
     /// List all design tokens and their resolved values.
+    ///
+    /// List every design token and its resolved value. Visual properties must
+    /// reference tokens, so this is how you discover the palette/type/spacing a document exposes
+    /// before authoring or editing nodes.
     Tokens(TokensArgs),
 
     /// Compile and render a `.zen` document.
+    ///
+    /// Compile and render a .zen document to PNG, PDF, or a scene display-list.
+    /// Rendering is deterministic (same source + backend → same bytes) and is blocked by hard
+    /// diagnostics, so `validate` first. Use `--all-pages <DIR>` for a contact sheet and `--spread
+    /// A-B` for facing pages.
     Render(RenderArgs),
 
     /// Apply a transaction to a `.zen` document (dry-run by default).
+    ///
+    /// Apply a typed transaction (a JSON edit script) to a .zen document. This is
+    /// the preferred way to edit existing documents: it is dry-run by default (shows a source + scene
+    /// diff), enforces id-uniqueness and referential integrity, and only writes with `--apply`.
     Tx(TxArgs),
 
     /// Print the node tree of a `.zen` document (read-only).
+    ///
+    /// Print the structure of a .zen document (read-only): the node tree plus
+    /// document-level blocks such as the `recipes` provenance block. Use it to discover node ids before
+    /// writing a `tx` edit, to see which recipes a document declares, or to confirm what it contains.
     Inspect(InspectArgs),
 
     /// Mail-merge a `.zen` template with a CSV data file, writing one PNG per row.
+    ///
+    /// Mail-merge a .zen template with a CSV, writing one PNG per row. Mark variable
+    /// nodes with role="data.<column>" (text nodes substitute their text; image nodes substitute
+    /// their asset path) where <column> matches a CSV header. Use this for localized posts,
+    /// personalized graphics, certificates, badges, and campaign variants.
     Merge(MergeArgs),
 
     /// Inspect the library subsystem (preset + project packs).
@@ -76,7 +102,13 @@ pub enum Command {
     /// change (e.g. after a GUI edit, hand-edit, or `git checkout`).
     Sync(SyncArgs),
 
-    /// Expand all variant definitions in a `.zen` document, writing one PNG + .zen per variant.
+    /// Generate size/format variants of a document (one design → many sizes).
+    ///
+    /// Expands the `variants` block: one canonical page becomes N named target sizes (square,
+    /// story, banner), each written as a native `.zen` page plus a rendered PNG. Per-variant
+    /// `override`s can hide/show nodes, swap text, or change a fill; source token edits propagate
+    /// to every variant. This varies DIMENSIONS — distinct from `merge`, which varies CONTENT
+    /// across CSV rows. Deterministic: same source → byte-identical outputs.
     Variant(VariantArgs),
 
     /// Update the installed `zenith` binary to a published release.
@@ -89,17 +121,20 @@ pub enum Command {
     Plugin(PluginArgs),
 
     /// Run Zenith as an MCP server over stdio (for remote/CI/server agents).
+    ///
+    /// Run Zenith as a Model Context Protocol (MCP) server over stdio, exposing the
+    /// command surface (validate, inspect, tokens, fmt, render, tx, merge, theme) as MCP tools for any
+    /// MCP-aware client.
+    ///
+    /// This is for remote, CI, or server contexts. For a LOCAL agent, prefer
+    /// installing the CLI and the skill (`zenith plugin install`) and running commands directly — it is
+    /// faster and cheaper on tokens than going through MCP.
     Mcp(McpArgs),
 }
 
 /// Arguments for `zenith mcp`.
 #[derive(Debug, Args)]
 #[command(
-    long_about = "Run Zenith as a Model Context Protocol (MCP) server over stdio, exposing the \
-command surface (validate, inspect, tokens, fmt, render, tx, merge, theme) as MCP tools for any \
-MCP-aware client.\n\nThis is for remote, CI, or server contexts. For a LOCAL agent, prefer \
-installing the CLI and the skill (`zenith plugin install`) and running commands directly — it is \
-faster and cheaper on tokens than going through MCP.",
     after_help = "Configure your MCP client to launch `zenith mcp` (command: \"zenith\", args: \
 [\"mcp\"]). Logs go to stderr; stdout carries the JSON-RPC protocol."
 )]
@@ -116,6 +151,12 @@ pub struct PluginArgs {
 #[derive(Debug, Subcommand)]
 pub enum PluginSub {
     /// Install the skill for the given agents (auto-detects when none are named).
+    ///
+    /// Install the Zenith agent skill so AI coding tools know how to drive the
+    /// `zenith` CLI. Claude Code, Codex, and OpenCode receive the full folder skill (SKILL.md plus
+    /// reference packs, templates, and themes); other agents receive a single self-contained rule
+    /// file that points back at this self-documenting CLI. Writes are idempotent. With no agent flag,
+    /// the present agents are auto-detected.
     Install(PluginInstallArgs),
 
     /// Remove a previously installed skill for the given agents.
@@ -183,18 +224,11 @@ pub struct AgentFlags {
 
 /// Arguments for `zenith plugin install`.
 #[derive(Debug, Args)]
-#[command(
-    long_about = "Install the Zenith agent skill so AI coding tools know how to drive the \
-`zenith` CLI. Claude Code, Codex, and OpenCode receive the full folder skill (SKILL.md plus \
-reference packs, templates, and themes); other agents receive a single self-contained rule \
-file that points back at this self-documenting CLI. Writes are idempotent. With no agent flag, \
-the present agents are auto-detected.",
-    after_help = "EXAMPLES:\n  \
+#[command(after_help = "EXAMPLES:\n  \
 zenith plugin install                       # auto-detect and install for the user\n  \
 zenith plugin install --claude --codex      # specific agents\n  \
 zenith plugin install --all --scope project # everything, into ./\n  \
-zenith plugin install --claude --dry-run    # preview without writing"
-)]
+zenith plugin install --claude --dry-run    # preview without writing")]
 pub struct PluginInstallArgs {
     #[command(flatten)]
     pub agents: AgentFlags,
@@ -238,19 +272,18 @@ pub struct ThemeArgs {
 #[derive(Debug, Subcommand)]
 pub enum ThemeSub {
     /// Synthesize a complete theme pack from a primary colour (+ optional roles).
+    ///
+    /// Synthesize a complete theme pack (a token-only .zen) from brand colours.
+    /// Surfaces are tinted toward the primary; each role gets an APCA-correct `.content` pairing for
+    /// WCAG 3 contrast. Captures radius, border, spacing, type, and optional depth/noise — not just
+    /// colour. The output validates clean and can be merged into a document or used as a starting palette.
     New(ThemeNewArgs),
 }
 
 /// Arguments for `zenith theme new`.
 #[derive(Debug, Args)]
-#[command(
-    long_about = "Synthesize a complete theme pack (a token-only .zen) from brand colours. \
-Surfaces are tinted toward the primary; each role gets an APCA-correct `.content` pairing for \
-WCAG 3 contrast. Captures radius, border, spacing, type, and optional depth/noise — not just \
-colour. The output validates clean and can be merged into a document or used as a starting palette.",
-    after_help = "EXAMPLE:\n  \
-zenith theme new acme --scheme light --primary '#3b5bdb' --accent '#f76707' --out acme.zen"
-)]
+#[command(after_help = "EXAMPLE:\n  \
+zenith theme new acme --scheme light --primary '#3b5bdb' --accent '#f76707' --out acme.zen")]
 pub struct ThemeNewArgs {
     /// Theme name (used in ids and the preview title), e.g. `acme`.
     pub name: String,
@@ -322,6 +355,10 @@ pub struct ThemeNewArgs {
 
 /// Arguments for `zenith variant`.
 #[derive(Debug, Args)]
+#[command(after_help = "EXAMPLE:\n  \
+zenith variant poster.zen --out-dir out/ --manifest run.json\n\n\
+The document must contain a `variants { variant id=\"square\" source=\"page.main\" w=(px)1080 \
+h=(px)1080 { … } }` block.")]
 pub struct VariantArgs {
     /// Input `.zen` document containing a `variants` block.
     pub doc: PathBuf,
@@ -415,12 +452,7 @@ pub struct LibraryListArgs {
 
 /// Arguments for `zenith validate`.
 #[derive(Debug, Args)]
-#[command(
-    long_about = "Validate a .zen document and report diagnostics. Hard (Error) diagnostics \
-block rendering — always validate and fix them before `render`. Exit code is non-zero when \
-hard diagnostics are present.",
-    after_help = "EXAMPLE:\n  zenith validate poster.zen --json"
-)]
+#[command(after_help = "EXAMPLE:\n  zenith validate poster.zen --json")]
 pub struct ValidateArgs {
     /// Path to the `.zen` document.
     pub path: PathBuf,
@@ -443,12 +475,7 @@ pub struct FmtArgs {
 
 /// Arguments for `zenith tokens`.
 #[derive(Debug, Args)]
-#[command(
-    long_about = "List every design token and its resolved value. Visual properties must \
-reference tokens, so this is how you discover the palette/type/spacing a document exposes \
-before authoring or editing nodes.",
-    after_help = "EXAMPLE:\n  zenith tokens poster.zen --json"
-)]
+#[command(after_help = "EXAMPLE:\n  zenith tokens poster.zen --json")]
 pub struct TokensArgs {
     /// Path to the `.zen` document.
     pub path: PathBuf,
@@ -460,14 +487,9 @@ pub struct TokensArgs {
 
 /// Arguments for `zenith tx`.
 #[derive(Debug, Args)]
-#[command(
-    long_about = "Apply a typed transaction (a JSON edit script) to a .zen document. This is \
-the preferred way to edit existing documents: it is dry-run by default (shows a source + scene \
-diff), enforces id-uniqueness and referential integrity, and only writes with `--apply`.",
-    after_help = "EXAMPLE:\n  \
+#[command(after_help = "EXAMPLE:\n  \
 zenith tx poster.zen edits.json            # preview the diff\n  \
-zenith tx poster.zen edits.json --apply    # write the change"
-)]
+zenith tx poster.zen edits.json --apply    # write the change")]
 pub struct TxArgs {
     /// Path to the `.zen` document.
     pub path: PathBuf,
@@ -486,11 +508,7 @@ pub struct TxArgs {
 
 /// Arguments for `zenith inspect`.
 #[derive(Debug, Args)]
-#[command(
-    long_about = "Print the node tree of a .zen document (read-only). Use it to discover node \
-ids and structure before writing a `tx` edit, or to confirm what a document contains.",
-    after_help = "EXAMPLE:\n  zenith inspect poster.zen --node hero --json"
-)]
+#[command(after_help = "EXAMPLE:\n  zenith inspect poster.zen --node hero --json")]
 pub struct InspectArgs {
     /// Path to the `.zen` document.
     pub path: PathBuf,
@@ -506,14 +524,8 @@ pub struct InspectArgs {
 
 /// Arguments for `zenith merge`.
 #[derive(Debug, Args)]
-#[command(
-    long_about = "Mail-merge a .zen template with a CSV, writing one PNG per row. Mark variable \
-nodes with role=\"data.<column>\" (text nodes substitute their text; image nodes substitute \
-their asset path) where <column> matches a CSV header. Use this for localized posts, \
-personalized graphics, certificates, badges, and campaign variants.",
-    after_help = "EXAMPLE:\n  \
-zenith merge card.zen people.csv --out-dir out/ --name-by name --manifest run.json"
-)]
+#[command(after_help = "EXAMPLE:\n  \
+zenith merge card.zen people.csv --out-dir out/ --name-by name --manifest run.json")]
 pub struct MergeArgs {
     /// Template `.zen` document with role="data.<column>" text nodes.
     pub doc: PathBuf,
@@ -542,10 +554,6 @@ pub struct MergeArgs {
 /// Arguments for `zenith render`.
 #[derive(Debug, Args)]
 #[command(
-    long_about = "Compile and render a .zen document to PNG, PDF, or a scene display-list. \
-Rendering is deterministic (same source + backend → same bytes) and is blocked by hard \
-diagnostics, so `validate` first. Use `--all-pages <DIR>` for a contact sheet and `--spread \
-A-B` for facing pages.",
     after_help = "At least one of --scene, --png, --pdf, or --all-pages is required.\n\n\
 EXAMPLES:\n  \
 zenith render poster.zen --png out.png\n  \
