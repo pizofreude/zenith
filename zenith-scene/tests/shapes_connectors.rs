@@ -1,0 +1,714 @@
+mod common;
+use common::*;
+use zenith_core::default_provider;
+use zenith_scene::compile;
+use zenith_scene::ir::{SceneCommand, StrokeAlign};
+
+// ── connector node (U1): straight line between resolved edge anchors ──────────
+//
+// A `connector` declares `from`/`to` target ids and, at compile time, resolves
+// those nodes' boxes to draw a STRAIGHT 2-point line between anchor points on
+// their edges. U1 = straight line, no arrowhead markers, no orthogonal routing.
+
+/// Collect the first `StrokePolyline`'s flat points, or panic.
+fn first_stroke_polyline_points(cmds: &[SceneCommand]) -> Vec<f64> {
+    cmds.iter()
+        .find_map(|c| match c {
+            SceneCommand::StrokePolyline { points, .. } => Some(points.clone()),
+            _ => None,
+        })
+        .unwrap_or_else(|| panic!("expected a StrokePolyline; got: {cmds:?}"))
+}
+
+/// Two rects laid out horizontally with a connector between them, default
+/// (auto) anchors. The from-box center is left of the to-box center, so auto
+/// picks the right edge of `a` and the left edge of `b`.
+#[test]
+fn connector_auto_anchors_between_horizontal_boxes() {
+    let src = r##"zenith version=1 {
+  project id="proj.cn" name="CN"
+  tokens format="zenith-token-v1" {
+token id="color.fill" type="color" value="#dbeafe"
+token id="color.line" type="color" value="#1e3a8a"
+token id="size.stroke" type="dimension" value=(px)2
+  }
+  styles {}
+  document id="doc.cn" title="CN" {
+page id="page.cn" w=(px)640 h=(px)360 {
+  rect id="a" x=(px)40 y=(px)40 w=(px)100 h=(px)80 fill=(token)"color.fill"
+  rect id="b" x=(px)300 y=(px)60 w=(px)100 h=(px)80 fill=(token)"color.fill"
+  connector id="c1" from="a" to="b" stroke=(token)"color.line" stroke-width=(token)"size.stroke"
+}
+  }
+}
+"##;
+    let doc = parse(src);
+    let result = compile(&doc, &default_provider());
+    let cmds = &result.scene.commands;
+
+    // a: x=40 y=40 w=100 h=80  → center (90,80),  right-mid edge = (140, 80)
+    // b: x=300 y=60 w=100 h=80 → center (350,100), left-mid edge = (300, 100)
+    let pts = first_stroke_polyline_points(cmds);
+    assert_eq!(
+        pts,
+        vec![140.0, 80.0, 300.0, 100.0],
+        "auto anchors must be a's right-mid and b's left-mid; got {pts:?}"
+    );
+
+    // U1: straight 2-point open line, centered stroke.
+    assert!(
+        cmds.iter().any(|c| matches!(
+            c,
+            SceneCommand::StrokePolyline { points, closed: false, align: StrokeAlign::Center, .. }
+                if points.len() == 4
+        )),
+        "connector must emit a straight open StrokePolyline; got {cmds:?}"
+    );
+}
+
+/// Explicit `from-anchor="right"` / `to-anchor="left"` anchors are honored
+/// verbatim (no auto resolution).
+#[test]
+fn connector_explicit_anchors_are_honored() {
+    let src = r##"zenith version=1 {
+  project id="proj.cn" name="CN"
+  tokens format="zenith-token-v1" {
+token id="color.line" type="color" value="#1e3a8a"
+  }
+  styles {}
+  document id="doc.cn" title="CN" {
+page id="page.cn" w=(px)640 h=(px)360 {
+  rect id="a" x=(px)40 y=(px)40 w=(px)100 h=(px)80 stroke=(token)"color.line"
+  rect id="b" x=(px)300 y=(px)60 w=(px)100 h=(px)80 stroke=(token)"color.line"
+  connector id="c1" from="a" to="b" from-anchor="right" to-anchor="left" stroke=(token)"color.line"
+}
+  }
+}
+"##;
+    let doc = parse(src);
+    let result = compile(&doc, &default_provider());
+    let cmds = &result.scene.commands;
+
+    // a right-mid = (140, 80); b left-mid = (300, 100).
+    let pts = first_stroke_polyline_points(cmds);
+    assert_eq!(pts, vec![140.0, 80.0, 300.0, 100.0]);
+}
+
+/// A connector to a MISSING target emits no StrokePolyline (graceful skip).
+#[test]
+fn connector_missing_target_emits_nothing() {
+    let src = r##"zenith version=1 {
+  project id="proj.cn" name="CN"
+  tokens format="zenith-token-v1" {
+token id="color.line" type="color" value="#1e3a8a"
+  }
+  styles {}
+  document id="doc.cn" title="CN" {
+page id="page.cn" w=(px)640 h=(px)360 {
+  rect id="a" x=(px)40 y=(px)40 w=(px)100 h=(px)80 stroke=(token)"color.line"
+  connector id="c1" from="a" to="ghost" stroke=(token)"color.line"
+}
+  }
+}
+"##;
+    let doc = parse(src);
+    let result = compile(&doc, &default_provider());
+    let cmds = &result.scene.commands;
+    assert!(
+        !cmds
+            .iter()
+            .any(|c| matches!(c, SceneCommand::StrokePolyline { .. })),
+        "connector to a missing target must emit no StrokePolyline; got {cmds:?}"
+    );
+}
+
+/// A connector reroutes when its target box changes: compiling two documents
+/// that differ only in the `to` rect's position yields different endpoints.
+#[test]
+fn connector_reroutes_when_target_moves() {
+    let doc_src = |to_x: u32| {
+        format!(
+            r##"zenith version=1 {{
+  project id="proj.cn" name="CN"
+  tokens format="zenith-token-v1" {{
+token id="color.line" type="color" value="#1e3a8a"
+  }}
+  styles {{}}
+  document id="doc.cn" title="CN" {{
+page id="page.cn" w=(px)640 h=(px)360 {{
+  rect id="a" x=(px)40 y=(px)40 w=(px)100 h=(px)80 stroke=(token)"color.line"
+  rect id="b" x=(px){to_x} y=(px)60 w=(px)100 h=(px)80 stroke=(token)"color.line"
+  connector id="c1" from="a" to="b" from-anchor="right" to-anchor="left" stroke=(token)"color.line"
+}}
+  }}
+}}
+"##
+        )
+    };
+
+    let r1 = compile(&parse(&doc_src(300)), &default_provider());
+    let r2 = compile(&parse(&doc_src(420)), &default_provider());
+
+    let p1 = first_stroke_polyline_points(&r1.scene.commands);
+    let p2 = first_stroke_polyline_points(&r2.scene.commands);
+
+    // The `to` (left-edge) endpoint must move with the target rect.
+    assert_eq!(p1[2], 300.0, "first layout: b left-mid x = 300");
+    assert_eq!(p2[2], 420.0, "moved layout: b left-mid x = 420");
+    assert_ne!(
+        p1, p2,
+        "connector endpoints must change when the target moves"
+    );
+}
+
+// ── connector node (U2): arrowhead markers (marker-start / marker-end) ────────
+//
+// `marker-end="arrow"` adds a filled-triangle head whose tip sits exactly on the
+// `to` anchor; `marker-start="arrow"` does the same at the `from` anchor. The head
+// reuses the line's stroke color. Default (no marker) emits only the line.
+
+/// Collect every `FillPolygon`'s flat points, in command order.
+fn all_fill_polygon_points(cmds: &[SceneCommand]) -> Vec<Vec<f64>> {
+    cmds.iter()
+        .filter_map(|c| match c {
+            SceneCommand::FillPolygon { points, .. } => Some(points.clone()),
+            _ => None,
+        })
+        .collect()
+}
+
+/// `marker-end="arrow"` → one StrokePolyline (the line) PLUS one FillPolygon (the
+/// arrowhead): 3 vertices (6 coords), with the tip sitting on the `to` anchor.
+#[test]
+fn connector_marker_end_emits_arrowhead_at_to_anchor() {
+    let src = r##"zenith version=1 {
+  project id="proj.cn" name="CN"
+  tokens format="zenith-token-v1" {
+token id="color.line" type="color" value="#1e3a8a"
+  }
+  styles {}
+  document id="doc.cn" title="CN" {
+page id="page.cn" w=(px)640 h=(px)360 {
+  rect id="a" x=(px)40 y=(px)40 w=(px)100 h=(px)80 stroke=(token)"color.line"
+  rect id="b" x=(px)300 y=(px)60 w=(px)100 h=(px)80 stroke=(token)"color.line"
+  connector id="c1" from="a" to="b" from-anchor="right" to-anchor="left" stroke=(token)"color.line" marker-end="arrow"
+}
+  }
+}
+"##;
+    let doc = parse(src);
+    let result = compile(&doc, &default_provider());
+    let cmds = &result.scene.commands;
+
+    // The line is still emitted.
+    let line = first_stroke_polyline_points(cmds);
+    assert_eq!(line, vec![140.0, 80.0, 300.0, 100.0]);
+
+    // Exactly one arrowhead, a 3-vertex triangle.
+    let heads = all_fill_polygon_points(cmds);
+    assert_eq!(
+        heads.len(),
+        1,
+        "marker-end must emit exactly one FillPolygon; got {cmds:?}"
+    );
+    let head = &heads[0];
+    assert_eq!(
+        head.len(),
+        6,
+        "arrowhead must be a 3-point triangle (6 coords)"
+    );
+
+    // The tip sits on the `to` anchor (300, 100): one vertex must equal it.
+    let to_anchor = (300.0, 100.0);
+    let has_tip = head
+        .chunks_exact(2)
+        .any(|p| (p[0] - to_anchor.0).abs() < 1e-9 && (p[1] - to_anchor.1).abs() < 1e-9);
+    assert!(
+        has_tip,
+        "an arrowhead vertex must equal the to anchor; got {head:?}"
+    );
+
+    // Horizontal left→right travel: the tip is the rightmost vertex.
+    let max_x = head
+        .chunks_exact(2)
+        .map(|p| p[0])
+        .fold(f64::NEG_INFINITY, f64::max);
+    assert!(
+        (max_x - to_anchor.0).abs() < 1e-9,
+        "head must point rightward: tip x is the max x; got {head:?}"
+    );
+}
+
+/// `marker-start` AND `marker-end` both "arrow" → the line PLUS TWO FillPolygons,
+/// one tip on the `from` anchor and one tip on the `to` anchor.
+#[test]
+fn connector_both_markers_emit_two_arrowheads() {
+    let src = r##"zenith version=1 {
+  project id="proj.cn" name="CN"
+  tokens format="zenith-token-v1" {
+token id="color.line" type="color" value="#1e3a8a"
+  }
+  styles {}
+  document id="doc.cn" title="CN" {
+page id="page.cn" w=(px)640 h=(px)360 {
+  rect id="a" x=(px)40 y=(px)40 w=(px)100 h=(px)80 stroke=(token)"color.line"
+  rect id="b" x=(px)300 y=(px)60 w=(px)100 h=(px)80 stroke=(token)"color.line"
+  connector id="c1" from="a" to="b" from-anchor="right" to-anchor="left" stroke=(token)"color.line" marker-start="arrow" marker-end="arrow"
+}
+  }
+}
+"##;
+    let doc = parse(src);
+    let result = compile(&doc, &default_provider());
+    let cmds = &result.scene.commands;
+
+    assert_eq!(
+        first_stroke_polyline_points(cmds),
+        vec![140.0, 80.0, 300.0, 100.0]
+    );
+
+    let heads = all_fill_polygon_points(cmds);
+    assert_eq!(
+        heads.len(),
+        2,
+        "both markers must emit two FillPolygons; got {cmds:?}"
+    );
+
+    let from_anchor = (140.0, 80.0);
+    let to_anchor = (300.0, 100.0);
+    let tip_on = |head: &Vec<f64>, t: (f64, f64)| {
+        head.chunks_exact(2)
+            .any(|p| (p[0] - t.0).abs() < 1e-9 && (p[1] - t.1).abs() < 1e-9)
+    };
+    assert!(
+        heads.iter().any(|h| tip_on(h, from_anchor)),
+        "one arrowhead tip must sit on the from anchor; got {heads:?}"
+    );
+    assert!(
+        heads.iter().any(|h| tip_on(h, to_anchor)),
+        "one arrowhead tip must sit on the to anchor; got {heads:?}"
+    );
+}
+
+/// Default (no markers) → only the line, no FillPolygon (U1 regression).
+#[test]
+fn connector_without_markers_emits_no_arrowhead() {
+    let src = r##"zenith version=1 {
+  project id="proj.cn" name="CN"
+  tokens format="zenith-token-v1" {
+token id="color.line" type="color" value="#1e3a8a"
+  }
+  styles {}
+  document id="doc.cn" title="CN" {
+page id="page.cn" w=(px)640 h=(px)360 {
+  rect id="a" x=(px)40 y=(px)40 w=(px)100 h=(px)80 stroke=(token)"color.line"
+  rect id="b" x=(px)300 y=(px)60 w=(px)100 h=(px)80 stroke=(token)"color.line"
+  connector id="c1" from="a" to="b" stroke=(token)"color.line"
+}
+  }
+}
+"##;
+    let doc = parse(src);
+    let result = compile(&doc, &default_provider());
+    let cmds = &result.scene.commands;
+
+    assert!(
+        cmds.iter()
+            .any(|c| matches!(c, SceneCommand::StrokePolyline { .. })),
+        "connector must still emit its line; got {cmds:?}"
+    );
+    assert!(
+        !cmds
+            .iter()
+            .any(|c| matches!(c, SceneCommand::FillPolygon { .. })),
+        "a connector with no markers must emit no FillPolygon; got {cmds:?}"
+    );
+}
+
+// ── connector node (U3): orthogonal routing + multi-segment marker orientation ─
+//
+// `route="orthogonal"` replaces the straight diagonal with a right-angle elbow
+// path: an H–V–H (or V–H–V) 4-point Z-route when both anchors share an
+// orientation, or a 3-point L-corner when they differ. The first segment leaves
+// `from` perpendicular to its edge and the last enters `to` perpendicular to its
+// edge, so arrowheads land axis-aligned. Straight routing is unchanged.
+
+/// Two boxes side-by-side, `route="orthogonal"` with auto anchors → an H–V–H
+/// 4-point Z-route with the vertical riser at the mid x and right angles.
+#[test]
+fn connector_orthogonal_horizontal_boxes_makes_z_route() {
+    let src = r##"zenith version=1 {
+  project id="proj.co" name="CO"
+  tokens format="zenith-token-v1" {
+token id="color.line" type="color" value="#1e3a8a"
+  }
+  styles {}
+  document id="doc.co" title="CO" {
+page id="page.co" w=(px)640 h=(px)360 {
+  rect id="a" x=(px)40 y=(px)40 w=(px)100 h=(px)80 stroke=(token)"color.line"
+  rect id="b" x=(px)300 y=(px)60 w=(px)100 h=(px)80 stroke=(token)"color.line"
+  connector id="c1" from="a" to="b" route="orthogonal" stroke=(token)"color.line"
+}
+  }
+}
+"##;
+    let doc = parse(src);
+    let result = compile(&doc, &default_provider());
+    let pts = first_stroke_polyline_points(&result.scene.commands);
+
+    // a right-mid = (140,80) [Horizontal], b left-mid = (300,100) [Horizontal].
+    // mid x = (140+300)/2 = 220 → [140,80, 220,80, 220,100, 300,100].
+    assert_eq!(
+        pts,
+        vec![140.0, 80.0, 220.0, 80.0, 220.0, 100.0, 300.0, 100.0],
+        "horizontal-anchored orthogonal route must be an H–V–H Z-route; got {pts:?}"
+    );
+    // Right-angle elbow: the two riser points share the mid x.
+    assert_eq!(pts[2], pts[4], "elbow x's must be equal (right angles)");
+    assert_eq!(pts[2], (140.0 + 300.0) / 2.0, "riser sits at the mid x");
+    // First segment is horizontal (leaves a's right edge), last is horizontal
+    // (enters b's left edge).
+    assert_eq!(pts[1], 80.0, "first segment leaves horizontally at fy");
+    assert_eq!(pts[7], 100.0, "last segment enters horizontally at ty");
+}
+
+/// Two boxes stacked vertically, `route="orthogonal"` with auto anchors → a
+/// V–H–V 4-point Z-route with the horizontal run at the mid y.
+#[test]
+fn connector_orthogonal_stacked_boxes_makes_vertical_z() {
+    let src = r##"zenith version=1 {
+  project id="proj.co" name="CO"
+  tokens format="zenith-token-v1" {
+token id="color.line" type="color" value="#1e3a8a"
+  }
+  styles {}
+  document id="doc.co" title="CO" {
+page id="page.co" w=(px)640 h=(px)480 {
+  rect id="a" x=(px)40 y=(px)40 w=(px)100 h=(px)80 stroke=(token)"color.line"
+  rect id="b" x=(px)60 y=(px)300 w=(px)100 h=(px)80 stroke=(token)"color.line"
+  connector id="c1" from="a" to="b" route="orthogonal" stroke=(token)"color.line"
+}
+  }
+}
+"##;
+    let doc = parse(src);
+    let result = compile(&doc, &default_provider());
+    let pts = first_stroke_polyline_points(&result.scene.commands);
+
+    // a center (90,80), b center (110,340): dy dominates → Vertical anchors.
+    // a bottom-mid = (90,120), b top-mid = (110,300). mid y = (120+300)/2 = 210
+    // → [90,120, 90,210, 110,210, 110,300].
+    assert_eq!(
+        pts,
+        vec![90.0, 120.0, 90.0, 210.0, 110.0, 210.0, 110.0, 300.0],
+        "vertical-anchored orthogonal route must be a V–H–V Z-route; got {pts:?}"
+    );
+    // Right-angle elbow: the two crossbar points share the mid y.
+    assert_eq!(pts[3], pts[5], "elbow y's must be equal (right angles)");
+    assert_eq!(pts[3], (120.0 + 300.0) / 2.0, "crossbar sits at the mid y");
+    // First segment vertical (leaves a's bottom edge), last vertical (enters b's top).
+    assert_eq!(pts[0], pts[2], "first segment leaves vertically at fx");
+    assert_eq!(pts[4], pts[6], "last segment enters vertically at tx");
+}
+
+/// `route="orthogonal"` + `marker-end="arrow"`: the arrowhead tip sits on the
+/// `to` anchor and is axis-aligned to the (horizontal) last segment — its two
+/// base vertices share the same x.
+#[test]
+fn connector_orthogonal_with_marker_end_arrowhead_is_axis_aligned() {
+    let src = r##"zenith version=1 {
+  project id="proj.co" name="CO"
+  tokens format="zenith-token-v1" {
+token id="color.line" type="color" value="#1e3a8a"
+  }
+  styles {}
+  document id="doc.co" title="CO" {
+page id="page.co" w=(px)640 h=(px)360 {
+  rect id="a" x=(px)40 y=(px)40 w=(px)100 h=(px)80 stroke=(token)"color.line"
+  rect id="b" x=(px)300 y=(px)60 w=(px)100 h=(px)80 stroke=(token)"color.line"
+  connector id="c1" from="a" to="b" route="orthogonal" stroke=(token)"color.line" marker-end="arrow"
+}
+  }
+}
+"##;
+    let doc = parse(src);
+    let result = compile(&doc, &default_provider());
+    let cmds = &result.scene.commands;
+
+    // Last orthogonal segment is (220,100)→(300,100): horizontal entry into b.
+    let heads = all_fill_polygon_points(cmds);
+    assert_eq!(
+        heads.len(),
+        1,
+        "marker-end must emit one FillPolygon; got {cmds:?}"
+    );
+    let head = &heads[0];
+    assert_eq!(head.len(), 6, "arrowhead must be a 3-point triangle");
+
+    // Tip on the `to` anchor (300,100).
+    let to_anchor = (300.0, 100.0);
+    let has_tip = head
+        .chunks_exact(2)
+        .any(|p| (p[0] - to_anchor.0).abs() < 1e-9 && (p[1] - to_anchor.1).abs() < 1e-9);
+    assert!(
+        has_tip,
+        "an arrowhead vertex must equal the to anchor; got {head:?}"
+    );
+
+    // Axis-aligned to a horizontal entry: the two base vertices (everything but
+    // the tip) share the same x.
+    let base: Vec<(f64, f64)> = head
+        .chunks_exact(2)
+        .map(|p| (p[0], p[1]))
+        .filter(|p| (p.0 - to_anchor.0).abs() >= 1e-9 || (p.1 - to_anchor.1).abs() >= 1e-9)
+        .collect();
+    assert_eq!(base.len(), 2, "triangle must have two base vertices");
+    assert!(
+        (base[0].0 - base[1].0).abs() < 1e-9,
+        "horizontal entry → base vertices share the same x; got {base:?}"
+    );
+}
+
+/// `route="straight"` (and the omitted default) still emits a 2-point line whose
+/// marker endpoints are the raw anchors — U1/U2 byte-for-byte regression guard.
+#[test]
+fn connector_straight_route_unchanged_regression() {
+    let src = r##"zenith version=1 {
+  project id="proj.co" name="CO"
+  tokens format="zenith-token-v1" {
+token id="color.line" type="color" value="#1e3a8a"
+  }
+  styles {}
+  document id="doc.co" title="CO" {
+page id="page.co" w=(px)640 h=(px)360 {
+  rect id="a" x=(px)40 y=(px)40 w=(px)100 h=(px)80 stroke=(token)"color.line"
+  rect id="b" x=(px)300 y=(px)60 w=(px)100 h=(px)80 stroke=(token)"color.line"
+  connector id="c1" from="a" to="b" route="straight" stroke=(token)"color.line" marker-end="arrow"
+}
+  }
+}
+"##;
+    let doc = parse(src);
+    let result = compile(&doc, &default_provider());
+    let cmds = &result.scene.commands;
+
+    // Straight 2-point line between the raw anchors.
+    let line = first_stroke_polyline_points(cmds);
+    assert_eq!(
+        line,
+        vec![140.0, 80.0, 300.0, 100.0],
+        "straight route must remain a 2-point line; got {line:?}"
+    );
+
+    // Marker endpoints are the raw anchors: tip on the `to` anchor.
+    let heads = all_fill_polygon_points(cmds);
+    assert_eq!(
+        heads.len(),
+        1,
+        "marker-end must emit one FillPolygon; got {cmds:?}"
+    );
+    let to_anchor = (300.0, 100.0);
+    let has_tip = heads[0]
+        .chunks_exact(2)
+        .any(|p| (p[0] - to_anchor.0).abs() < 1e-9 && (p[1] - to_anchor.1).abs() < 1e-9);
+    assert!(
+        has_tip,
+        "straight marker tip must sit on the to anchor; got {:?}",
+        heads[0]
+    );
+}
+
+// ── Mask ──────────────────────────────────────────────────────────────
+
+/// A rect carrying `mask=(token)` with NO effect must emit a
+/// `BeginMask { mask }` … `EndMask` bracket around its fill, with the
+/// `MaskSpec` carrying the rect's x/y/w/h and the resolved shape/radius/feather.
+#[test]
+fn mask_emits_begin_end_bracket() {
+    let src = r##"zenith version=1 {
+  project id="proj.mk" name="Mk"
+  tokens format="zenith-token-v1" {
+    token id="color.fill" type="color" value="#445566"
+    token id="mask.m" type="mask" {
+      rounded radius=12 feather=8
+    }
+  }
+  styles {}
+  document id="doc.mk" title="Mk" {
+    page id="page.mk" w=(px)200 h=(px)200 {
+      rect id="rect.mk" x=(px)10 y=(px)20 w=(px)80 h=(px)40 fill=(token)"color.fill" mask=(token)"mask.m"
+    }
+  }
+}
+"##;
+    let doc = parse(src);
+    let result = compile(&doc, &default_provider());
+    let cmds = &result.scene.commands;
+
+    // Locate the BeginMask and verify the resolved spec.
+    let spec = cmds
+        .iter()
+        .find_map(|c| match c {
+            SceneCommand::BeginMask { mask } => Some(*mask),
+            _ => None,
+        })
+        .expect("a BeginMask must be emitted");
+    assert_eq!(spec.shape, zenith_scene::MaskShape::RoundedRect);
+    assert_eq!(spec.radius, 12.0);
+    assert_eq!(spec.feather, 8.0);
+    assert!(!spec.invert);
+    assert_eq!((spec.x, spec.y, spec.w, spec.h), (10.0, 20.0, 80.0, 40.0));
+
+    // Bracket is balanced, BeginMask precedes a fill which precedes EndMask.
+    let begin_idx = cmds
+        .iter()
+        .position(|c| matches!(c, SceneCommand::BeginMask { .. }))
+        .expect("begin index");
+    let end_idx = cmds
+        .iter()
+        .position(|c| matches!(c, SceneCommand::EndMask))
+        .expect("end index");
+    assert!(begin_idx < end_idx, "BeginMask must precede EndMask");
+    let has_fill_between = cmds
+        .get(begin_idx + 1..end_idx)
+        .map(|window| {
+            window.iter().any(|c| {
+                matches!(
+                    c,
+                    SceneCommand::FillRect { .. } | SceneCommand::FillRoundedRect { .. }
+                )
+            })
+        })
+        .unwrap_or(false);
+    assert!(
+        has_fill_between,
+        "the fill must sit inside the mask bracket: {cmds:?}"
+    );
+
+    // No effect was set, so no blur/shadow/filter bracket appears.
+    assert!(
+        !cmds.iter().any(|c| matches!(
+            c,
+            SceneCommand::BeginBlur { .. }
+                | SceneCommand::BeginShadow { .. }
+                | SceneCommand::BeginFilter { .. }
+        )),
+        "no effect bracket should appear for a mask-only rect: {cmds:?}"
+    );
+}
+
+/// A rect with BOTH `blur` and `mask` must emit the fill TWICE: once bare
+/// (sharp base), then inside `BeginMask BeginBlur .. EndBlur EndMask`. The
+/// command order is: bare fill, BeginMask, BeginBlur, fill, EndBlur, EndMask.
+#[test]
+fn mask_and_blur_emits_sharp_base_then_masked_effect() {
+    let src = r##"zenith version=1 {
+  project id="proj.mb" name="Mb"
+  tokens format="zenith-token-v1" {
+    token id="color.fill" type="color" value="#445566"
+    token id="mask.m" type="mask" {
+      ellipse feather=6
+    }
+  }
+  styles {}
+  document id="doc.mb" title="Mb" {
+    page id="page.mb" w=(px)200 h=(px)200 {
+      rect id="rect.mb" x=(px)10 y=(px)10 w=(px)80 h=(px)60 fill=(token)"color.fill" mask=(token)"mask.m" blur=(px)6
+    }
+  }
+}
+"##;
+    let doc = parse(src);
+    let result = compile(&doc, &default_provider());
+    let cmds = &result.scene.commands;
+
+    // Collect the indices of the relevant commands in order.
+    let is_fill = |c: &SceneCommand| matches!(c, SceneCommand::FillRect { .. });
+    let fills: Vec<usize> = cmds
+        .iter()
+        .enumerate()
+        .filter(|(_, c)| is_fill(c))
+        .map(|(i, _)| i)
+        .collect();
+    assert_eq!(
+        fills.len(),
+        2,
+        "fill must be emitted twice (sharp base + masked): {cmds:?}"
+    );
+
+    let begin_mask = cmds
+        .iter()
+        .position(|c| matches!(c, SceneCommand::BeginMask { .. }))
+        .expect("BeginMask");
+    let begin_blur = cmds
+        .iter()
+        .position(|c| matches!(c, SceneCommand::BeginBlur { .. }))
+        .expect("BeginBlur");
+    let end_blur = cmds
+        .iter()
+        .position(|c| matches!(c, SceneCommand::EndBlur))
+        .expect("EndBlur");
+    let end_mask = cmds
+        .iter()
+        .position(|c| matches!(c, SceneCommand::EndMask))
+        .expect("EndMask");
+
+    // Order: bare fill < BeginMask < BeginBlur < masked fill < EndBlur < EndMask.
+    assert!(fills[0] < begin_mask, "sharp base fill precedes BeginMask");
+    assert!(begin_mask < begin_blur, "BeginMask precedes BeginBlur");
+    assert!(begin_blur < fills[1], "BeginBlur precedes the masked fill");
+    assert!(fills[1] < end_blur, "masked fill precedes EndBlur");
+    assert!(end_blur < end_mask, "EndBlur precedes EndMask");
+}
+
+/// A rect with `blur` and NO mask must be byte-identical to the pre-mask
+/// stream: BeginBlur, fill, EndBlur — and NO BeginMask anywhere.
+#[test]
+fn blur_without_mask_emits_no_mask_bracket() {
+    let src = r##"zenith version=1 {
+  project id="proj.bn" name="Bn"
+  tokens format="zenith-token-v1" {
+    token id="color.fill" type="color" value="#445566"
+  }
+  styles {}
+  document id="doc.bn" title="Bn" {
+    page id="page.bn" w=(px)200 h=(px)200 {
+      rect id="rect.bn" x=(px)10 y=(px)10 w=(px)80 h=(px)60 fill=(token)"color.fill" blur=(px)6
+    }
+  }
+}
+"##;
+    let doc = parse(src);
+    let result = compile(&doc, &default_provider());
+    let cmds = &result.scene.commands;
+
+    assert!(
+        !cmds
+            .iter()
+            .any(|c| matches!(c, SceneCommand::BeginMask { .. } | SceneCommand::EndMask)),
+        "no mask bracket must appear when mask is absent: {cmds:?}"
+    );
+
+    // Exactly one BeginBlur, EndBlur, and a single fill between them.
+    let begin = cmds
+        .iter()
+        .position(|c| matches!(c, SceneCommand::BeginBlur { .. }))
+        .expect("BeginBlur");
+    let end = cmds
+        .iter()
+        .position(|c| matches!(c, SceneCommand::EndBlur))
+        .expect("EndBlur");
+    assert!(begin < end);
+    let fills_between = cmds
+        .get(begin + 1..end)
+        .map(|w| {
+            w.iter()
+                .filter(|c| matches!(c, SceneCommand::FillRect { .. }))
+                .count()
+        })
+        .unwrap_or(0);
+    assert_eq!(
+        fills_between, 1,
+        "exactly one fill inside the blur bracket: {cmds:?}"
+    );
+}
