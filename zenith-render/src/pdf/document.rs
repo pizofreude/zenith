@@ -83,14 +83,16 @@ pub fn render_pdf(scene: &Scene, fonts: &dyn FontProvider, assets: &dyn AssetPro
     // ── Page dict + boxes + resource dict ────────────────────────────────
     write_page(
         &mut pdf,
-        page_id,
-        page_tree_id,
-        content_id,
-        scene,
-        &res,
-        &alpha_ids,
-        &gradient_refs,
-        &image_refs,
+        PageWrite {
+            page_id,
+            page_tree_id,
+            content_id,
+            scene,
+            res: &res,
+            alpha_ids: &alpha_ids,
+            gradient_refs: &gradient_refs,
+            image_refs: &image_refs,
+        },
     );
 
     // ── Content stream ───────────────────────────────────────────────────
@@ -121,18 +123,33 @@ struct ImageRefs {
     smask: Option<Ref>,
 }
 
-#[allow(clippy::too_many_arguments)]
-fn write_page(
-    pdf: &mut Pdf,
+/// Borrow/scalar context for [`write_page`], bundled into a `Copy` struct so
+/// the function stays within the argument-count budget without an `#[allow]`.
+/// `Ref` is `Copy` and the slice fields are shared borrows, so the whole struct
+/// is `Copy`.
+#[derive(Clone, Copy)]
+struct PageWrite<'a> {
     page_id: Ref,
     page_tree_id: Ref,
     content_id: Ref,
-    scene: &Scene,
-    res: &PageResources,
-    alpha_ids: &[Ref],
-    gradient_refs: &[GradientRefs],
-    image_refs: &[ImageRefs],
-) {
+    scene: &'a Scene,
+    res: &'a PageResources,
+    alpha_ids: &'a [Ref],
+    gradient_refs: &'a [GradientRefs],
+    image_refs: &'a [ImageRefs],
+}
+
+fn write_page(pdf: &mut Pdf, ctx: PageWrite<'_>) {
+    let PageWrite {
+        page_id,
+        page_tree_id,
+        content_id,
+        scene,
+        res,
+        alpha_ids,
+        gradient_refs,
+        image_refs,
+    } = ctx;
     let w = scene.width as f32;
     let h = scene.height as f32;
     let media = PdfRect::new(0.0, 0.0, w, h);
@@ -250,7 +267,13 @@ fn write_gradient_function(pdf: &mut Pdf, gr: &GradientRefs, g: &AxialGradient) 
     // Interior stop offsets become the stitching bounds; each subfunction's
     // input is encoded over [0, 1].
     let last = g.stops.len() - 1;
-    let bounds: Vec<f32> = g.stops[1..last].iter().map(|s| s.0).collect();
+    let bounds: Vec<f32> = g
+        .stops
+        .get(1..last)
+        .unwrap_or(&[])
+        .iter()
+        .map(|s| s.0)
+        .collect();
     let mut encode: Vec<f32> = Vec::with_capacity(gr.sub_functions.len() * 2);
     for _ in &gr.sub_functions {
         encode.push(0.0);

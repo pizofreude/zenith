@@ -24,7 +24,7 @@ use zenith_scene::{Color, FitMode, ImageClip, Scene, SceneCommand, StrokeAlign};
 use super::color;
 use super::geometry::{GlyphPen, ellipse_path, poly_path, rounded_rect_path};
 use super::gradient::{AxialGradient, resolve as resolve_gradient};
-use super::image::{DecodedImage, decode_for_pdf, decoded_image_from_straight_rgba};
+use super::image::{DecodedImage, decode_for_pdf};
 
 /// Page-level resources accumulated during [`translate`], keyed for
 /// deduplication and emitted in a deterministic order by the document writer.
@@ -103,7 +103,14 @@ pub(super) fn translate(
                 if *depth == 0
                     && let Some((_, region)) = effect_buf.take()
                 {
-                    embed_rasterized_region(&mut content, &mut res, &region, page, fonts, assets);
+                    super::raster_embed::embed_rasterized_region(
+                        &mut content,
+                        &mut res,
+                        &region,
+                        page,
+                        fonts,
+                        assets,
+                    );
                 }
             }
             continue;
@@ -167,7 +174,7 @@ fn apply_alpha(content: &mut Content, res: &mut PageResources, color: &Color) {
     content.set_parameters(name(ALPHA_PREFIX, idx).as_name());
 }
 
-fn emit_command(
+pub(super) fn emit_command(
     content: &mut Content,
     res: &mut PageResources,
     cmd: &SceneCommand,
@@ -549,7 +556,17 @@ fn emit_command(
             glyphs,
         } => {
             emit_glyph_run(
-                content, res, fonts, *x, *y, font_id, *font_size, color, glyphs,
+                content,
+                res,
+                fonts,
+                GlyphRun {
+                    x: *x,
+                    y: *y,
+                    font_id,
+                    font_size: *font_size,
+                    color,
+                    glyphs,
+                },
             );
         }
 
@@ -568,8 +585,21 @@ fn emit_command(
             src_rect: _,
         } => {
             emit_image(
-                content, res, assets, *x, *y, *w, *h, asset_id, *fit, *pos_x, *pos_y, *opacity,
-                clip_shape,
+                content,
+                res,
+                assets,
+                ImageDraw {
+                    x: *x,
+                    y: *y,
+                    w: *w,
+                    h: *h,
+                    asset_id,
+                    fit: *fit,
+                    pos_x: *pos_x,
+                    pos_y: *pos_y,
+                    opacity: *opacity,
+                    clip_shape,
+                },
             );
         }
 
@@ -650,18 +680,39 @@ fn push_gradient(res: &mut PageResources, g: AxialGradient) -> usize {
     id
 }
 
-#[allow(clippy::too_many_arguments)]
+/// Borrow/scalar context for one [`SceneCommand::DrawGlyphRun`] emission,
+/// bundled into a `Copy` struct so [`emit_glyph_run`] stays within the
+/// argument-count budget without an `#[allow]`.
+#[derive(Clone, Copy)]
+struct GlyphRun<'a> {
+    /// Text-box origin x in pixels.
+    x: f64,
+    /// Baseline y in pixels.
+    y: f64,
+    /// Stable font-face identifier; resolved via `FontProvider::by_id`.
+    font_id: &'a str,
+    /// Font size at which glyphs were shaped, in pixels.
+    font_size: f32,
+    /// Fill color of the glyph run.
+    color: &'a Color,
+    /// Positioned glyphs, baseline-relative.
+    glyphs: &'a [zenith_scene::SceneGlyph],
+}
+
 fn emit_glyph_run(
     content: &mut Content,
     res: &mut PageResources,
     fonts: &dyn FontProvider,
-    x: f64,
-    y: f64,
-    font_id: &str,
-    font_size: f32,
-    color: &Color,
-    glyphs: &[zenith_scene::SceneGlyph],
+    run: GlyphRun<'_>,
 ) {
+    let GlyphRun {
+        x,
+        y,
+        font_id,
+        font_size,
+        color,
+        glyphs,
+    } = run;
     let Some(font_data) = fonts.by_id(font_id) else {
         return;
     };
@@ -708,22 +759,47 @@ fn emit_glyph_run(
     content.restore_state();
 }
 
-#[allow(clippy::too_many_arguments)]
-fn emit_image(
-    content: &mut Content,
-    res: &mut PageResources,
-    assets: &dyn AssetProvider,
+/// Borrow/scalar context for one [`SceneCommand::DrawImage`] emission, bundled
+/// into a `Copy` struct so [`emit_image`] stays within the argument-count
+/// budget without an `#[allow]`.
+#[derive(Clone, Copy)]
+struct ImageDraw<'a> {
     x: f64,
     y: f64,
     w: f64,
     h: f64,
-    asset_id: &str,
+    /// Stable asset id; resolved via `AssetProvider::by_id`.
+    asset_id: &'a str,
+    /// How the image scales to fill the box.
     fit: FitMode,
+    /// Horizontal object-position anchor in `0.0..=100.0`.
     pos_x: f64,
+    /// Vertical object-position anchor in `0.0..=100.0`.
     pos_y: f64,
+    /// Effective opacity, `0.0..=1.0`.
     opacity: f64,
-    clip_shape: &Option<ImageClip>,
+    /// Optional non-rectangular clip shape inscribed in the box.
+    clip_shape: &'a Option<ImageClip>,
+}
+
+fn emit_image(
+    content: &mut Content,
+    res: &mut PageResources,
+    assets: &dyn AssetProvider,
+    draw: ImageDraw<'_>,
 ) {
+    let ImageDraw {
+        x,
+        y,
+        w,
+        h,
+        asset_id,
+        fit,
+        pos_x,
+        pos_y,
+        opacity,
+        clip_shape,
+    } = draw;
     if !rect_ok(x, y, w, h) {
         return;
     }
@@ -824,135 +900,6 @@ fn emit_image(
     content.transform([iw, 0.0, 0.0, -ih, tx as f32, ty as f32 + ih]);
     content.x_object(name(IMAGE_PREFIX, id).as_name());
 
-    content.restore_state();
-}
-
-/// Rasterize a self-applying effect bracket (blur, shadow, filter, or mask —
-/// including any effect nested inside it) and embed it as an image XObject.
-///
-/// `sub_commands` is the WHOLE bracket inclusive (`Begin*` … matching `End*`), so
-/// the raster backend ([`crate::render::render_image`]) self-applies every effect
-/// — no post-pass is needed here. This helper builds the standalone full-page
-/// sub-scene (default transparent canvas, so only the bracket's ink is opaque),
-/// renders it, crops to the tight opaque bounding box, and embeds the crop at its
-/// scene position. All arithmetic is deterministic (fixed rounding, fixed deflate
-/// level) so the PDF stays byte-identical across runs.
-///
-/// On render failure the buffered commands are emitted via [`emit_command`] so
-/// content is never lost (the region then draws unmasked rather than vanishing).
-fn embed_rasterized_region(
-    content: &mut Content,
-    res: &mut PageResources,
-    sub_commands: &[SceneCommand],
-    page: (f64, f64),
-    fonts: &dyn FontProvider,
-    assets: &dyn AssetProvider,
-) {
-    let (pw, ph) = page;
-    let mut sub_scene = Scene::new(pw, ph);
-    sub_scene.commands = sub_commands.to_vec();
-
-    let img = match crate::render::render_image(&sub_scene, fonts, assets) {
-        Ok(i) => i,
-        Err(_) => {
-            // Never lose content: emit the buffered commands (the BeginMask/
-            // EndMask no-op arms drop the bracket markers; the body draws
-            // unmasked).
-            for c in sub_commands {
-                emit_command(content, res, c, page, fonts, assets);
-            }
-            return;
-        }
-    };
-    crop_and_embed(content, res, &img.rgba, img.width, img.height);
-}
-
-/// Crop a rendered straight-alpha RGBA buffer to its tight opaque bounding box
-/// and embed that crop as an image XObject placed back at its scene position.
-///
-/// Used by [`embed_rasterized_region`]. A fully transparent (or zero-sized /
-/// malformed) buffer embeds nothing.
-fn crop_and_embed(content: &mut Content, res: &mut PageResources, rgba: &[u8], iw: u32, ih: u32) {
-    // Defensive: the buffer must be exactly iw*ih*4 bytes for the row math below.
-    let expected = match (iw as usize)
-        .checked_mul(ih as usize)
-        .and_then(|n| n.checked_mul(4))
-    {
-        Some(n) => n,
-        None => return,
-    };
-    if iw == 0 || ih == 0 || rgba.len() != expected {
-        return;
-    }
-    let stride = iw as usize * 4;
-
-    // 4. Scan for the tight opaque bounding box (alpha byte > 0). All-transparent
-    //    ⇒ nothing to draw.
-    let mut min_x = iw;
-    let mut min_y = ih;
-    let mut max_x = 0u32;
-    let mut max_y = 0u32;
-    let mut found = false;
-    for (y, row) in rgba.chunks_exact(stride).enumerate() {
-        for (x, px) in row.chunks_exact(4).enumerate() {
-            if px[3] > 0 {
-                found = true;
-                let (xu, yu) = (x as u32, y as u32);
-                if xu < min_x {
-                    min_x = xu;
-                }
-                if yu < min_y {
-                    min_y = yu;
-                }
-                if xu > max_x {
-                    max_x = xu;
-                }
-                if yu > max_y {
-                    max_y = yu;
-                }
-            }
-        }
-    }
-    if !found {
-        return;
-    }
-
-    // 5. Crop to (cw, ch) at offset (ox, oy) by copying rows.
-    let ox = min_x;
-    let oy = min_y;
-    let cw = max_x - min_x + 1;
-    let ch = max_y - min_y + 1;
-    let crop_stride = cw as usize * 4;
-    let mut cropped = Vec::with_capacity(crop_stride * ch as usize);
-    for y in oy..=max_y {
-        let row_start = y as usize * stride + ox as usize * 4;
-        let row_end = row_start + crop_stride;
-        match rgba.get(row_start..row_end) {
-            Some(slice) => cropped.extend_from_slice(slice),
-            None => return, // bounds guard: never index out of range
-        }
-    }
-
-    // 6. Encode the crop as an image XObject.
-    let Some(decoded) = decoded_image_from_straight_rgba(&cropped, cw, ch) else {
-        return;
-    };
-    let id = res.images.len();
-    res.images.push(decoded);
-
-    // 7. Place it: the crop's top-left maps to scene (ox, oy) and its pixel size
-    //    is (cw, ch). The outer page CTM already flips y, so an image y-up unit
-    //    square maps via [cw 0 0 -ch ox oy+ch] — identical pattern to emit_image.
-    content.save_state();
-    content.transform([
-        cw as f32,
-        0.0,
-        0.0,
-        -(ch as f32),
-        ox as f32,
-        oy as f32 + ch as f32,
-    ]);
-    content.x_object(name(IMAGE_PREFIX, id).as_name());
     content.restore_state();
 }
 

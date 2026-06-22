@@ -43,6 +43,7 @@ mod document;
 mod geometry;
 mod gradient;
 mod image;
+mod raster_embed;
 
 #[cfg(test)]
 mod tests;
