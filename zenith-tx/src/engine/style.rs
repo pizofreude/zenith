@@ -708,7 +708,23 @@ pub(super) fn apply_find_replace_text(
                     Some(Node::Shape(shape_node)) => {
                         replace_in_spans(&mut shape_node.spans, find, replace)
                     }
-                    _ => false,
+                    Some(Node::Rect(_))
+                    | Some(Node::Ellipse(_))
+                    | Some(Node::Line(_))
+                    | Some(Node::Code(_))
+                    | Some(Node::Frame(_))
+                    | Some(Node::Group(_))
+                    | Some(Node::Image(_))
+                    | Some(Node::Polygon(_))
+                    | Some(Node::Polyline(_))
+                    | Some(Node::Instance(_))
+                    | Some(Node::Field(_))
+                    | Some(Node::Footnote(_))
+                    | Some(Node::Toc(_))
+                    | Some(Node::Table(_))
+                    | Some(Node::Connector(_))
+                    | Some(Node::Unknown(_))
+                    | None => false,
                 };
                 if changed {
                     record_affected(id, affected);

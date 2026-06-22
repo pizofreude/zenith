@@ -90,7 +90,12 @@ fn validate_color(
                 None
             }
         }
-        other => {
+        other @ (TokenLiteral::Dimension(_)
+        | TokenLiteral::Number(_)
+        | TokenLiteral::Gradient(_)
+        | TokenLiteral::Shadow(_)
+        | TokenLiteral::Filter(_)
+        | TokenLiteral::Mask(_)) => {
             diagnostics.push(invalid_value(
                 token_id,
                 &format!(
@@ -146,7 +151,12 @@ fn validate_dimension(
                 Some(ResolvedValue::Dimension(dim.clone()))
             }
         }
-        other => {
+        other @ (TokenLiteral::String(_)
+        | TokenLiteral::Number(_)
+        | TokenLiteral::Gradient(_)
+        | TokenLiteral::Shadow(_)
+        | TokenLiteral::Filter(_)
+        | TokenLiteral::Mask(_)) => {
             diagnostics.push(invalid_value(
                 token_id,
                 &format!(
@@ -185,7 +195,12 @@ fn validate_number(
                 None
             }
         }
-        other => {
+        other @ (TokenLiteral::String(_)
+        | TokenLiteral::Dimension(_)
+        | TokenLiteral::Gradient(_)
+        | TokenLiteral::Shadow(_)
+        | TokenLiteral::Filter(_)
+        | TokenLiteral::Mask(_)) => {
             diagnostics.push(invalid_value(
                 token_id,
                 &format!(
@@ -222,7 +237,12 @@ fn validate_font_family(
                 Some(ResolvedValue::FontFamily(s.clone()))
             }
         }
-        other => {
+        other @ (TokenLiteral::Dimension(_)
+        | TokenLiteral::Number(_)
+        | TokenLiteral::Gradient(_)
+        | TokenLiteral::Shadow(_)
+        | TokenLiteral::Filter(_)
+        | TokenLiteral::Mask(_)) => {
             diagnostics.push(invalid_value(
                 token_id,
                 &format!(
@@ -264,7 +284,12 @@ fn validate_font_weight(
                 Some(ResolvedValue::FontWeight(truncated as u32))
             }
         }
-        other => {
+        other @ (TokenLiteral::String(_)
+        | TokenLiteral::Dimension(_)
+        | TokenLiteral::Gradient(_)
+        | TokenLiteral::Shadow(_)
+        | TokenLiteral::Filter(_)
+        | TokenLiteral::Mask(_)) => {
             diagnostics.push(invalid_value(
                 token_id,
                 &format!(

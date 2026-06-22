@@ -334,7 +334,25 @@ fn splice_ungroup(children: &mut Vec<Node>, group_id: &str) -> bool {
         // checked access — the match arm handles the unreachable-but-safe case.
         let group_children = match children.get(i) {
             Some(Node::Group(g)) => g.children.clone(),
-            _ => return false, // unreachable under normal flow
+            // unreachable under normal flow
+            Some(Node::Rect(_))
+            | Some(Node::Ellipse(_))
+            | Some(Node::Line(_))
+            | Some(Node::Text(_))
+            | Some(Node::Code(_))
+            | Some(Node::Frame(_))
+            | Some(Node::Image(_))
+            | Some(Node::Polygon(_))
+            | Some(Node::Polyline(_))
+            | Some(Node::Instance(_))
+            | Some(Node::Field(_))
+            | Some(Node::Footnote(_))
+            | Some(Node::Toc(_))
+            | Some(Node::Table(_))
+            | Some(Node::Shape(_))
+            | Some(Node::Connector(_))
+            | Some(Node::Unknown(_))
+            | None => return false,
         };
         children.remove(i);
         // Insert the group's children at the same position, in order.

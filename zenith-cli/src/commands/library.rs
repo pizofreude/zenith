@@ -272,7 +272,7 @@ pub fn add(
                         2,
                     )
                 })?,
-                _ => page.unwrap_or(""),
+                Some(ItemKind::Token) | Some(ItemKind::Action) | None => page.unwrap_or(""),
             };
             let outcome =
                 crate::library::materialize(&mut target, &packs, &pkg_id, &item, page, id_base, at)

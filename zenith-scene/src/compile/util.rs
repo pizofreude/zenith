@@ -142,13 +142,21 @@ pub(super) fn resolve_property_dimension_px(
         Some(PropertyValue::TokenRef(token_id)) => match resolved.get(token_id.as_str()) {
             Some(rt) => match &rt.value {
                 ResolvedValue::Dimension(dim) => dim_to_px(dim.value, &dim.unit).unwrap_or(default),
-                _ => default,
+                ResolvedValue::Color(_)
+                | ResolvedValue::CmykColor { .. }
+                | ResolvedValue::Number(_)
+                | ResolvedValue::FontFamily(_)
+                | ResolvedValue::FontWeight(_)
+                | ResolvedValue::Gradient(_)
+                | ResolvedValue::Shadow(_)
+                | ResolvedValue::Filter(_)
+                | ResolvedValue::Mask(_) => default,
             },
             None => default,
         },
         // A literal dimension (e.g. `font-size=(px)24`) resolves directly,
         // bringing literal visual dimensions to parity with token-backed ones.
         Some(PropertyValue::Dimension(dim)) => dim_to_px(dim.value, &dim.unit).unwrap_or(default),
-        _ => default,
+        Some(PropertyValue::Literal(_)) | None => default,
     }
 }

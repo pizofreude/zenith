@@ -438,7 +438,21 @@ fn node_children(node: &Node) -> Option<&[Node]> {
             Some(children)
         }
         Node::Unknown(n) => Some(&n.children),
-        _ => None,
+        Node::Rect(_)
+        | Node::Ellipse(_)
+        | Node::Line(_)
+        | Node::Text(_)
+        | Node::Code(_)
+        | Node::Image(_)
+        | Node::Polygon(_)
+        | Node::Polyline(_)
+        | Node::Instance(_)
+        | Node::Field(_)
+        | Node::Footnote(_)
+        | Node::Toc(_)
+        | Node::Table(_)
+        | Node::Shape(_)
+        | Node::Connector(_) => None,
     }
 }
 
@@ -447,7 +461,7 @@ fn node_children(node: &Node) -> Option<&[Node]> {
 fn dim_to_f64(d: &Dimension) -> f64 {
     match d.unit {
         Unit::Pt => d.value * 96.0 / 72.0,
-        _ => d.value,
+        Unit::Px | Unit::Pct | Unit::Deg | Unit::Unknown(_) => d.value,
     }
 }
 

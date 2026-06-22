@@ -148,7 +148,15 @@ pub fn materialize_token(
     // The property the token is applied through, and (for filters) its deps.
     let apply_property = match item_token.token_type {
         TokenType::Mask => "mask",
-        _ => "filter",
+        TokenType::Color
+        | TokenType::Dimension
+        | TokenType::Number
+        | TokenType::FontFamily
+        | TokenType::FontWeight
+        | TokenType::Gradient
+        | TokenType::Shadow
+        | TokenType::Filter
+        | TokenType::Unknown(_) => "filter",
     };
 
     // 3. Collect transitive color-token deps (filter duotone colors; none for

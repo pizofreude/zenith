@@ -86,7 +86,21 @@ fn backdrop_rgb(
             Node::Rect(r) => (&r.fill, &r.style),
             Node::Ellipse(e) => (&e.fill, &e.style),
             Node::Frame(f) => (&no_fill, &f.style),
-            _ => continue,
+            Node::Line(_)
+            | Node::Text(_)
+            | Node::Code(_)
+            | Node::Group(_)
+            | Node::Image(_)
+            | Node::Polygon(_)
+            | Node::Polyline(_)
+            | Node::Instance(_)
+            | Node::Field(_)
+            | Node::Footnote(_)
+            | Node::Toc(_)
+            | Node::Table(_)
+            | Node::Shape(_)
+            | Node::Connector(_)
+            | Node::Unknown(_) => continue,
         };
 
         let Some((r, g, b, a)) = resolve_fill_rgba(fill, style, style_map, resolved_tokens) else {
@@ -166,7 +180,7 @@ pub(super) fn check_text_contrast(
                 }
                 // Literal / Dimension fills are caught as raw_visual_literal errors
                 // elsewhere; no need to chase them here.
-                _ => None,
+                Some(PropertyValue::Literal(_)) | Some(PropertyValue::Dimension(_)) | None => None,
             };
 
             let Some(fg_rgb) = text_rgb else {
@@ -188,7 +202,7 @@ pub(super) fn check_text_contrast(
                 }
                 // Literal / Dimension hints are caught as raw_visual_literal
                 // errors elsewhere; no need to chase them here.
-                _ => None,
+                Some(PropertyValue::Literal(_)) | Some(PropertyValue::Dimension(_)) | None => None,
             };
 
             // Resolve the EFFECTIVE background. Precedence:
@@ -327,6 +341,19 @@ pub(super) fn check_text_contrast(
         }
 
         // All other leaf node types carry no text — nothing to check.
-        _ => {}
+        Node::Rect(_)
+        | Node::Ellipse(_)
+        | Node::Line(_)
+        | Node::Code(_)
+        | Node::Image(_)
+        | Node::Polygon(_)
+        | Node::Polyline(_)
+        | Node::Instance(_)
+        | Node::Field(_)
+        | Node::Footnote(_)
+        | Node::Toc(_)
+        | Node::Shape(_)
+        | Node::Connector(_)
+        | Node::Unknown(_) => {}
     }
 }

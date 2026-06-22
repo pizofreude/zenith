@@ -140,12 +140,46 @@ fn find_container_in_children_mut<'a>(
         Some(Hit::Direct(i)) => match children.get_mut(i) {
             Some(Node::Frame(f)) => Some(&mut f.children),
             Some(Node::Group(g)) => Some(&mut g.children),
-            _ => None, // unreachable: phase-1 confirmed a container at i
+            // unreachable: phase-1 confirmed a container at i
+            Some(Node::Rect(_))
+            | Some(Node::Ellipse(_))
+            | Some(Node::Line(_))
+            | Some(Node::Text(_))
+            | Some(Node::Code(_))
+            | Some(Node::Image(_))
+            | Some(Node::Polygon(_))
+            | Some(Node::Polyline(_))
+            | Some(Node::Instance(_))
+            | Some(Node::Field(_))
+            | Some(Node::Footnote(_))
+            | Some(Node::Toc(_))
+            | Some(Node::Table(_))
+            | Some(Node::Shape(_))
+            | Some(Node::Connector(_))
+            | Some(Node::Unknown(_))
+            | None => None,
         },
         Some(Hit::Descend(i)) => match children.get_mut(i) {
             Some(Node::Frame(f)) => find_container_in_children_mut(&mut f.children, parent_id),
             Some(Node::Group(g)) => find_container_in_children_mut(&mut g.children, parent_id),
-            _ => None, // unreachable
+            // unreachable
+            Some(Node::Rect(_))
+            | Some(Node::Ellipse(_))
+            | Some(Node::Line(_))
+            | Some(Node::Text(_))
+            | Some(Node::Code(_))
+            | Some(Node::Image(_))
+            | Some(Node::Polygon(_))
+            | Some(Node::Polyline(_))
+            | Some(Node::Instance(_))
+            | Some(Node::Field(_))
+            | Some(Node::Footnote(_))
+            | Some(Node::Toc(_))
+            | Some(Node::Table(_))
+            | Some(Node::Shape(_))
+            | Some(Node::Connector(_))
+            | Some(Node::Unknown(_))
+            | None => None,
         },
     }
 }

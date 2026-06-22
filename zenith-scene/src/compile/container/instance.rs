@@ -106,7 +106,22 @@ fn apply_override(children: &mut [Node], ov: &Override) -> bool {
         let grandchildren = match child {
             Node::Frame(f) => Some(&mut f.children),
             Node::Group(g) => Some(&mut g.children),
-            _ => None,
+            Node::Rect(_)
+            | Node::Ellipse(_)
+            | Node::Line(_)
+            | Node::Text(_)
+            | Node::Code(_)
+            | Node::Image(_)
+            | Node::Polygon(_)
+            | Node::Polyline(_)
+            | Node::Instance(_)
+            | Node::Field(_)
+            | Node::Footnote(_)
+            | Node::Toc(_)
+            | Node::Table(_)
+            | Node::Shape(_)
+            | Node::Connector(_)
+            | Node::Unknown(_) => None,
         };
         if let Some(gc) = grandchildren
             && apply_override(gc, ov)
@@ -228,7 +243,21 @@ pub(in crate::compile) fn prefix_ids_in_children(children: &mut [Node], prefix: 
                     }
                 }
             }
-            _ => {}
+            Node::Rect(_)
+            | Node::Ellipse(_)
+            | Node::Line(_)
+            | Node::Text(_)
+            | Node::Code(_)
+            | Node::Image(_)
+            | Node::Polygon(_)
+            | Node::Polyline(_)
+            | Node::Instance(_)
+            | Node::Field(_)
+            | Node::Footnote(_)
+            | Node::Toc(_)
+            | Node::Shape(_)
+            | Node::Connector(_)
+            | Node::Unknown(_) => {}
         }
     }
 }

@@ -461,7 +461,20 @@ pub(super) fn subtree_contains(node: &Node, id: &str) -> bool {
                 .any(|c| c.children.iter().any(|ch| subtree_contains(ch, id)))
         }),
         Node::Unknown(u) => u.children.iter().any(|c| subtree_contains(c, id)),
-        _ => false,
+        Node::Rect(_)
+        | Node::Ellipse(_)
+        | Node::Line(_)
+        | Node::Text(_)
+        | Node::Code(_)
+        | Node::Image(_)
+        | Node::Polygon(_)
+        | Node::Polyline(_)
+        | Node::Instance(_)
+        | Node::Field(_)
+        | Node::Footnote(_)
+        | Node::Toc(_)
+        | Node::Shape(_)
+        | Node::Connector(_) => false,
     }
 }
 
@@ -528,7 +541,24 @@ fn find_in_children_any_mut<'a>(children: &'a mut [Node], id: &str) -> Option<&'
             Node::Unknown(u) if u.children.iter().any(|c| subtree_contains(c, id)) => {
                 Some(Hit::Descend(i))
             }
-            _ => None,
+            Node::Frame(_)
+            | Node::Group(_)
+            | Node::Table(_)
+            | Node::Unknown(_)
+            | Node::Rect(_)
+            | Node::Ellipse(_)
+            | Node::Line(_)
+            | Node::Text(_)
+            | Node::Code(_)
+            | Node::Image(_)
+            | Node::Polygon(_)
+            | Node::Polyline(_)
+            | Node::Instance(_)
+            | Node::Field(_)
+            | Node::Footnote(_)
+            | Node::Toc(_)
+            | Node::Shape(_)
+            | Node::Connector(_) => None,
         }
     });
 
@@ -550,7 +580,22 @@ fn find_in_children_any_mut<'a>(children: &'a mut [Node], id: &str) -> Option<&'
                 None
             }
             Some(Node::Unknown(u)) => find_in_children_any_mut(&mut u.children, id),
-            _ => None, // unreachable: phase-1 confirmed a container at i
+            // unreachable: phase-1 confirmed a container at i
+            Some(Node::Rect(_))
+            | Some(Node::Ellipse(_))
+            | Some(Node::Line(_))
+            | Some(Node::Text(_))
+            | Some(Node::Code(_))
+            | Some(Node::Image(_))
+            | Some(Node::Polygon(_))
+            | Some(Node::Polyline(_))
+            | Some(Node::Instance(_))
+            | Some(Node::Field(_))
+            | Some(Node::Footnote(_))
+            | Some(Node::Toc(_))
+            | Some(Node::Shape(_))
+            | Some(Node::Connector(_))
+            | None => None,
         },
     }
 }
@@ -586,7 +631,20 @@ pub(super) fn find_node_shared<'a>(children: &'a [Node], id: &str) -> Option<&'a
                     return Some(found);
                 }
             }
-            _ => {}
+            Node::Rect(_)
+            | Node::Ellipse(_)
+            | Node::Line(_)
+            | Node::Text(_)
+            | Node::Code(_)
+            | Node::Image(_)
+            | Node::Polygon(_)
+            | Node::Polyline(_)
+            | Node::Instance(_)
+            | Node::Field(_)
+            | Node::Footnote(_)
+            | Node::Toc(_)
+            | Node::Shape(_)
+            | Node::Connector(_) => {}
         }
     }
     None

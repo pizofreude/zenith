@@ -242,7 +242,16 @@ fn read_geometry_px(node: &Node) -> Option<(f64, f64, f64, f64)> {
         Node::Code(c) => (c.x.as_ref(), c.y.as_ref(), c.w.as_ref(), c.h.as_ref()),
         Node::Group(g) => (g.x.as_ref(), g.y.as_ref(), g.w.as_ref(), g.h.as_ref()),
         Node::Shape(s) => (s.x.as_ref(), s.y.as_ref(), s.w.as_ref(), s.h.as_ref()),
-        _ => return None,
+        Node::Line(_)
+        | Node::Polygon(_)
+        | Node::Polyline(_)
+        | Node::Instance(_)
+        | Node::Field(_)
+        | Node::Footnote(_)
+        | Node::Toc(_)
+        | Node::Table(_)
+        | Node::Connector(_)
+        | Node::Unknown(_) => return None,
     };
     let resolve = |d: Option<&Dimension>| -> Option<f64> {
         d.and_then(|dim| dim_to_px(dim.value, &dim.unit))

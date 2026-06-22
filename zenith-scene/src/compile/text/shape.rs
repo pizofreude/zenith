@@ -262,7 +262,15 @@ pub(in crate::compile) fn resolve_font_weight(
         Some(PropertyValue::TokenRef(token_id)) => match resolved.get(token_id.as_str()) {
             Some(rt) => match &rt.value {
                 ResolvedValue::FontWeight(w) => *w as u16,
-                _ => default,
+                ResolvedValue::Color(_)
+                | ResolvedValue::CmykColor { .. }
+                | ResolvedValue::Dimension(_)
+                | ResolvedValue::Number(_)
+                | ResolvedValue::FontFamily(_)
+                | ResolvedValue::Gradient(_)
+                | ResolvedValue::Shadow(_)
+                | ResolvedValue::Filter(_)
+                | ResolvedValue::Mask(_) => default,
             },
             None => default,
         },
@@ -318,7 +326,15 @@ pub(in crate::compile) fn resolve_font_family_name(
         Some(PropertyValue::TokenRef(token_id)) => match resolved.get(token_id.as_str()) {
             Some(rt) => match &rt.value {
                 ResolvedValue::FontFamily(name) => name.clone(),
-                _ => default.to_owned(),
+                ResolvedValue::Color(_)
+                | ResolvedValue::CmykColor { .. }
+                | ResolvedValue::Dimension(_)
+                | ResolvedValue::Number(_)
+                | ResolvedValue::FontWeight(_)
+                | ResolvedValue::Gradient(_)
+                | ResolvedValue::Shadow(_)
+                | ResolvedValue::Filter(_)
+                | ResolvedValue::Mask(_) => default.to_owned(),
             },
             None => default.to_owned(),
         },

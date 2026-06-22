@@ -68,7 +68,22 @@ fn node_points_mut(node: &mut Node) -> Option<&mut Vec<Point>> {
     match node {
         Node::Polygon(p) => Some(&mut p.points),
         Node::Polyline(p) => Some(&mut p.points),
-        _ => None,
+        Node::Rect(_)
+        | Node::Ellipse(_)
+        | Node::Line(_)
+        | Node::Text(_)
+        | Node::Code(_)
+        | Node::Frame(_)
+        | Node::Group(_)
+        | Node::Image(_)
+        | Node::Instance(_)
+        | Node::Field(_)
+        | Node::Footnote(_)
+        | Node::Toc(_)
+        | Node::Table(_)
+        | Node::Shape(_)
+        | Node::Connector(_)
+        | Node::Unknown(_) => None,
     }
 }
 

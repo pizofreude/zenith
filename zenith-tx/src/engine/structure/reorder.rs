@@ -109,25 +109,25 @@ fn reorder_in(children: &mut [Node], id: &str, kind: ReorderKind) -> MoveOutcome
         match child {
             Node::Frame(f) => match reorder_in(&mut f.children, id, kind) {
                 MoveOutcome::NotFound => {}
-                other => return other,
+                other @ (MoveOutcome::NoChange | MoveOutcome::Moved) => return other,
             },
             Node::Group(g) => match reorder_in(&mut g.children, id, kind) {
                 MoveOutcome::NotFound => {}
-                other => return other,
+                other @ (MoveOutcome::NoChange | MoveOutcome::Moved) => return other,
             },
             Node::Table(t) => {
                 for row in &mut t.rows {
                     for cell in &mut row.cells {
                         match reorder_in(&mut cell.children, id, kind) {
                             MoveOutcome::NotFound => {}
-                            other => return other,
+                            other @ (MoveOutcome::NoChange | MoveOutcome::Moved) => return other,
                         }
                     }
                 }
             }
             Node::Unknown(u) => match reorder_in(&mut u.children, id, kind) {
                 MoveOutcome::NotFound => {}
-                other => return other,
+                other @ (MoveOutcome::NoChange | MoveOutcome::Moved) => return other,
             },
             Node::Rect(_)
             | Node::Ellipse(_)

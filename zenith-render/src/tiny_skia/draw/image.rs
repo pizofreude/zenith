@@ -129,7 +129,7 @@ pub(in crate::tiny_skia) fn draw_image(
             pm
         }
         // Font or Unknown: not a drawable image; skip.
-        _ => return,
+        AssetKind::Font | AssetKind::Unknown(_) => return,
     };
     let (sw, sh) = (f64::from(src.width()), f64::from(src.height()));
     if !(sw > 0.0 && sh > 0.0) {

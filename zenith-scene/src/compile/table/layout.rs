@@ -226,7 +226,23 @@ fn cell_natural_width(
                 );
                 measure_text_natural(&eff, families, env, diagnostics).unwrap_or(0.0)
             }
-            other => child_declared_box(other).0.unwrap_or(0.0),
+            other @ (Node::Rect(_)
+            | Node::Ellipse(_)
+            | Node::Line(_)
+            | Node::Code(_)
+            | Node::Frame(_)
+            | Node::Group(_)
+            | Node::Image(_)
+            | Node::Polygon(_)
+            | Node::Polyline(_)
+            | Node::Instance(_)
+            | Node::Field(_)
+            | Node::Footnote(_)
+            | Node::Toc(_)
+            | Node::Table(_)
+            | Node::Shape(_)
+            | Node::Connector(_)
+            | Node::Unknown(_)) => child_declared_box(other).0.unwrap_or(0.0),
         };
         widest = widest.max(w);
     }
@@ -263,7 +279,23 @@ fn cell_content_height(
                 measure_text_wrapped_height(&eff, content_w, families, env, diagnostics)
                     .unwrap_or(0.0)
             }
-            other => child_declared_box(other).1.unwrap_or(0.0),
+            other @ (Node::Rect(_)
+            | Node::Ellipse(_)
+            | Node::Line(_)
+            | Node::Code(_)
+            | Node::Frame(_)
+            | Node::Group(_)
+            | Node::Image(_)
+            | Node::Polygon(_)
+            | Node::Polyline(_)
+            | Node::Instance(_)
+            | Node::Field(_)
+            | Node::Footnote(_)
+            | Node::Toc(_)
+            | Node::Table(_)
+            | Node::Shape(_)
+            | Node::Connector(_)
+            | Node::Unknown(_)) => child_declared_box(other).1.unwrap_or(0.0),
         };
         tallest = tallest.max(h);
     }
