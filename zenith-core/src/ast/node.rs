@@ -206,6 +206,9 @@ pub struct ImageNode {
     /// the node's x and/or y from the page and node dimensions. An explicitly-
     /// authored x or y always wins.
     pub anchor: Option<String>,
+    /// Optional safe-zone id selecting the reference rectangle for `anchor`
+    /// (page-relative when absent). See [`Anchor`].
+    pub anchor_zone: Option<String>,
     /// Source declaration span, when available.
     pub source_span: Option<Span>,
     /// Unknown properties preserved for forward-compat.
@@ -284,6 +287,12 @@ pub struct RectNode {
     /// the node's x and/or y from the page and node dimensions. An explicitly-
     /// authored x or y always wins.
     pub anchor: Option<String>,
+    /// Optional safe-zone reference for the anchor. When `Some(id)` and a
+    /// safe-zone with that id is declared on the page, the `anchor` is resolved
+    /// relative to that zone's rectangle instead of the full page. Requires
+    /// `anchor` to be set; `anchor_zone` without `anchor` has no effect and
+    /// triggers an `anchor.zone_without_anchor` warning.
+    pub anchor_zone: Option<String>,
     /// Source declaration span, when available.
     pub source_span: Option<Span>,
     /// Unknown properties preserved for forward-compat.
@@ -376,6 +385,8 @@ pub struct EllipseNode {
     /// the node's x and/or y from the page and node dimensions. An explicitly-
     /// authored x or y always wins.
     pub anchor: Option<String>,
+    /// Optional safe-zone reference for the anchor. See [`RectNode::anchor_zone`].
+    pub anchor_zone: Option<String>,
     /// Source declaration span, when available.
     pub source_span: Option<Span>,
     /// Unknown properties preserved for forward-compat.
@@ -539,6 +550,8 @@ pub struct TextNode {
     /// the node's x and/or y from the page and node dimensions. An explicitly-
     /// authored x or y always wins.
     pub anchor: Option<String>,
+    /// Optional safe-zone reference for the anchor. See [`RectNode::anchor_zone`].
+    pub anchor_zone: Option<String>,
     /// Source declaration span, when available.
     pub source_span: Option<Span>,
     /// Unknown properties preserved for forward-compat.
@@ -598,6 +611,8 @@ pub struct ShapeNode {
     /// the node's x and/or y from the page and node dimensions. An explicitly-
     /// authored x or y always wins.
     pub anchor: Option<String>,
+    /// Optional safe-zone reference for the anchor. See [`RectNode::anchor_zone`].
+    pub anchor_zone: Option<String>,
     /// Source declaration span, when available.
     pub source_span: Option<Span>,
     /// Unknown properties preserved for forward-compat.
@@ -651,6 +666,8 @@ pub struct CodeNode {
     /// the node's x and/or y from the page and node dimensions. An explicitly-
     /// authored x or y always wins.
     pub anchor: Option<String>,
+    /// Optional safe-zone reference for the anchor. See [`RectNode::anchor_zone`].
+    pub anchor_zone: Option<String>,
     /// Source declaration span, when available.
     pub source_span: Option<Span>,
     /// Unknown properties preserved for forward-compat.
@@ -788,6 +805,8 @@ pub struct FrameNode {
     /// the node's x and/or y from the page and node dimensions. An explicitly-
     /// authored x or y always wins.
     pub anchor: Option<String>,
+    /// Optional safe-zone reference for the anchor. See [`RectNode::anchor_zone`].
+    pub anchor_zone: Option<String>,
     /// Source declaration span, when available.
     pub source_span: Option<Span>,
     /// Unknown properties preserved for forward-compat.
@@ -837,6 +856,8 @@ pub struct GroupNode {
     /// the node's x and/or y from the page and node dimensions. An explicitly-
     /// authored x or y always wins.
     pub anchor: Option<String>,
+    /// Optional safe-zone reference for the anchor. See [`RectNode::anchor_zone`].
+    pub anchor_zone: Option<String>,
     /// Source declaration span, when available.
     pub source_span: Option<Span>,
     /// Unknown properties preserved for forward-compat.
@@ -1036,6 +1057,8 @@ pub struct FieldNode {
     /// the node's x and/or y from the page and node dimensions. An explicitly-
     /// authored x or y always wins.
     pub anchor: Option<String>,
+    /// Optional safe-zone reference for the anchor. See [`RectNode::anchor_zone`].
+    pub anchor_zone: Option<String>,
     /// Source declaration span, when available.
     pub source_span: Option<Span>,
     /// Unknown properties preserved for forward-compat.
@@ -1126,6 +1149,8 @@ pub struct TocNode {
     /// the node's x and/or y from the page and node dimensions. An explicitly-
     /// authored x or y always wins.
     pub anchor: Option<String>,
+    /// Optional safe-zone reference for the anchor. See [`RectNode::anchor_zone`].
+    pub anchor_zone: Option<String>,
     /// Source declaration span, when available.
     pub source_span: Option<Span>,
     /// Unknown properties preserved for forward-compat.
@@ -1250,6 +1275,8 @@ pub struct TableNode {
     /// the node's x and/or y from the page and node dimensions. An explicitly-
     /// authored x or y always wins.
     pub anchor: Option<String>,
+    /// Optional safe-zone reference for the anchor. See [`RectNode::anchor_zone`].
+    pub anchor_zone: Option<String>,
     /// Source declaration span, when available.
     pub source_span: Option<Span>,
     /// Unknown properties preserved for forward-compat.

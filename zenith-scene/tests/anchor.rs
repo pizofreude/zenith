@@ -1,4 +1,4 @@
-//! Integration tests for G-69 unit A-1: page-relative 9-point anchors.
+//! Integration tests for G-69 units A-1 (page-relative) and A-2 (safe-zone-relative) anchors.
 //!
 //! An `anchor` attribute on a node derives its missing `x` and/or `y` from the
 //! page dimensions. Explicitly-authored `x`/`y` always win over the anchor-
@@ -279,4 +279,161 @@ fn all_nine_anchors_geometry() {
             "anchor=\"{anchor_name}\": expected ({exp_x}, {exp_y}, 40, 30); got: {rects:?}"
         );
     }
+}
+
+// ═════════════════════════════════════════════════════════════════════════════
+// G-69 unit A-2: safe-zone-relative anchors
+// ═════════════════════════════════════════════════════════════════════════════
+
+/// Wrap a single page child in a document that also declares one safe-zone.
+///
+/// Page is 400×300.  Safe-zone "sz.panel" is at (100, 50, 200, 100) —
+/// i.e. x=100 y=50 w=200 h=100.
+fn doc_with_zone_and_node(node_kdl: &str) -> String {
+    format!(
+        r#"zenith version=1 {{
+  project id="proj.az" name="AnchorZone"
+  tokens format="zenith-token-v1" {{}}
+  styles {{}}
+  document id="doc.az" title="AnchorZone" {{
+page id="page.az" w=(px)400 h=(px)300 {{
+  safe-zone id="sz.panel" type="required" x=(px)100 y=(px)50 w=(px)200 h=(px)100
+  {node_kdl}
+}}
+  }}
+}}"#
+    )
+}
+
+// ── A-2 Test 1: bottom-right relative to zone ─────────────────────────────
+
+#[test]
+fn anchor_zone_bottom_right() {
+    // Zone: x=100 y=50 w=200 h=100. Node: w=40 h=30. anchor="bottom-right".
+    // Zone-relative:  ox = 200-40 = 160, oy = 100-30 = 70.
+    // Absolute:       x  = 100+160 = 260, y = 50+70 = 120.
+    let src = doc_with_zone_and_node(
+        r##"rect id="r.zbr" anchor="bottom-right" anchor-zone="sz.panel" w=(px)40 h=(px)30 fill="#ff0000""##,
+    );
+    let doc = parse(&src);
+    let result = compile(&doc, &default_provider());
+    assert!(
+        result.diagnostics.is_empty(),
+        "expected no diagnostics, got: {:?}",
+        result.diagnostics
+    );
+
+    let rects = fill_rects(&result);
+    assert!(
+        rects.iter().any(|&(x, y, w, h)| {
+            (x - 260.0).abs() < 0.001
+                && (y - 120.0).abs() < 0.001
+                && (w - 40.0).abs() < 0.001
+                && (h - 30.0).abs() < 0.001
+        }),
+        "expected FillRect at (260, 120, 40, 30) for zone bottom-right; got: {rects:?}"
+    );
+}
+
+// ── A-2 Test 2: center within zone ───────────────────────────────────────────
+
+#[test]
+fn anchor_zone_center() {
+    // Zone: x=100 y=50 w=200 h=100. Node: w=40 h=20. anchor="center".
+    // Zone-relative:  ox = (200-40)/2 = 80, oy = (100-20)/2 = 40.
+    // Absolute:       x  = 100+80 = 180, y = 50+40 = 90.
+    let src = doc_with_zone_and_node(
+        r##"rect id="r.zctr" anchor="center" anchor-zone="sz.panel" w=(px)40 h=(px)20 fill="#00ff00""##,
+    );
+    let doc = parse(&src);
+    let result = compile(&doc, &default_provider());
+    assert!(
+        result.diagnostics.is_empty(),
+        "expected no diagnostics, got: {:?}",
+        result.diagnostics
+    );
+
+    let rects = fill_rects(&result);
+    assert!(
+        rects.iter().any(|&(x, y, w, h)| {
+            (x - 180.0).abs() < 0.001
+                && (y - 90.0).abs() < 0.001
+                && (w - 40.0).abs() < 0.001
+                && (h - 20.0).abs() < 0.001
+        }),
+        "expected FillRect at (180, 90, 40, 20) for zone center; got: {rects:?}"
+    );
+}
+
+// ── A-2 Test 3: unresolved zone id produces anchor.unresolved_zone error ─────
+
+#[test]
+fn anchor_zone_unresolved() {
+    use zenith_core::{KdlAdapter, KdlSource};
+
+    // "sz.ghost" does not exist on the page.
+    let src = doc_with_zone_and_node(
+        r##"rect id="r.zghost" anchor="top-left" anchor-zone="sz.ghost" w=(px)40 h=(px)30 fill="#ff0000""##,
+    );
+    let doc = KdlAdapter.parse(src.as_bytes()).expect("must parse");
+    let report = zenith_core::validate(&doc);
+    assert!(
+        report
+            .diagnostics
+            .iter()
+            .any(|d| d.code == "anchor.unresolved_zone"),
+        "expected anchor.unresolved_zone diagnostic; got: {:?}",
+        report.diagnostics
+    );
+}
+
+// ── A-2 Test 4: anchor-zone without anchor produces anchor.zone_without_anchor
+
+#[test]
+fn anchor_zone_without_anchor() {
+    use zenith_core::{KdlAdapter, KdlSource};
+
+    // anchor-zone is set but anchor is absent.
+    let src = doc_with_zone_and_node(
+        r##"rect id="r.znoanc" anchor-zone="sz.panel" x=(px)0 y=(px)0 w=(px)40 h=(px)30 fill="#ff0000""##,
+    );
+    let doc = KdlAdapter.parse(src.as_bytes()).expect("must parse");
+    let report = zenith_core::validate(&doc);
+    assert!(
+        report
+            .diagnostics
+            .iter()
+            .any(|d| d.code == "anchor.zone_without_anchor"),
+        "expected anchor.zone_without_anchor warning; got: {:?}",
+        report.diagnostics
+    );
+}
+
+// ── A-2 Test 5: no zone → page-relative behaviour unchanged (regression) ─────
+
+#[test]
+fn anchor_no_zone_regression() {
+    // Same page, anchor="bottom-right" without anchor-zone: page-relative.
+    // Page 400×300, rect 40×30 → x=360, y=270.
+    let src = doc_with_zone_and_node(
+        r##"rect id="r.nozone" anchor="bottom-right" w=(px)40 h=(px)30 fill="#0000ff""##,
+    );
+    let doc = parse(&src);
+    let result = compile(&doc, &default_provider());
+    assert!(
+        result.diagnostics.is_empty(),
+        "expected no diagnostics, got: {:?}",
+        result.diagnostics
+    );
+
+    let rects = fill_rects(&result);
+    assert!(
+        rects.iter().any(|&(x, y, w, h)| {
+            (x - 360.0).abs() < 0.001
+                && (y - 270.0).abs() < 0.001
+                && (w - 40.0).abs() < 0.001
+                && (h - 30.0).abs() < 0.001
+        }),
+        "expected FillRect at (360, 270, 40, 30) for page-relative bottom-right; got: {rects:?}"
+    );
 }

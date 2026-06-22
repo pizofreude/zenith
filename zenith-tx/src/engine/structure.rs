@@ -1280,6 +1280,7 @@ pub(super) fn apply_group(
         blur: None,
         style: None,
         anchor: None,
+        anchor_zone: None,
         children: group_children,
         source_span: None,
         unknown_props: BTreeMap::new(),

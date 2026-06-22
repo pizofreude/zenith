@@ -854,6 +854,7 @@ pub(super) fn compile_instance(
         blur: None,
         style: None,
         anchor: None,
+        anchor_zone: None,
         children,
         source_span: instance.source_span,
         unknown_props: BTreeMap::new(),

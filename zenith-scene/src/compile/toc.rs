@@ -123,6 +123,7 @@ pub(super) fn resolve_toc_to_text(
         bullet: None,
         bullet_gap: None,
         anchor: None,
+        anchor_zone: None,
         spans: vec![TextSpan {
             text: combined,
             fill: None,
@@ -251,6 +252,7 @@ mod tests {
         Node::Text(Box::new(TextNode {
             id: id.to_owned(),
             anchor: None,
+            anchor_zone: None,
             name: None,
             role: Some(role.to_owned()),
             x: Some(px(0.0)),
@@ -321,6 +323,7 @@ mod tests {
         TocNode {
             id: "toc.main".to_owned(),
             anchor: None,
+            anchor_zone: None,
             name: None,
             role: None,
             match_role: match_role.map(str::to_owned),

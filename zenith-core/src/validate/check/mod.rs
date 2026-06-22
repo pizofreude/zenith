@@ -53,7 +53,7 @@ use crate::diagnostics::{Diagnostic, Severity};
 use crate::tokens::{ResolvedToken, ResolvedValue};
 
 use contrast::check_text_contrast;
-use nodes::walk_node;
+use nodes::{WalkCtx, WalkPos, walk_node};
 use visual::{VisualExpect, check_visual_prop};
 
 // ── Public surface ────────────────────────────────────────────────────────────
@@ -292,20 +292,28 @@ pub fn validate(doc: &Document) -> ValidationReport {
         register_id(&comp.id, &mut seen_ids, &mut diagnostics);
 
         let mut local_seen: HashSet<String> = HashSet::new();
+        // Components are not page-children: no safe-zones apply.
+        let no_zones: BTreeSet<&str> = BTreeSet::new();
+        let ctx = WalkCtx {
+            resolved_tokens,
+            declared_asset_ids: &declared_asset_ids,
+            declared_style_ids: &declared_style_ids,
+            declared_component_ids: &declared_component_ids,
+            component_local_ids: &component_local_ids,
+            all_node_ids: &all_node_ids,
+            zone_ids: &no_zones,
+        };
         for child in &comp.children {
             walk_node(
                 child,
+                ctx,
                 &mut local_seen,
                 &mut referenced_token_ids,
-                resolved_tokens,
-                &declared_asset_ids,
-                &declared_style_ids,
-                &declared_component_ids,
-                &component_local_ids,
-                &all_node_ids,
-                None,
-                false,
-                None,
+                WalkPos {
+                    page_px_bounds: None,
+                    in_flow_parent: false,
+                    enclosing_frame: None,
+                },
                 &mut diagnostics,
             );
         }
@@ -322,20 +330,28 @@ pub fn validate(doc: &Document) -> ValidationReport {
         register_id(&master.id, &mut seen_ids, &mut diagnostics);
 
         let mut local_seen: HashSet<String> = HashSet::new();
+        // Masters are not page-children: no safe-zones apply.
+        let no_zones: BTreeSet<&str> = BTreeSet::new();
+        let ctx = WalkCtx {
+            resolved_tokens,
+            declared_asset_ids: &declared_asset_ids,
+            declared_style_ids: &declared_style_ids,
+            declared_component_ids: &declared_component_ids,
+            component_local_ids: &component_local_ids,
+            all_node_ids: &all_node_ids,
+            zone_ids: &no_zones,
+        };
         for child in &master.children {
             walk_node(
                 child,
+                ctx,
                 &mut local_seen,
                 &mut referenced_token_ids,
-                resolved_tokens,
-                &declared_asset_ids,
-                &declared_style_ids,
-                &declared_component_ids,
-                &component_local_ids,
-                &all_node_ids,
-                None,
-                false,
-                None,
+                WalkPos {
+                    page_px_bounds: None,
+                    in_flow_parent: false,
+                    enclosing_frame: None,
+                },
                 &mut diagnostics,
             );
         }
@@ -619,20 +635,32 @@ pub fn validate(doc: &Document) -> ValidationReport {
         // (already diagnosed) bounds are unresolved and we use (0, 0) — no
         // shape will contain the text, so contrast falls back to the page bg.
         let (page_w, page_h) = page_px_bounds.unwrap_or((0.0, 0.0));
+
+        // Build the set of safe-zone ids for this page so that check_anchor
+        // can validate anchor-zone references.
+        let zone_ids: BTreeSet<&str> = page.safe_zones.iter().map(|z| z.id.as_str()).collect();
+
+        let ctx = WalkCtx {
+            resolved_tokens,
+            declared_asset_ids: &declared_asset_ids,
+            declared_style_ids: &declared_style_ids,
+            declared_component_ids: &declared_component_ids,
+            component_local_ids: &component_local_ids,
+            all_node_ids: &all_node_ids,
+            zone_ids: &zone_ids,
+        };
+
         for (i, node) in page.children.iter().enumerate() {
             walk_node(
                 node,
+                ctx,
                 &mut seen_ids,
                 &mut referenced_token_ids,
-                resolved_tokens,
-                &declared_asset_ids,
-                &declared_style_ids,
-                &declared_component_ids,
-                &component_local_ids,
-                &all_node_ids,
-                page_px_bounds,
-                false,
-                None,
+                WalkPos {
+                    page_px_bounds,
+                    in_flow_parent: false,
+                    enclosing_frame: None,
+                },
                 &mut diagnostics,
             );
             // Contrast check runs after the structural walk so that

@@ -1490,6 +1490,8 @@ const SHAPE_KNOWN_PROPS: &[&str] = &[
     "locked",
     "rotate",
     "anchor",
+    "anchor-zone",
+    "anchor_zone",
 ];
 
 fn transform_shape(node: &KdlNode) -> Result<ShapeNode, ParseError> {
@@ -1537,6 +1539,9 @@ fn transform_shape(node: &KdlNode) -> Result<ShapeNode, ParseError> {
         locked: optional_bool_prop(node, "locked"),
         rotate: optional_dimension_prop(node, "rotate"),
         anchor: optional_string_prop(node, "anchor").map(str::to_owned),
+        anchor_zone: optional_string_prop(node, "anchor-zone")
+            .or_else(|| optional_string_prop(node, "anchor_zone"))
+            .map(str::to_owned),
         source_span: node_span(node),
         unknown_props,
     })
@@ -1682,6 +1687,8 @@ const RECT_KNOWN_PROPS: &[&str] = &[
     "stroke-outer-width",
     "stroke_outer_width",
     "anchor",
+    "anchor-zone",
+    "anchor_zone",
 ];
 
 fn transform_rect(node: &KdlNode) -> Result<RectNode, ParseError> {
@@ -1757,6 +1764,9 @@ fn transform_rect(node: &KdlNode) -> Result<RectNode, ParseError> {
         locked: optional_bool_prop(node, "locked"),
         rotate: optional_dimension_prop(node, "rotate"),
         anchor: optional_string_prop(node, "anchor").map(str::to_owned),
+        anchor_zone: optional_string_prop(node, "anchor-zone")
+            .or_else(|| optional_string_prop(node, "anchor_zone"))
+            .map(str::to_owned),
         source_span: node_span(node),
         unknown_props,
     })
@@ -1799,6 +1809,8 @@ const IMAGE_KNOWN_PROPS: &[&str] = &[
     "rotate",
     "style",
     "anchor",
+    "anchor-zone",
+    "anchor_zone",
 ];
 
 fn transform_image(node: &KdlNode) -> Result<ImageNode, ParseError> {
@@ -1853,6 +1865,9 @@ fn transform_image(node: &KdlNode) -> Result<ImageNode, ParseError> {
         rotate: optional_dimension_prop(node, "rotate"),
         style: optional_string_prop(node, "style").map(str::to_owned),
         anchor: optional_string_prop(node, "anchor").map(str::to_owned),
+        anchor_zone: optional_string_prop(node, "anchor-zone")
+            .or_else(|| optional_string_prop(node, "anchor_zone"))
+            .map(str::to_owned),
         source_span: node_span(node),
         unknown_props,
     })
@@ -1890,6 +1905,8 @@ const ELLIPSE_KNOWN_PROPS: &[&str] = &[
     "locked",
     "rotate",
     "anchor",
+    "anchor-zone",
+    "anchor_zone",
 ];
 
 fn transform_ellipse(node: &KdlNode) -> Result<EllipseNode, ParseError> {
@@ -1937,6 +1954,9 @@ fn transform_ellipse(node: &KdlNode) -> Result<EllipseNode, ParseError> {
         locked: optional_bool_prop(node, "locked"),
         rotate: optional_dimension_prop(node, "rotate"),
         anchor: optional_string_prop(node, "anchor").map(str::to_owned),
+        anchor_zone: optional_string_prop(node, "anchor-zone")
+            .or_else(|| optional_string_prop(node, "anchor_zone"))
+            .map(str::to_owned),
         source_span: node_span(node),
         unknown_props,
     })
@@ -2058,6 +2078,8 @@ const TEXT_KNOWN_PROPS: &[&str] = &[
     "bullet-gap",
     "bullet_gap",
     "anchor",
+    "anchor-zone",
+    "anchor_zone",
 ];
 
 fn transform_text(node: &KdlNode) -> Result<TextNode, ParseError> {
@@ -2146,6 +2168,9 @@ fn transform_text(node: &KdlNode) -> Result<TextNode, ParseError> {
         bullet_gap,
         spans,
         anchor: optional_string_prop(node, "anchor").map(str::to_owned),
+        anchor_zone: optional_string_prop(node, "anchor-zone")
+            .or_else(|| optional_string_prop(node, "anchor_zone"))
+            .map(str::to_owned),
         source_span: node_span(node),
         unknown_props,
     })
@@ -2180,6 +2205,8 @@ const CODE_KNOWN_PROPS: &[&str] = &[
     "locked",
     "rotate",
     "anchor",
+    "anchor-zone",
+    "anchor_zone",
 ];
 
 fn transform_code(node: &KdlNode) -> Result<CodeNode, ParseError> {
@@ -2239,6 +2266,9 @@ fn transform_code(node: &KdlNode) -> Result<CodeNode, ParseError> {
         rotate: optional_dimension_prop(node, "rotate"),
         content,
         anchor: optional_string_prop(node, "anchor").map(str::to_owned),
+        anchor_zone: optional_string_prop(node, "anchor-zone")
+            .or_else(|| optional_string_prop(node, "anchor_zone"))
+            .map(str::to_owned),
         source_span: node_span(node),
         unknown_props,
     })
@@ -2264,6 +2294,8 @@ const FRAME_KNOWN_PROPS: &[&str] = &[
     "blur",
     "style",
     "anchor",
+    "anchor-zone",
+    "anchor_zone",
 ];
 
 fn transform_frame(node: &KdlNode) -> Result<FrameNode, ParseError> {
@@ -2291,6 +2323,9 @@ fn transform_frame(node: &KdlNode) -> Result<FrameNode, ParseError> {
         style: optional_string_prop(node, "style").map(str::to_owned),
         children: transform_children(node)?,
         anchor: optional_string_prop(node, "anchor").map(str::to_owned),
+        anchor_zone: optional_string_prop(node, "anchor-zone")
+            .or_else(|| optional_string_prop(node, "anchor_zone"))
+            .map(str::to_owned),
         source_span: node_span(node),
         unknown_props,
     })
@@ -2313,6 +2348,8 @@ const GROUP_KNOWN_PROPS: &[&str] = &[
     "blur",
     "style",
     "anchor",
+    "anchor-zone",
+    "anchor_zone",
 ];
 
 fn transform_group(node: &KdlNode) -> Result<GroupNode, ParseError> {
@@ -2338,6 +2375,9 @@ fn transform_group(node: &KdlNode) -> Result<GroupNode, ParseError> {
         style: optional_string_prop(node, "style").map(str::to_owned),
         children: transform_children(node)?,
         anchor: optional_string_prop(node, "anchor").map(str::to_owned),
+        anchor_zone: optional_string_prop(node, "anchor-zone")
+            .or_else(|| optional_string_prop(node, "anchor_zone"))
+            .map(str::to_owned),
         source_span: node_span(node),
         unknown_props,
     })
@@ -2394,6 +2434,8 @@ const TABLE_KNOWN_PROPS: &[&str] = &[
     "locked",
     "rotate",
     "anchor",
+    "anchor-zone",
+    "anchor_zone",
 ];
 
 /// Transform a `cell` child node into a [`TableCell`].
@@ -2488,6 +2530,9 @@ fn transform_table(node: &KdlNode) -> Result<TableNode, ParseError> {
         locked: optional_bool_prop(node, "locked"),
         rotate: optional_dimension_prop(node, "rotate"),
         anchor: optional_string_prop(node, "anchor").map(str::to_owned),
+        anchor_zone: optional_string_prop(node, "anchor-zone")
+            .or_else(|| optional_string_prop(node, "anchor_zone"))
+            .map(str::to_owned),
         source_span: node_span(node),
         unknown_props,
     })
@@ -2725,6 +2770,8 @@ const FIELD_KNOWN_PROPS: &[&str] = &[
     "visible",
     "locked",
     "anchor",
+    "anchor-zone",
+    "anchor_zone",
 ];
 
 /// Transform a `field` node into a [`FieldNode`].
@@ -2769,6 +2816,9 @@ fn transform_field(node: &KdlNode) -> Result<FieldNode, ParseError> {
         visible: optional_bool_prop(node, "visible"),
         locked: optional_bool_prop(node, "locked"),
         anchor: optional_string_prop(node, "anchor").map(str::to_owned),
+        anchor_zone: optional_string_prop(node, "anchor-zone")
+            .or_else(|| optional_string_prop(node, "anchor_zone"))
+            .map(str::to_owned),
         source_span: node_span(node),
         unknown_props,
     })
@@ -2799,6 +2849,8 @@ const TOC_KNOWN_PROPS: &[&str] = &[
     "visible",
     "locked",
     "anchor",
+    "anchor-zone",
+    "anchor_zone",
 ];
 
 /// Transform a `toc` node into a [`TocNode`].
@@ -2844,6 +2896,9 @@ fn transform_toc(node: &KdlNode) -> Result<TocNode, ParseError> {
         visible: optional_bool_prop(node, "visible"),
         locked: optional_bool_prop(node, "locked"),
         anchor: optional_string_prop(node, "anchor").map(str::to_owned),
+        anchor_zone: optional_string_prop(node, "anchor-zone")
+            .or_else(|| optional_string_prop(node, "anchor_zone"))
+            .map(str::to_owned),
         source_span: node_span(node),
         unknown_props,
     })

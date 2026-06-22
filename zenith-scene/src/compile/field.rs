@@ -195,6 +195,7 @@ pub(super) fn resolve_field_to_text(field: &FieldNode, ctx: &FieldCtx) -> Option
         bullet: None,
         bullet_gap: None,
         anchor: None,
+        anchor_zone: None,
         spans: vec![TextSpan {
             text,
             fill: None,
@@ -647,6 +648,7 @@ mod tests {
         FieldNode {
             id: "total".to_owned(),
             anchor: None,
+            anchor_zone: None,
             name: None,
             role: None,
             field_type: "page-count".to_owned(),
@@ -948,6 +950,7 @@ mod tests {
         FieldNode {
             id: "pn".to_owned(),
             anchor: None,
+            anchor_zone: None,
             name: None,
             role: None,
             field_type: "page-number".to_owned(),
@@ -976,6 +979,7 @@ mod tests {
         FieldNode {
             id: "rh".to_owned(),
             anchor: None,
+            anchor_zone: None,
             name: None,
             role: None,
             field_type: "running-head".to_owned(),
@@ -1212,6 +1216,7 @@ mod tests {
         FieldNode {
             id: "sf".to_owned(),
             anchor: None,
+            anchor_zone: None,
             name: None,
             role: None,
             field_type: field_type.to_owned(),

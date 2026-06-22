@@ -14,6 +14,26 @@ use crate::tokens::ResolvedToken;
 use super::register_id;
 use super::visual::{VisualExpect, check_visual_prop};
 
+/// Walk-wide immutable validation context (never changes during a page walk).
+#[derive(Clone, Copy)]
+pub(super) struct WalkCtx<'a> {
+    pub(super) resolved_tokens: &'a BTreeMap<String, ResolvedToken>,
+    pub(super) declared_asset_ids: &'a HashSet<String>,
+    pub(super) declared_style_ids: &'a HashSet<String>,
+    pub(super) declared_component_ids: &'a HashSet<String>,
+    pub(super) component_local_ids: &'a BTreeMap<String, HashSet<String>>,
+    pub(super) all_node_ids: &'a HashSet<String>,
+    pub(super) zone_ids: &'a BTreeSet<&'a str>,
+}
+
+/// Per-recursion position state (changes as the walk descends frames/groups).
+#[derive(Clone, Copy)]
+pub(super) struct WalkPos {
+    pub(super) page_px_bounds: Option<(f64, f64)>,
+    pub(super) in_flow_parent: bool,
+    pub(super) enclosing_frame: Option<(f64, f64, f64, f64)>,
+}
+
 /// Recursively walk a [`Node`], collecting all diagnostics.
 ///
 /// `referenced_token_ids` accumulates every token id actually used so that
@@ -27,29 +47,30 @@ use super::visual::{VisualExpect, check_visual_prop};
 /// Recursion through `Node::Group` and `Node::Frame` children has no depth
 /// guard.  Pathologically deep trees can overflow the stack.  This is an
 /// accepted v0 limitation.
-#[allow(clippy::too_many_arguments)]
 pub(super) fn walk_node(
     node: &Node,
+    ctx: WalkCtx,
     seen_ids: &mut HashSet<String>,
     referenced_token_ids: &mut HashSet<String>,
-    resolved_tokens: &BTreeMap<String, ResolvedToken>,
-    declared_asset_ids: &HashSet<String>,
-    declared_style_ids: &HashSet<String>,
-    declared_component_ids: &HashSet<String>,
-    component_local_ids: &BTreeMap<String, HashSet<String>>,
-    all_node_ids: &HashSet<String>,
-    page_px_bounds: Option<(f64, f64)>,
-    in_flow_parent: bool,
-    enclosing_frame: Option<(f64, f64, f64, f64)>,
+    pos: WalkPos,
     diagnostics: &mut Vec<Diagnostic>,
 ) {
+    let WalkCtx {
+        resolved_tokens,
+        declared_asset_ids,
+        declared_style_ids,
+        all_node_ids,
+        zone_ids,
+        ..
+    } = ctx;
+
     // ── frame.child_overflow advisory ─────────────────────────────────────
     // When this node is a direct (or group-nested) child of a frame whose px
     // box resolved, advise if the child's AUTHORED bbox protrudes beyond the
     // frame box on any side. `node_bbox` returns None for flow-supplied
     // (missing) geometry, so such children are naturally skipped.
-    if let Some((fx, fy, fw, fh)) = enclosing_frame
-        && let Some((page_w, page_h)) = page_px_bounds
+    if let Some((fx, fy, fw, fh)) = pos.enclosing_frame
+        && let Some((page_w, page_h)) = pos.page_px_bounds
         && let Some((nx, ny, nw, nh)) = node_bbox(node, page_w, page_h)
     {
         const EPSILON: f64 = 0.5;
@@ -74,7 +95,7 @@ pub(super) fn walk_node(
 
     // Direct children of a `layout="flow"` frame have their x/y (and, when
     // omitted, w/h) supplied by the flow algorithm, so geometry is optional.
-    let geom_required = !in_flow_parent;
+    let geom_required = !pos.in_flow_parent;
     // ── off_canvas advisory ───────────────────────────────────────────────
     // Check whether the node's authored bounding box exceeds the page rect
     // [0, 0, page_w, page_h]. This uses authored coordinates only — group
@@ -85,7 +106,7 @@ pub(super) fn walk_node(
     // axis-aligned bounding box (AABB) of the four rotated corners instead of
     // the authored box. Unrotated nodes (no rotate or 0°) use the authored
     // box unchanged, keeping byte-identical advisory behavior for those nodes.
-    if let Some((page_w, page_h)) = page_px_bounds
+    if let Some((page_w, page_h)) = pos.page_px_bounds
         && let Some((nx, ny, nw, nh)) = node_bbox(node, page_w, page_h)
     {
         // Compute the effective (ax, ay, aw, ah) used for the bounds check.
@@ -148,8 +169,14 @@ pub(super) fn walk_node(
 
             // A recognized anchor supplies both x and y; x/y are not required
             // even outside a flow parent when a recognized anchor is present.
-            let anchor_active =
-                check_anchor(&r.id, r.anchor.as_deref(), r.source_span, diagnostics);
+            let anchor_active = check_anchor(
+                &r.id,
+                r.anchor.as_deref(),
+                r.anchor_zone.as_deref(),
+                zone_ids,
+                r.source_span,
+                diagnostics,
+            );
             let xy_required = geom_required && !anchor_active;
 
             // Required geometry: x, y, w, h must all be present.
@@ -411,8 +438,14 @@ pub(super) fn walk_node(
             );
 
             // A recognized anchor supplies both x and y.
-            let anchor_active =
-                check_anchor(&e.id, e.anchor.as_deref(), e.source_span, diagnostics);
+            let anchor_active = check_anchor(
+                &e.id,
+                e.anchor.as_deref(),
+                e.anchor_zone.as_deref(),
+                zone_ids,
+                e.source_span,
+                diagnostics,
+            );
             let xy_required = geom_required && !anchor_active;
 
             // Required geometry: x, y, w, h must all be present.
@@ -744,8 +777,14 @@ pub(super) fn walk_node(
             );
 
             // A recognized anchor supplies both x and y.
-            let anchor_active =
-                check_anchor(&t.id, t.anchor.as_deref(), t.source_span, diagnostics);
+            let anchor_active = check_anchor(
+                &t.id,
+                t.anchor.as_deref(),
+                t.anchor_zone.as_deref(),
+                zone_ids,
+                t.source_span,
+                diagnostics,
+            );
             let xy_required = geom_required && !anchor_active;
 
             // Required geometry.
@@ -962,8 +1001,14 @@ pub(super) fn walk_node(
             );
 
             // A recognized anchor supplies both x and y.
-            let anchor_active =
-                check_anchor(&c.id, c.anchor.as_deref(), c.source_span, diagnostics);
+            let anchor_active = check_anchor(
+                &c.id,
+                c.anchor.as_deref(),
+                c.anchor_zone.as_deref(),
+                zone_ids,
+                c.source_span,
+                diagnostics,
+            );
             let xy_required = geom_required && !anchor_active;
 
             // Geometry (advisory box for v0; only unit-checked if present).
@@ -1078,8 +1123,14 @@ pub(super) fn walk_node(
             );
 
             // A recognized anchor supplies both x and y.
-            let anchor_active =
-                check_anchor(&f.id, f.anchor.as_deref(), f.source_span, diagnostics);
+            let anchor_active = check_anchor(
+                &f.id,
+                f.anchor.as_deref(),
+                f.anchor_zone.as_deref(),
+                zone_ids,
+                f.source_span,
+                diagnostics,
+            );
             let xy_required = geom_required && !anchor_active;
 
             // Frames REQUIRE all four geometry dimensions (unlike groups).
@@ -1165,7 +1216,7 @@ pub(super) fn walk_node(
             // Compute this frame's own px box; children are checked for
             // overflow against it. If any of x/y/w/h is missing or has a bad
             // unit, pass None so no spurious overflow advisory is produced.
-            let frame_box = match page_px_bounds {
+            let frame_box = match pos.page_px_bounds {
                 Some((page_w, page_h)) => {
                     f.x.as_ref()
                         .and_then(|d| resolve_axis(d, page_w))
@@ -1180,17 +1231,14 @@ pub(super) fn walk_node(
             for child in &f.children {
                 walk_node(
                     child,
+                    ctx,
                     seen_ids,
                     referenced_token_ids,
-                    resolved_tokens,
-                    declared_asset_ids,
-                    declared_style_ids,
-                    declared_component_ids,
-                    component_local_ids,
-                    all_node_ids,
-                    page_px_bounds,
-                    children_in_flow,
-                    frame_box,
+                    WalkPos {
+                        page_px_bounds: pos.page_px_bounds,
+                        in_flow_parent: children_in_flow,
+                        enclosing_frame: frame_box,
+                    },
                     diagnostics,
                 );
             }
@@ -1221,7 +1269,14 @@ pub(super) fn walk_node(
 
             // Groups have NO required geometry — x/y/w/h are all advisory.
             // Still validate the anchor value if present.
-            check_anchor(&g.id, g.anchor.as_deref(), g.source_span, diagnostics);
+            check_anchor(
+                &g.id,
+                g.anchor.as_deref(),
+                g.anchor_zone.as_deref(),
+                zone_ids,
+                g.source_span,
+                diagnostics,
+            );
 
             if let Some(d) = g.blur.as_ref()
                 && d.value < 0.0
@@ -1257,17 +1312,14 @@ pub(super) fn walk_node(
             for child in &g.children {
                 walk_node(
                     child,
+                    ctx,
                     seen_ids,
                     referenced_token_ids,
-                    resolved_tokens,
-                    declared_asset_ids,
-                    declared_style_ids,
-                    declared_component_ids,
-                    component_local_ids,
-                    all_node_ids,
-                    page_px_bounds,
-                    false,
-                    enclosing_frame,
+                    WalkPos {
+                        page_px_bounds: pos.page_px_bounds,
+                        in_flow_parent: false,
+                        enclosing_frame: pos.enclosing_frame,
+                    },
                     diagnostics,
                 );
             }
@@ -1297,8 +1349,14 @@ pub(super) fn walk_node(
             );
 
             // A recognized anchor supplies both x and y.
-            let anchor_active =
-                check_anchor(&img.id, img.anchor.as_deref(), img.source_span, diagnostics);
+            let anchor_active = check_anchor(
+                &img.id,
+                img.anchor.as_deref(),
+                img.anchor_zone.as_deref(),
+                zone_ids,
+                img.source_span,
+                diagnostics,
+            );
             let xy_required = geom_required && !anchor_active;
 
             // Required geometry: x, y, w, h must all be present (mirror rect).
@@ -1513,71 +1571,27 @@ pub(super) fn walk_node(
         }
 
         Node::Polygon(poly) => {
-            check_polygon(
-                poly,
-                seen_ids,
-                referenced_token_ids,
-                resolved_tokens,
-                declared_style_ids,
-                diagnostics,
-            );
+            check_polygon(poly, ctx, seen_ids, referenced_token_ids, diagnostics);
         }
 
         Node::Polyline(poly) => {
-            check_polyline(
-                poly,
-                seen_ids,
-                referenced_token_ids,
-                resolved_tokens,
-                declared_style_ids,
-                diagnostics,
-            );
+            check_polyline(poly, ctx, seen_ids, referenced_token_ids, diagnostics);
         }
 
         Node::Instance(inst) => {
-            check_instance(
-                inst,
-                seen_ids,
-                referenced_token_ids,
-                resolved_tokens,
-                declared_component_ids,
-                component_local_ids,
-                diagnostics,
-            );
+            check_instance(inst, ctx, seen_ids, referenced_token_ids, diagnostics);
         }
 
         Node::Field(field) => {
-            check_field(
-                field,
-                seen_ids,
-                referenced_token_ids,
-                resolved_tokens,
-                declared_style_ids,
-                all_node_ids,
-                diagnostics,
-            );
+            check_field(field, ctx, seen_ids, referenced_token_ids, diagnostics);
         }
 
         Node::Toc(toc) => {
-            check_toc(
-                toc,
-                seen_ids,
-                referenced_token_ids,
-                resolved_tokens,
-                declared_style_ids,
-                diagnostics,
-            );
+            check_toc(toc, ctx, seen_ids, referenced_token_ids, diagnostics);
         }
 
         Node::Footnote(footnote) => {
-            check_footnote(
-                footnote,
-                seen_ids,
-                referenced_token_ids,
-                resolved_tokens,
-                declared_style_ids,
-                diagnostics,
-            );
+            check_footnote(footnote, ctx, seen_ids, referenced_token_ids, diagnostics);
         }
 
         Node::Table(t) => {
@@ -1600,8 +1614,14 @@ pub(super) fn walk_node(
             );
 
             // A recognized anchor supplies both x and y.
-            let anchor_active =
-                check_anchor(&t.id, t.anchor.as_deref(), t.source_span, diagnostics);
+            let anchor_active = check_anchor(
+                &t.id,
+                t.anchor.as_deref(),
+                t.anchor_zone.as_deref(),
+                zone_ids,
+                t.source_span,
+                diagnostics,
+            );
             let xy_required = geom_required && !anchor_active;
 
             // Required geometry: x, y, w, h must all be present (mirror frame).
@@ -1896,17 +1916,14 @@ pub(super) fn walk_node(
                     for child in &cell.children {
                         walk_node(
                             child,
+                            ctx,
                             seen_ids,
                             referenced_token_ids,
-                            resolved_tokens,
-                            declared_asset_ids,
-                            declared_style_ids,
-                            declared_component_ids,
-                            component_local_ids,
-                            all_node_ids,
-                            page_px_bounds,
-                            true,
-                            enclosing_frame,
+                            WalkPos {
+                                page_px_bounds: pos.page_px_bounds,
+                                in_flow_parent: true,
+                                enclosing_frame: pos.enclosing_frame,
+                            },
                             diagnostics,
                         );
                     }
@@ -1932,8 +1949,14 @@ pub(super) fn walk_node(
             );
 
             // A recognized anchor supplies both x and y.
-            let anchor_active =
-                check_anchor(&s.id, s.anchor.as_deref(), s.source_span, diagnostics);
+            let anchor_active = check_anchor(
+                &s.id,
+                s.anchor.as_deref(),
+                s.anchor_zone.as_deref(),
+                zone_ids,
+                s.source_span,
+                diagnostics,
+            );
             let xy_required = geom_required && !anchor_active;
 
             // Required geometry: x, y, w, h must all be present.
@@ -2280,17 +2303,14 @@ pub(super) fn walk_node(
             for child in &u.children {
                 walk_node(
                     child,
+                    ctx,
                     seen_ids,
                     referenced_token_ids,
-                    resolved_tokens,
-                    declared_asset_ids,
-                    declared_style_ids,
-                    declared_component_ids,
-                    component_local_ids,
-                    all_node_ids,
-                    page_px_bounds,
-                    true,
-                    enclosing_frame,
+                    WalkPos {
+                        page_px_bounds: pos.page_px_bounds,
+                        in_flow_parent: true,
+                        enclosing_frame: pos.enclosing_frame,
+                    },
                     diagnostics,
                 );
             }
@@ -2558,12 +2578,16 @@ pub(super) fn node_id_and_span(node: &Node) -> (&str, Option<crate::ast::Span>) 
 
 fn check_polygon(
     poly: &PolygonNode,
+    ctx: WalkCtx,
     seen_ids: &mut HashSet<String>,
     referenced_token_ids: &mut HashSet<String>,
-    resolved_tokens: &BTreeMap<String, ResolvedToken>,
-    declared_style_ids: &HashSet<String>,
     diagnostics: &mut Vec<Diagnostic>,
 ) {
+    let WalkCtx {
+        resolved_tokens,
+        declared_style_ids,
+        ..
+    } = ctx;
     register_id(&poly.id, seen_ids, diagnostics);
     check_style_ref(
         &poly.id,
@@ -2688,12 +2712,16 @@ fn check_polygon(
 
 fn check_polyline(
     poly: &PolylineNode,
+    ctx: WalkCtx,
     seen_ids: &mut HashSet<String>,
     referenced_token_ids: &mut HashSet<String>,
-    resolved_tokens: &BTreeMap<String, ResolvedToken>,
-    declared_style_ids: &HashSet<String>,
     diagnostics: &mut Vec<Diagnostic>,
 ) {
+    let WalkCtx {
+        resolved_tokens,
+        declared_style_ids,
+        ..
+    } = ctx;
     register_id(&poly.id, seen_ids, diagnostics);
     check_style_ref(
         &poly.id,
@@ -2815,13 +2843,17 @@ fn check_polyline(
 /// checked once.
 fn check_instance(
     inst: &InstanceNode,
+    ctx: WalkCtx,
     seen_ids: &mut HashSet<String>,
     referenced_token_ids: &mut HashSet<String>,
-    resolved_tokens: &BTreeMap<String, ResolvedToken>,
-    declared_component_ids: &HashSet<String>,
-    component_local_ids: &BTreeMap<String, HashSet<String>>,
     diagnostics: &mut Vec<Diagnostic>,
 ) {
+    let WalkCtx {
+        resolved_tokens,
+        declared_component_ids,
+        component_local_ids,
+        ..
+    } = ctx;
     register_id(&inst.id, seen_ids, diagnostics);
 
     let component_known = declared_component_ids.contains(&inst.component);
@@ -2927,13 +2959,18 @@ const KNOWN_FIELD_TYPES: &[&str] = &[
 /// error is raised here.
 fn check_field(
     field: &FieldNode,
+    ctx: WalkCtx,
     seen_ids: &mut HashSet<String>,
     referenced_token_ids: &mut HashSet<String>,
-    resolved_tokens: &BTreeMap<String, ResolvedToken>,
-    declared_style_ids: &HashSet<String>,
-    all_node_ids: &HashSet<String>,
     diagnostics: &mut Vec<Diagnostic>,
 ) {
+    let WalkCtx {
+        resolved_tokens,
+        declared_style_ids,
+        all_node_ids,
+        zone_ids,
+        ..
+    } = ctx;
     register_id(&field.id, seen_ids, diagnostics);
     check_style_ref(
         &field.id,
@@ -2947,6 +2984,8 @@ fn check_field(
     check_anchor(
         &field.id,
         field.anchor.as_deref(),
+        field.anchor_zone.as_deref(),
+        zone_ids,
         field.source_span,
         diagnostics,
     );
@@ -3042,12 +3081,17 @@ fn check_field(
 /// absent (the toc would collect no entries at compile time).
 fn check_toc(
     toc: &TocNode,
+    ctx: WalkCtx,
     seen_ids: &mut HashSet<String>,
     referenced_token_ids: &mut HashSet<String>,
-    resolved_tokens: &BTreeMap<String, ResolvedToken>,
-    declared_style_ids: &HashSet<String>,
     diagnostics: &mut Vec<Diagnostic>,
 ) {
+    let WalkCtx {
+        resolved_tokens,
+        declared_style_ids,
+        zone_ids,
+        ..
+    } = ctx;
     register_id(&toc.id, seen_ids, diagnostics);
     check_style_ref(
         &toc.id,
@@ -3058,7 +3102,14 @@ fn check_toc(
     );
 
     // Validate the anchor value (geometry is all-optional for toc anyway).
-    check_anchor(&toc.id, toc.anchor.as_deref(), toc.source_span, diagnostics);
+    check_anchor(
+        &toc.id,
+        toc.anchor.as_deref(),
+        toc.anchor_zone.as_deref(),
+        zone_ids,
+        toc.source_span,
+        diagnostics,
+    );
 
     // Warn when neither selector is set: the toc will collect no entries.
     if toc.match_role.is_none() && toc.match_style.is_none() {
@@ -3127,12 +3178,16 @@ fn check_toc(
 /// no geometry checks.
 fn check_footnote(
     footnote: &FootnoteNode,
+    ctx: WalkCtx,
     seen_ids: &mut HashSet<String>,
     referenced_token_ids: &mut HashSet<String>,
-    resolved_tokens: &BTreeMap<String, ResolvedToken>,
-    declared_style_ids: &HashSet<String>,
     diagnostics: &mut Vec<Diagnostic>,
 ) {
+    let WalkCtx {
+        resolved_tokens,
+        declared_style_ids,
+        ..
+    } = ctx;
     register_id(&footnote.id, seen_ids, diagnostics);
     check_style_ref(
         &footnote.id,
@@ -3209,20 +3264,39 @@ fn check_footnote(
 
 // ── Geometry helpers ──────────────────────────────────────────────────────────
 
-/// Validate the `anchor` property on a node.
+/// Validate the `anchor` and `anchor_zone` properties on a node.
 ///
-/// - Absent (`None`) → no diagnostic; returns `false` (no anchor active).
-/// - Present with a recognized value → no diagnostic; returns `true` (anchor
-///   active: x/y geometry is NOT required even outside a flow parent).
-/// - Present with an unrecognized value → pushes `anchor.unknown_value` and
-///   returns `false` (treat as absent for geometry purposes).
+/// Returns `true` when `anchor` is present and recognized (anchor active:
+/// x/y geometry is NOT required even outside a flow parent), `false` otherwise.
+///
+/// Diagnostics pushed:
+/// - `anchor.unknown_value` (Error) — `anchor` present with an unrecognized value.
+/// - `anchor.zone_without_anchor` (Warning) — `anchor_zone` set but `anchor` absent.
+/// - `anchor.unresolved_zone` (Error) — `anchor_zone` names a zone not on this page.
 fn check_anchor(
     node_id: &str,
     anchor: Option<&str>,
+    anchor_zone: Option<&str>,
+    zone_ids: &BTreeSet<&str>,
     span: Option<crate::ast::Span>,
     diagnostics: &mut Vec<Diagnostic>,
 ) -> bool {
-    match anchor {
+    // When anchor-zone is present without anchor, emit a warning and treat zone as
+    // irrelevant (anchor-zone has no effect without an anchor value).
+    if anchor_zone.is_some() && anchor.is_none() {
+        diagnostics.push(Diagnostic::warning(
+            "anchor.zone_without_anchor",
+            format!(
+                "node '{}': anchor-zone is set but anchor is absent; \
+                 anchor-zone has no effect without an anchor value",
+                node_id
+            ),
+            span,
+            Some(node_id.to_owned()),
+        ));
+    }
+
+    let anchor_active = match anchor {
         None => false,
         Some(s) => {
             if parse_anchor(s).is_some() {
@@ -3243,7 +3317,24 @@ fn check_anchor(
                 false
             }
         }
+    };
+
+    // When anchor-zone names a zone, check that it exists on the page.
+    if let Some(zone_id) = anchor_zone
+        && !zone_ids.contains(zone_id)
+    {
+        diagnostics.push(Diagnostic::error(
+            "anchor.unresolved_zone",
+            format!(
+                "node '{}': anchor-zone '{}' does not name a safe-zone on this page",
+                node_id, zone_id
+            ),
+            span,
+            Some(node_id.to_owned()),
+        ));
     }
+
+    anchor_active
 }
 
 /// - absent AND `required` (e.g. a non-flow-positioned leaf) → `node.missing_geometry` (Error).

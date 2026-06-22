@@ -227,7 +227,7 @@ fn write_table(t: &TableNode, out: &mut String, depth: usize) {
     indent(out, depth);
     out.push_str("table");
 
-    // Canonical property order: id, name, role, x, y, w, h, header-rows, flows,
+    // Canonical property order: id, name, role, anchor, anchor-zone, x, y, w, h, header-rows, flows,
     // gap, cell-padding, border-collapse, fill, border, border-width, header-fill,
     // header-style, h-align, v-align, opacity, visible, locked, rotate, style,
     // then unknown props (sorted), then the column/row children block.
@@ -237,6 +237,7 @@ fn write_table(t: &TableNode, out: &mut String, depth: usize) {
     write_opt_str(out, "name", &t.name);
     write_opt_str(out, "role", &t.role);
     write_opt_str(out, "anchor", &t.anchor);
+    write_opt_str(out, "anchor-zone", &t.anchor_zone);
     write_opt_dimension(out, "x", &t.x);
     write_opt_dimension(out, "y", &t.y);
     write_opt_dimension(out, "w", &t.w);
@@ -294,7 +295,7 @@ fn write_field(f: &FieldNode, out: &mut String, depth: usize) {
     indent(out, depth);
     out.push_str("field");
 
-    // Canonical property order: id, name, role, type, recto, verso, target,
+    // Canonical property order: id, name, role, anchor, anchor-zone, type, recto, verso, target,
     // x, y, w, h, fill, font-family, font-size, opacity, visible, locked, style,
     // then unknown props (sorted). A field is a leaf — no child block.
     out.push_str(" id=\"");
@@ -303,6 +304,7 @@ fn write_field(f: &FieldNode, out: &mut String, depth: usize) {
     write_opt_str(out, "name", &f.name);
     write_opt_str(out, "role", &f.role);
     write_opt_str(out, "anchor", &f.anchor);
+    write_opt_str(out, "anchor-zone", &f.anchor_zone);
     out.push_str(" type=\"");
     out.push_str(&f.field_type);
     out.push('"');
@@ -336,7 +338,7 @@ fn write_toc(t: &TocNode, out: &mut String, depth: usize) {
     indent(out, depth);
     out.push_str("toc");
 
-    // Canonical property order: id, name, role, match-role, match-style,
+    // Canonical property order: id, name, role, anchor, anchor-zone, match-role, match-style,
     // leader, folio-style, x, y, w, h, fill, font-family, font-size, opacity,
     // visible, locked, style, then unknown props (sorted). A toc is a leaf —
     // no child block.
@@ -346,6 +348,7 @@ fn write_toc(t: &TocNode, out: &mut String, depth: usize) {
     write_opt_str(out, "name", &t.name);
     write_opt_str(out, "role", &t.role);
     write_opt_str(out, "anchor", &t.anchor);
+    write_opt_str(out, "anchor-zone", &t.anchor_zone);
     write_opt_str(out, "match-role", &t.match_role);
     write_opt_str(out, "match-style", &t.match_style);
     write_opt_str(out, "leader", &t.leader);
@@ -438,7 +441,7 @@ fn write_rect(r: &RectNode, out: &mut String, depth: usize) {
     indent(out, depth);
     out.push_str("rect");
 
-    // Canonical property order: id, name, role, x, y, w, h, radius, fill,
+    // Canonical property order: id, name, role, anchor, anchor-zone, x, y, w, h, radius, fill,
     // stroke, stroke-width, stroke-alignment, opacity, visible, locked, rotate, style
     out.push_str(" id=\"");
     out.push_str(&r.id);
@@ -446,6 +449,7 @@ fn write_rect(r: &RectNode, out: &mut String, depth: usize) {
     write_opt_str(out, "name", &r.name);
     write_opt_str(out, "role", &r.role);
     write_opt_str(out, "anchor", &r.anchor);
+    write_opt_str(out, "anchor-zone", &r.anchor_zone);
     write_opt_dimension(out, "x", &r.x);
     write_opt_dimension(out, "y", &r.y);
     write_opt_dimension(out, "w", &r.w);
@@ -495,7 +499,7 @@ fn write_image(i: &ImageNode, out: &mut String, depth: usize) {
     indent(out, depth);
     out.push_str("image");
 
-    // Canonical property order: id, name, role, asset, x, y, w, h,
+    // Canonical property order: id, name, role, anchor, anchor-zone, asset, x, y, w, h,
     // src-x, src-y, src-w, src-h, fit, clip, clip-radius,
     // object-position-x, object-position-y, shadow, opacity, visible, locked,
     // rotate, style, then unknown props (sorted).
@@ -505,6 +509,7 @@ fn write_image(i: &ImageNode, out: &mut String, depth: usize) {
     write_opt_str(out, "name", &i.name);
     write_opt_str(out, "role", &i.role);
     write_opt_str(out, "anchor", &i.anchor);
+    write_opt_str(out, "anchor-zone", &i.anchor_zone);
     out.push_str(" asset=\"");
     out.push_str(&i.asset);
     out.push('"');
@@ -547,7 +552,7 @@ fn write_ellipse(e: &EllipseNode, out: &mut String, depth: usize) {
     indent(out, depth);
     out.push_str("ellipse");
 
-    // Canonical property order: id, name, role, x, y, w, h, fill, stroke,
+    // Canonical property order: id, name, role, anchor, anchor-zone, x, y, w, h, fill, stroke,
     // stroke-width, opacity, visible, locked, rotate, style.
     // NOTE: stroke-alignment is not supported for ellipse in v0 (centered only).
     out.push_str(" id=\"");
@@ -556,6 +561,7 @@ fn write_ellipse(e: &EllipseNode, out: &mut String, depth: usize) {
     write_opt_str(out, "name", &e.name);
     write_opt_str(out, "role", &e.role);
     write_opt_str(out, "anchor", &e.anchor);
+    write_opt_str(out, "anchor-zone", &e.anchor_zone);
     write_opt_dimension(out, "x", &e.x);
     write_opt_dimension(out, "y", &e.y);
     write_opt_dimension(out, "w", &e.w);
@@ -668,7 +674,7 @@ fn write_frame(f: &FrameNode, out: &mut String, depth: usize) {
     indent(out, depth);
     out.push_str("frame");
 
-    // Canonical property order: id, name, role, x, y, w, h, layout, columns,
+    // Canonical property order: id, name, role, anchor, anchor-zone, x, y, w, h, layout, columns,
     // rows, opacity, visible, locked, rotate, style, then unknown props (sorted).
     out.push_str(" id=\"");
     out.push_str(&f.id);
@@ -676,6 +682,7 @@ fn write_frame(f: &FrameNode, out: &mut String, depth: usize) {
     write_opt_str(out, "name", &f.name);
     write_opt_str(out, "role", &f.role);
     write_opt_str(out, "anchor", &f.anchor);
+    write_opt_str(out, "anchor-zone", &f.anchor_zone);
     write_opt_dimension(out, "x", &f.x);
     write_opt_dimension(out, "y", &f.y);
     write_opt_dimension(out, "w", &f.w);
@@ -713,7 +720,7 @@ fn write_group(g: &GroupNode, out: &mut String, depth: usize) {
     indent(out, depth);
     out.push_str("group");
 
-    // Canonical property order: id, name, role, x, y, w, h, opacity,
+    // Canonical property order: id, name, role, anchor, anchor-zone, x, y, w, h, opacity,
     // visible, locked, rotate, blend-mode, style, then unknown props (sorted).
     out.push_str(" id=\"");
     out.push_str(&g.id);
@@ -721,6 +728,7 @@ fn write_group(g: &GroupNode, out: &mut String, depth: usize) {
     write_opt_str(out, "name", &g.name);
     write_opt_str(out, "role", &g.role);
     write_opt_str(out, "anchor", &g.anchor);
+    write_opt_str(out, "anchor-zone", &g.anchor_zone);
     write_opt_dimension(out, "x", &g.x);
     write_opt_dimension(out, "y", &g.y);
     write_opt_dimension(out, "w", &g.w);
@@ -751,7 +759,7 @@ fn write_text(t: &TextNode, out: &mut String, depth: usize) {
     indent(out, depth);
     out.push_str("text");
 
-    // Canonical property order: id, name, role, x, y, w, h, align, direction,
+    // Canonical property order: id, name, role, anchor, anchor-zone, x, y, w, h, align, direction,
     // overflow, fill, font-family, font-size, font-weight, opacity, visible,
     // locked, rotate, style, chain
     out.push_str(" id=\"");
@@ -760,6 +768,7 @@ fn write_text(t: &TextNode, out: &mut String, depth: usize) {
     write_opt_str(out, "name", &t.name);
     write_opt_str(out, "role", &t.role);
     write_opt_str(out, "anchor", &t.anchor);
+    write_opt_str(out, "anchor-zone", &t.anchor_zone);
     write_opt_dimension(out, "x", &t.x);
     write_opt_dimension(out, "y", &t.y);
     write_opt_dimension(out, "w", &t.w);
@@ -823,7 +832,7 @@ fn write_shape(s: &ShapeNode, out: &mut String, depth: usize) {
     indent(out, depth);
     out.push_str("shape");
 
-    // Canonical property order: id, name, role, x, y, w, h, kind, fill, stroke,
+    // Canonical property order: id, name, role, anchor, anchor-zone, x, y, w, h, kind, fill, stroke,
     // stroke-width, radius, stroke-alignment, padding, h-align, v-align,
     // text-style, style, opacity, visible, locked, rotate, then unknown props
     // (sorted), then the span children.
@@ -833,6 +842,7 @@ fn write_shape(s: &ShapeNode, out: &mut String, depth: usize) {
     write_opt_str(out, "name", &s.name);
     write_opt_str(out, "role", &s.role);
     write_opt_str(out, "anchor", &s.anchor);
+    write_opt_str(out, "anchor-zone", &s.anchor_zone);
     write_opt_dimension(out, "x", &s.x);
     write_opt_dimension(out, "y", &s.y);
     write_opt_dimension(out, "w", &s.w);
@@ -925,7 +935,7 @@ fn write_code(c: &CodeNode, out: &mut String, depth: usize) {
     indent(out, depth);
     out.push_str("code");
 
-    // Canonical property order: id, name, role, x, y, w, h, overflow, language,
+    // Canonical property order: id, name, role, anchor, anchor-zone, x, y, w, h, overflow, language,
     // line-numbers, tab-width, style, fill, font-family, font-size, font-weight,
     // syntax-theme, opacity, visible, locked, rotate, then unknown props.
     out.push_str(" id=\"");
@@ -934,6 +944,7 @@ fn write_code(c: &CodeNode, out: &mut String, depth: usize) {
     write_opt_str(out, "name", &c.name);
     write_opt_str(out, "role", &c.role);
     write_opt_str(out, "anchor", &c.anchor);
+    write_opt_str(out, "anchor-zone", &c.anchor_zone);
     write_opt_dimension(out, "x", &c.x);
     write_opt_dimension(out, "y", &c.y);
     write_opt_dimension(out, "w", &c.w);

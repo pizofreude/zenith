@@ -1,21 +1,27 @@
-//! Page-relative 9-point anchor pre-pass.
+//! 9-point anchor pre-pass (A-1: page-relative; A-2: safe-zone-relative).
 //!
-//! A node may carry `anchor="<name>"` where name is one of the nine page-
-//! relative positions (`top-left`, `top-center`, `top-right`, `center-left`,
-//! `center`, `center-right`, `bottom-left`, `bottom-center`, `bottom-right`).
-//! When present and recognized, the compile step derives the node's x and/or y
-//! from the page dimensions and the node's resolved w/h. An explicitly-authored
-//! x or y always wins over the anchor-derived value.
+//! A node may carry `anchor="<name>"` where name is one of the nine positions:
+//! `top-left`, `top-center`, `top-right`, `center-left`, `center`,
+//! `center-right`, `bottom-left`, `bottom-center`, `bottom-right`. When present
+//! and recognized, the compile step derives the node's x and/or y from a
+//! reference rectangle and the node's resolved w/h. An explicitly-authored x or
+//! y always wins over the anchor-derived value.
+//!
+//! **A-1 (page-relative):** reference rectangle is the full page.
+//!
+//! **A-2 (safe-zone-relative):** when the node also carries
+//! `anchor-zone="<id>"` and a safe-zone with that id is declared on the same
+//! page, the reference rectangle is that zone's rect instead of the page.
+//! Unrecognized zone ids and non-px zone dimensions silently fall back to no
+//! anchor entry (the validator emits `anchor.unresolved_zone`).
 //!
 //! ## Pre-pass
 //!
 //! [`build_anchor_map`] is called once per page compile, AFTER `page_w`/
 //! `page_h` are resolved, and walks the top-level page children (no recursion
-//! into frames/groups — anchors are page-relative and only meaningful on direct
-//! page children or equivalently-positioned nodes). For each node that carries
-//! a recognized anchor AND has both `w` and `h` in a px-convertible unit, the
-//! map stores the derived `(x, y)` pair keyed by node id. Nodes without
-//! a recognized anchor or with non-px dimensions are absent from the map.
+//! into frames/groups). For each node that carries a recognized anchor AND has
+//! both `w` and `h` in a px-convertible unit, the map stores the derived
+//! `(x, y)` pair keyed by node id.
 //!
 //! ## Leaf application
 //!
@@ -27,7 +33,7 @@
 
 use std::collections::BTreeMap;
 
-use zenith_core::{Node, Page, anchor_xy, dim_to_px, parse_anchor};
+use zenith_core::{Node, Page, SafeZone, anchor_xy, dim_to_px, parse_anchor};
 
 /// Pre-derived anchor coordinates keyed by node id.
 ///
@@ -45,7 +51,7 @@ pub(crate) type AnchorMap = BTreeMap<String, (f64, f64)>;
 pub(crate) fn build_anchor_map(page: &Page, page_w: f64, page_h: f64) -> AnchorMap {
     let mut map = AnchorMap::new();
     for node in &page.children {
-        collect_anchor(node, page_w, page_h, &mut map);
+        collect_anchor(node, page_w, page_h, &page.safe_zones, &mut map);
     }
     map
 }
@@ -57,71 +63,88 @@ pub(crate) fn build_anchor_map(page: &Page, page_w: f64, page_h: f64) -> AnchorM
 /// for direct page-level nodes (or those compiled in the same absolute
 /// coordinate space). Container children are compiled with a potentially
 /// different translation and are excluded here.
-fn collect_anchor(node: &Node, page_w: f64, page_h: f64, map: &mut AnchorMap) {
-    let (id, anchor_str, w_dim, h_dim) = match node {
+fn collect_anchor(
+    node: &Node,
+    page_w: f64,
+    page_h: f64,
+    safe_zones: &[SafeZone],
+    map: &mut AnchorMap,
+) {
+    let (id, anchor_str, anchor_zone_str, w_dim, h_dim) = match node {
         Node::Rect(n) => (
             n.id.as_str(),
             n.anchor.as_deref(),
+            n.anchor_zone.as_deref(),
             n.w.as_ref(),
             n.h.as_ref(),
         ),
         Node::Ellipse(n) => (
             n.id.as_str(),
             n.anchor.as_deref(),
+            n.anchor_zone.as_deref(),
             n.w.as_ref(),
             n.h.as_ref(),
         ),
         Node::Text(n) => (
             n.id.as_str(),
             n.anchor.as_deref(),
+            n.anchor_zone.as_deref(),
             n.w.as_ref(),
             n.h.as_ref(),
         ),
         Node::Code(n) => (
             n.id.as_str(),
             n.anchor.as_deref(),
+            n.anchor_zone.as_deref(),
             n.w.as_ref(),
             n.h.as_ref(),
         ),
         Node::Image(n) => (
             n.id.as_str(),
             n.anchor.as_deref(),
+            n.anchor_zone.as_deref(),
             n.w.as_ref(),
             n.h.as_ref(),
         ),
         Node::Frame(n) => (
             n.id.as_str(),
             n.anchor.as_deref(),
+            n.anchor_zone.as_deref(),
             n.w.as_ref(),
             n.h.as_ref(),
         ),
         Node::Group(n) => (
             n.id.as_str(),
             n.anchor.as_deref(),
+            n.anchor_zone.as_deref(),
             n.w.as_ref(),
             n.h.as_ref(),
         ),
         Node::Shape(n) => (
             n.id.as_str(),
             n.anchor.as_deref(),
+            n.anchor_zone.as_deref(),
             n.w.as_ref(),
             n.h.as_ref(),
         ),
         Node::Table(n) => (
             n.id.as_str(),
             n.anchor.as_deref(),
+            n.anchor_zone.as_deref(),
             n.w.as_ref(),
             n.h.as_ref(),
         ),
         Node::Field(n) => (
             n.id.as_str(),
             n.anchor.as_deref(),
+            n.anchor_zone.as_deref(),
             n.w.as_ref(),
             n.h.as_ref(),
         ),
         Node::Toc(n) => (
             n.id.as_str(),
             n.anchor.as_deref(),
+            n.anchor_zone.as_deref(),
             n.w.as_ref(),
             n.h.as_ref(),
         ),
@@ -160,6 +183,31 @@ fn collect_anchor(node: &Node, page_w: f64, page_h: f64, map: &mut AnchorMap) {
         return;
     };
 
-    let (ax, ay) = anchor_xy(anchor, page_w, page_h, node_w, node_h);
-    map.insert(id.to_owned(), (ax, ay));
+    // Determine the reference rectangle: the zone rect when anchor-zone is set
+    // and names a known zone with px-convertible dims; the full page otherwise.
+    let (ref_w, ref_h, ref_x, ref_y) = if let Some(zone_id) = anchor_zone_str {
+        match safe_zones.iter().find(|z| z.id == zone_id) {
+            Some(zone) => {
+                match (
+                    dim_to_px(zone.x.value, &zone.x.unit),
+                    dim_to_px(zone.y.value, &zone.y.unit),
+                    dim_to_px(zone.w.value, &zone.w.unit),
+                    dim_to_px(zone.h.value, &zone.h.unit),
+                ) {
+                    (Some(zx), Some(zy), Some(zw), Some(zh)) => (zw, zh, zx, zy),
+                    // Non-px zone dims → skip; validator warns if zone is
+                    // unreachable, so no entry is the right silent fallback.
+                    _ => return,
+                }
+            }
+            // Unknown zone id → skip (validator emits anchor.unresolved_zone).
+            None => return,
+        }
+    } else {
+        // Page-relative (A-1 behaviour): origin is (0, 0).
+        (page_w, page_h, 0.0, 0.0)
+    };
+
+    let (ox, oy) = anchor_xy(anchor, ref_w, ref_h, node_w, node_h);
+    map.insert(id.to_owned(), (ref_x + ox, ref_y + oy));
 }
