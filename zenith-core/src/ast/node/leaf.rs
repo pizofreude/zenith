@@ -12,7 +12,7 @@ use super::common::{Node, ObjectPosition, Point, TextSpan, UnknownProperty};
 
 /// An `image` node — a LEAF that draws a raster (PNG) asset into a declared
 /// `[x, y, w, h]` box with a `fit` mode, ALWAYS clipped to that box
-/// (normative image box-clip, doc 09 G-22).
+/// (normative image box-clip).
 ///
 /// The `asset` field references an [`AssetDecl`](crate::ast::AssetDecl) by its
 /// stable id, declared in the document's `assets {}` block.
@@ -644,7 +644,7 @@ pub struct PatternNode {
 /// `point` child nodes.
 ///
 /// `polyline` has stroke (required for visible output) and optional fill.
-/// Unlike `polygon`, `polyline` does NOT support `stroke-alignment` (doc 09).
+/// Unlike `polygon`, `polyline` does NOT support `stroke-alignment`.
 #[derive(Debug, Clone, PartialEq)]
 pub struct PolylineNode {
     pub id: String,

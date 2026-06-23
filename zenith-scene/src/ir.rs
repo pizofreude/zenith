@@ -686,7 +686,7 @@ pub struct Rect {
 ///
 /// The `schema` field is always `"zenith-scene-v1"` and is declared first so
 /// that it serializes as the first key in the JSON output, satisfying the
-/// normative requirement from doc 09 / doc 16.
+/// normative requirement from the format spec.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct Scene {
     /// Always `"zenith-scene-v1"`.  Declared first so it appears first in JSON.

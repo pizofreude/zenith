@@ -173,7 +173,7 @@ pub(in crate::tiny_skia) fn draw_image(
     // ── d. Build the clip Mask from the effective clip ────────
     // The compiler emits PushClip(box) before DrawImage, so
     // clip_stack.last() already equals the image box ∩ enclosing
-    // clips (G-22 box-clip).  clip_mask() handles the full-pixmap
+    // clips (box-clip).  clip_mask() handles the full-pixmap
     // fast path (returns Some(None) → no mask allocation) and the
     // sub-page case (returns Some(Some(mask))).
     let mask = match super::super::paths::clip_mask(ctx.effective_clip, width, height) {
@@ -185,7 +185,7 @@ pub(in crate::tiny_skia) fn draw_image(
     // When the image carries a non-rectangular clip shape, build
     // a path Mask from the shape INSCRIBED in the device box and
     // use it in place of the box mask. The shape is a subset of
-    // the box (G-22), so the shape mask alone enforces both the
+    // the box, so the shape mask alone enforces both the
     // box clip and the shape clip. AA-on path fill is
     // deterministic same-machine, consistent with FillEllipse.
     // `current_ts` is applied so a rotated image clips to the
@@ -238,7 +238,7 @@ pub(in crate::tiny_skia) fn draw_image(
     let fit = Transform::from_row(sx as f32, 0.0, 0.0, sy as f32, tx as f32, ty as f32);
     let transform = current_ts.pre_concat(fit);
 
-    // ── g. Composite. Box-clip (G-22) is enforced by the Mask;
+    // ── g. Composite. Box-clip is enforced by the Mask;
     // deterministic same-machine (pure-software bilinear). ─────
     target.draw_pixmap(0, 0, src.as_ref(), &paint, transform, mask);
 }

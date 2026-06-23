@@ -1,4 +1,4 @@
-//! Variant generation: pure engine (V-3) and CLI command wiring (V-4).
+//! Variant generation: pure engine and CLI command wiring.
 //!
 //! - [`engine`] — the pure in-memory variant expansion engine.
 //! - [`run`]    — the CLI entry point: file I/O, rendering, manifest, output.

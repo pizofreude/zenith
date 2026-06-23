@@ -5,8 +5,7 @@
 //! `source` page it derives from, the target dimensions `w`/`h`, and an
 //! optional list of per-node property overrides. It is a sibling of the
 //! `provenance`/`document` blocks. The engine round-trips and validates these
-//! records but does NOT act on them in unit V-1; generation is deferred to a
-//! later unit.
+//! records but does NOT act on them; generation is deferred to a later unit.
 
 use std::collections::BTreeMap;
 

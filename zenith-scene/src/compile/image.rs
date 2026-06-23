@@ -20,7 +20,7 @@ use super::util::{
 ///
 /// Mirrors the frame box-clip pattern: resolve geometry first (so early
 /// returns stay push/pop balanced), then emit `PushClip(box)` → `DrawImage` →
-/// `PopClip`. The box-clip is the normative image box-clip (doc 09 G-22): the
+/// `PopClip`. The box-clip is the normative image box-clip: the
 /// raster is ALWAYS clipped to its declared `[x, y, w, h]` box. `compile_node`
 /// needs no asset provider here — the asset id string is enough; bytes are
 /// resolved at render time.
@@ -258,7 +258,7 @@ pub(super) fn compile_image(
         _ => None,
     };
 
-    // Box-clip (G-22): push the box, draw the image, pop. The image is always
+    // Box-clip: push the box, draw the image, pop. The image is always
     // clipped to its declared box ∩ enclosing clips. Collected into a local
     // buffer so the shared helper can bracket it with the effect and/or mask.
     let draws: Vec<SceneCommand> = vec![

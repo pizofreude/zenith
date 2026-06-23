@@ -144,7 +144,7 @@ fn validate_dimension(
                 ));
                 None
             } else {
-                // Negative values are allowed at the token layer (doc 11:
+                // Negative values are allowed at the token layer (per spec:
                 // "Negative dimensions are invalid unless the consuming
                 // property explicitly allows negative values" — that check
                 // belongs to the property/node validation layer, not here).

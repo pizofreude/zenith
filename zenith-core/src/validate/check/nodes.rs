@@ -40,7 +40,7 @@ pub(super) struct WalkPos {
     pub(super) in_flow_parent: bool,
     pub(super) enclosing_frame: Option<(f64, f64, f64, f64)>,
     /// `true` when this node is a direct (or group-nested) child of a
-    /// `frame`/`group` — the A-3 anchor-parent container context.
+    /// `frame`/`group` — the anchor-parent container context.
     pub(super) in_container: bool,
     /// `true` when the enclosing container's reference box is usable (frame:
     /// always; group: only when it declares both `w` and `h`).
@@ -100,7 +100,7 @@ pub(super) fn walk_node(
     // Direct children of a `layout="flow"` frame have their x/y (and, when
     // omitted, w/h) supplied by the flow algorithm, so geometry is optional.
     let geom_required = !pos.in_flow_parent;
-    // A-3 parent-relative anchor context for this node: whether it sits inside a
+    // Parent-relative anchor context for this node: whether it sits inside a
     // frame/group container and whether that container's reference box is usable.
     let parent_ctx = AnchorParentCtx {
         in_container: pos.in_container,
@@ -323,7 +323,7 @@ pub(super) fn walk_node(
                         page_px_bounds: pos.page_px_bounds,
                         in_flow_parent: children_in_flow,
                         enclosing_frame: frame_box,
-                        // A frame is always an A-3 anchor-parent container with a
+                        // A frame is always an anchor-parent container with a
                         // usable box (its geometry is required + validated).
                         in_container: true,
                         parent_box_known: true,
@@ -336,7 +336,7 @@ pub(super) fn walk_node(
         Node::Group(g) => {
             node::check_group(g, ctx, seen_ids, parent_ctx, diagnostics);
 
-            // A group is an A-3 anchor-parent container; its reference box is
+            // A group is an anchor-parent container; its reference box is
             // usable only when it declares both `w` and `h`.
             let group_box_known = g.w.is_some() && g.h.is_some();
 
@@ -396,7 +396,7 @@ pub(super) fn walk_node(
                                 page_px_bounds: pos.page_px_bounds,
                                 in_flow_parent: true,
                                 enclosing_frame: pos.enclosing_frame,
-                                // A table cell is NOT an A-3 anchor-parent
+                                // A table cell is NOT an anchor-parent
                                 // container; its children's direct parent is the
                                 // cell, so anchor-parent there is unresolvable.
                                 in_container: false,
@@ -427,7 +427,7 @@ pub(super) fn walk_node(
                         page_px_bounds: pos.page_px_bounds,
                         in_flow_parent: true,
                         enclosing_frame: pos.enclosing_frame,
-                        // An unknown parent is not a known A-3 container.
+                        // An unknown parent is not a known anchor-parent container.
                         in_container: false,
                         parent_box_known: false,
                     },

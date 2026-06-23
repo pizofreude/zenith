@@ -284,7 +284,7 @@ pub(in crate::validate::check) fn node_id_and_span(
 
 // ── Geometry helpers ──────────────────────────────────────────────────────────
 
-/// Container context for the parent-relative (A-3) anchor checks.
+/// Container context for the parent-relative anchor checks.
 ///
 /// `in_container` is `true` when the node is a direct (or group-nested) child of
 /// a `frame`/`group`. `parent_box_known` is `true` when that enclosing container

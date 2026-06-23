@@ -60,7 +60,7 @@ impl std::error::Error for ParseError {}
 ///
 /// In practice, formatting the minimal v0 node set never fails — return `Err`
 /// only for genuinely un-serializable states (unreachable in valid input, but
-/// the fallible signature is the contract from doc 16).
+/// the fallible signature is the contract from the format spec).
 #[derive(Debug, Clone, PartialEq)]
 pub struct FormatError {
     /// Human-readable description of why formatting failed.

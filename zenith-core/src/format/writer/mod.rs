@@ -3,7 +3,7 @@
 //! Produces canonical `.zen` text from a [`Document`]. The output is
 //! idempotent: `format(format(doc)) == format(doc)` for all valid documents.
 //!
-//! Rules (from doc 08 and doc 16):
+//! Rules:
 //! - Two-space indentation per nesting level.
 //! - Root `zenith` node at column 0.
 //! - Child order under `zenith`: project, assets, libraries, tokens, styles, components, masters, sections, provenance, variants, recipes, actions, document.

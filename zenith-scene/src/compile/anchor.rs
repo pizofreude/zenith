@@ -1,5 +1,5 @@
-//! 9-point anchor pre-pass (A-1: page-relative; A-2: safe-zone-relative;
-//! A-3: parent-container-relative; A-4b: sibling-relative).
+//! 9-point anchor pre-pass supporting page-relative, safe-zone-relative,
+//! parent-container-relative, and sibling-relative anchoring.
 //!
 //! A node may carry `anchor="<name>"` where name is one of the nine positions:
 //! `top-left`, `top-center`, `top-right`, `center-left`, `center`,
@@ -8,22 +8,22 @@
 //! reference rectangle and the node's resolved w/h. An explicitly-authored x or
 //! y always wins over the anchor-derived value.
 //!
-//! **A-1 (page-relative):** reference rectangle is the full page.
+//! **Page-relative:** reference rectangle is the full page.
 //!
-//! **A-2 (safe-zone-relative):** when the node also carries
+//! **Safe-zone-relative:** when the node also carries
 //! `anchor-zone="<id>"` and a safe-zone with that id is declared on the same
 //! page, the reference rectangle is that zone's rect instead of the page.
 //! Unrecognized zone ids and non-px zone dimensions silently fall back to no
 //! anchor entry (the validator emits `anchor.unresolved_zone`).
 //!
-//! **A-3 (parent-relative):** when the node carries `anchor-parent="true"`
+//! **Parent-relative:** when the node carries `anchor-parent="true"`
 //! (and NOT `anchor-zone`, which takes precedence), the reference rectangle is
 //! its DIRECT PARENT CONTAINER's box (a `frame` or `group`). The pre-pass
 //! recurses into frame/group children, threading the parent box and the
 //! cumulative group translation so the stored value cancels the `ctx.dx`/
 //! `ctx.dy` that the leaf compiler re-applies.
 //!
-//! **A-4b (sibling-relative):** when the node carries `anchor-sibling="<id>"`
+//! **Sibling-relative:** when the node carries `anchor-sibling="<id>"`
 //! (and NOT `anchor-zone`, which takes precedence), the reference rectangle is
 //! the resolved box of the named sibling in the SAME scope (same direct
 //! parent's children). Because node and sibling share the same accumulated
@@ -35,7 +35,7 @@
 //!
 //! [`build_anchor_map`] is called once per page compile, AFTER `page_w`/
 //! `page_h` are resolved, and walks the page tree, descending into `frame` and
-//! `group` containers (only those two are A-3 anchor-parent containers). For
+//! `group` containers (only those two are anchor-parent containers). For
 //! each node that carries a recognized anchor AND has both `w` and `h` in a
 //! px-convertible unit, the map stores the derived `(x, y)` pair keyed by node
 //! id.
@@ -70,7 +70,7 @@ struct PrePassEnv<'a> {
     safe_zones: &'a [SafeZone],
 }
 
-/// Per-recursion container context for parent-relative (A-3) derivation.
+/// Per-recursion container context for parent-relative derivation.
 ///
 /// `parent_box` = `Some((ref_x, ref_y, ref_w, ref_h))` is the enclosing
 /// container's reference rectangle, or `None` at the page root (and when a
@@ -95,8 +95,8 @@ impl ParentCtx {
 
 /// Walk the page tree and build the [`AnchorMap`].
 ///
-/// Top-level nodes resolve page/zone-relative anchors (A-1/A-2). Frame and
-/// group children additionally resolve parent-relative anchors (A-3) against
+/// Top-level nodes resolve page/zone-relative anchors. Frame and
+/// group children additionally resolve parent-relative anchors against
 /// their enclosing container's box. Only nodes with a recognized anchor,
 /// present `w`/`h`, and px-convertible `w`/`h` produce entries; all others are
 /// absent (byte-identical to before for any node not using anchor-parent).
@@ -210,7 +210,7 @@ fn sibling_topo_order(children: &[Node]) -> Vec<&Node> {
 /// The anchor-bearing fields pulled from a node that may carry an anchor.
 ///
 /// `x`/`y` are included (in addition to `w`/`h`) because sibling-relative
-/// anchoring (A-4b) reads the sibling's authored origin per axis.
+/// anchoring reads the sibling's authored origin per axis.
 struct AnchorFields<'a> {
     id: &'a str,
     anchor: Option<&'a str>,
@@ -390,7 +390,7 @@ fn px_box(
 
 /// Try to build an anchor map entry for a single node, then recurse into
 /// `frame`/`group` containers carrying their box as the parent reference for
-/// A-3 anchor-parent children.
+/// anchor-parent children.
 fn collect_anchor(
     node: &Node,
     env: PrePassEnv,
@@ -402,7 +402,7 @@ fn collect_anchor(
         derive_entry(fields, env, ctx, scope, map);
     }
 
-    // Recurse into the two A-3 anchor-parent containers: frame (clip-only — does
+    // Recurse into the two anchor-parent containers: frame (clip-only — does
     // NOT translate children) and group (translates children by group_x/group_y).
     // Other node kinds are leaves for anchor purposes (matching the prior pre-pass
     // which did not recurse at all), so adding only frame/group recursion is the
@@ -536,13 +536,13 @@ fn derive_entry(
     };
 
     // Reference rectangle precedence:
-    //   1. anchor-zone (A-2) wins when set — resolve the zone rect; skip on
+    //   1. anchor-zone wins when set — resolve the zone rect; skip on
     //      unknown id / non-px dims (validator diagnoses).
-    //   2. anchor-sibling (A-4b) when no zone — derive against the named
+    //   2. anchor-sibling when no zone — derive against the named
     //      sibling's resolved box, purely in local space.
-    //   3. anchor-parent (A-3) when no zone/sibling — use the enclosing
+    //   3. anchor-parent when no zone/sibling — use the enclosing
     //      container box and pre-subtract the accumulated group translation.
-    //   4. page-relative (A-1) otherwise.
+    //   4. page-relative otherwise.
     if let Some(zone_id) = anchor_zone_str {
         let (ref_x, ref_y, ref_w, ref_h) = match env.safe_zones.iter().find(|z| z.id == zone_id) {
             Some(zone) => match (
@@ -561,7 +561,7 @@ fn derive_entry(
         return;
     }
 
-    // Sibling-relative (A-4b): the node's origin is derived from a named
+    // Sibling-relative: the node's origin is derived from a named
     // sibling's resolved box. The node and its sibling share the SAME scope
     // (same direct parent's children) and hence the SAME accumulated group
     // translation, so this derivation is PURELY in local space — no acc term.
@@ -616,7 +616,7 @@ fn derive_entry(
         return;
     }
 
-    // Page-relative (A-1): origin is (0, 0).
+    // Page-relative: origin is (0, 0).
     let (ox, oy) = anchor_xy(anchor, env.page_w, env.page_h, node_w, node_h);
     map.insert(id.to_owned(), (ox, oy));
 }

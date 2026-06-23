@@ -1,5 +1,4 @@
-//! Integration tests for G-69 units A-1 (page-relative), A-2 (safe-zone-relative),
-//! and A-3 (parent-container-relative) anchors.
+//! Integration tests for page-relative, safe-zone-relative, and parent-container-relative anchors.
 //!
 //! An `anchor` attribute on a node derives its missing `x` and/or `y` from the
 //! page dimensions. Explicitly-authored `x`/`y` always win over the anchor-
@@ -283,7 +282,7 @@ fn all_nine_anchors_geometry() {
 }
 
 // ═════════════════════════════════════════════════════════════════════════════
-// G-69 unit A-2: safe-zone-relative anchors
+// Safe-zone-relative anchors
 // ═════════════════════════════════════════════════════════════════════════════
 
 /// Wrap a single page child in a document that also declares one safe-zone.
@@ -306,7 +305,7 @@ page id="page.az" w=(px)400 h=(px)300 {{
     )
 }
 
-// ── A-2 Test 1: bottom-right relative to zone ─────────────────────────────
+// ── bottom-right relative to zone ─────────────────────────────
 
 #[test]
 fn anchor_zone_bottom_right() {
@@ -336,7 +335,7 @@ fn anchor_zone_bottom_right() {
     );
 }
 
-// ── A-2 Test 2: center within zone ───────────────────────────────────────────
+// ── center within zone ───────────────────────────────────────────
 
 #[test]
 fn anchor_zone_center() {
@@ -366,7 +365,7 @@ fn anchor_zone_center() {
     );
 }
 
-// ── A-2 Test 3: unresolved zone id produces anchor.unresolved_zone error ─────
+// ── unresolved zone id produces anchor.unresolved_zone error ─────
 
 #[test]
 fn anchor_zone_unresolved() {
@@ -388,7 +387,7 @@ fn anchor_zone_unresolved() {
     );
 }
 
-// ── A-2 Test 4: anchor-zone without anchor produces anchor.zone_without_anchor
+// ── anchor-zone without anchor produces anchor.zone_without_anchor
 
 #[test]
 fn anchor_zone_without_anchor() {
@@ -410,7 +409,7 @@ fn anchor_zone_without_anchor() {
     );
 }
 
-// ── A-2 Test 5: no zone → page-relative behaviour unchanged (regression) ─────
+// ── no zone → page-relative behaviour unchanged (regression) ─────
 
 #[test]
 fn anchor_no_zone_regression() {
@@ -440,7 +439,7 @@ fn anchor_no_zone_regression() {
 }
 
 // ═════════════════════════════════════════════════════════════════════════════
-// G-69 unit A-3: parent-container-relative anchors
+// Parent-container-relative anchors
 // ═════════════════════════════════════════════════════════════════════════════
 
 /// Wrap a child node inside a clip-only `frame` on a 400×300 page.
@@ -482,7 +481,7 @@ page id="page.ap" w=(px)400 h=(px)300 {{
     )
 }
 
-// ── A-3 Test 1: center inside a frame ────────────────────────────────────────
+// ── center inside a frame ────────────────────────────────────────
 
 #[test]
 fn anchor_parent_frame_center() {
@@ -513,7 +512,7 @@ fn anchor_parent_frame_center() {
     );
 }
 
-// ── A-3 Test 2: bottom-right inside a frame ──────────────────────────────────
+// ── bottom-right inside a frame ──────────────────────────────────
 
 #[test]
 fn anchor_parent_frame_bottom_right() {
@@ -544,7 +543,7 @@ fn anchor_parent_frame_bottom_right() {
     );
 }
 
-// ── A-3 Test 3: center inside a group (group translates the child) ───────────
+// ── center inside a group (group translates the child) ───────────
 
 #[test]
 fn anchor_parent_group_center() {
@@ -575,7 +574,7 @@ fn anchor_parent_group_center() {
     );
 }
 
-// ── A-3 Test 4: all nine anchors inside a frame ──────────────────────────────
+// ── all nine anchors inside a frame ──────────────────────────────
 
 #[test]
 fn anchor_parent_frame_all_nine() {
@@ -621,7 +620,7 @@ fn anchor_parent_frame_all_nine() {
     }
 }
 
-// ── A-3 Test 5: explicit x wins over anchor-parent ───────────────────────────
+// ── explicit x wins over anchor-parent ───────────────────────────
 
 #[test]
 fn anchor_parent_explicit_x_wins() {
@@ -652,12 +651,12 @@ fn anchor_parent_explicit_x_wins() {
     );
 }
 
-// ── A-3 Test 6: page-level anchor without anchor-parent unchanged (A-1 regression)
+// ── page-level anchor without anchor-parent unchanged (page-relative regression)
 
 #[test]
 fn anchor_parent_absent_page_relative_unchanged() {
     // A top-level rect with anchor="center" and NO anchor-parent must stay
-    // page-relative (A-1): page 400×300, rect 40×30 → (180, 135).
+    // page-relative: page 400×300, rect 40×30 → (180, 135).
     let src = doc_with_node(r##"rect id="r.pr" anchor="center" w=(px)40 h=(px)30 fill="#123456""##);
     let doc = parse(&src);
     let result = compile(&doc, &default_provider());
@@ -679,7 +678,7 @@ fn anchor_parent_absent_page_relative_unchanged() {
     );
 }
 
-// ── A-3 Test 7: anchor-zone takes precedence over anchor-parent ──────────────
+// ── anchor-zone takes precedence over anchor-parent ──────────────
 
 #[test]
 fn anchor_zone_precedence_over_parent() {
@@ -722,7 +721,7 @@ page id="page.ap" w=(px)400 h=(px)300 {
     );
 }
 
-// ── A-3 Test 8: page-level anchor-parent → anchor.unresolvable_parent error ───
+// ── page-level anchor-parent → anchor.unresolvable_parent error ───
 
 #[test]
 fn anchor_parent_unresolvable_at_page_root() {
@@ -744,7 +743,7 @@ fn anchor_parent_unresolvable_at_page_root() {
     );
 }
 
-// ── A-3 Test 9: group without w/h + anchor-parent → unresolvable_parent ──────
+// ── group without w/h + anchor-parent → unresolvable_parent ──────
 
 #[test]
 fn anchor_parent_group_without_box_unresolvable() {
@@ -767,7 +766,7 @@ fn anchor_parent_group_without_box_unresolvable() {
     );
 }
 
-// ── A-4b sibling-relative anchoring ───────────────────────────────────────────
+// ── sibling-relative anchoring ───────────────────────────────────────────
 
 /// Wrap a raw block of page children (multiple KDL lines) in a 400×300 page.
 fn doc_with_children(children_kdl: &str) -> String {
@@ -785,7 +784,7 @@ page id="page.sib" w=(px)400 h=(px)300 {{
     )
 }
 
-// ── A-4b Test 1: top-left / center / bottom-right against a sibling box ────────
+// ── top-left / center / bottom-right against a sibling box ────────
 
 #[test]
 fn anchor_sibling_three_points() {
@@ -827,7 +826,7 @@ fn anchor_sibling_three_points() {
     );
 }
 
-// ── A-4b Test 2: chain A→B→C resolves transitively, source order independent ──
+// ── chain A→B→C resolves transitively, source order independent ──
 
 #[test]
 fn anchor_sibling_chain_topo_order() {
@@ -864,7 +863,7 @@ fn anchor_sibling_chain_topo_order() {
     assert!(has(50.0, 50.0, 8.0, 8.0), "c@top-left(b); got: {rects:?}");
 }
 
-// ── A-4b Test 3: anchor-zone takes precedence over anchor-sibling ─────────────
+// ── anchor-zone takes precedence over anchor-sibling ─────────────
 
 #[test]
 fn anchor_zone_beats_sibling() {
@@ -905,7 +904,7 @@ page id="page.zs" w=(px)400 h=(px)300 {
     );
 }
 
-// ── A-4b Test 4: sibling inside a group resolves in the group's local space ───
+// ── sibling inside a group resolves in the group's local space ───
 
 #[test]
 fn anchor_sibling_inside_group() {
@@ -938,7 +937,7 @@ fn anchor_sibling_inside_group() {
     );
 }
 
-// ── A-3 Test 10: anchor-parent without anchor → parent_without_anchor warning ─
+// ── anchor-parent without anchor → parent_without_anchor warning ─
 
 #[test]
 fn anchor_parent_without_anchor_warns() {

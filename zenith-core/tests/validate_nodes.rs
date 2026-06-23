@@ -644,7 +644,7 @@ fn anchor_sibling_without_anchor_produces_sibling_without_anchor() {
     assert!(!report.has_errors());
 }
 
-// ── A-4b sibling-anchor graph validation ──────────────────────────────
+// ── sibling-anchor graph validation ──────────────────────────────
 
 /// Build a `minimal_rect` carrying a recognized `anchor` and an
 /// `anchor_sibling` target, for the sibling-graph validator tests.

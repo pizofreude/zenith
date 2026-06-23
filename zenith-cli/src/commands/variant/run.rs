@@ -1,4 +1,4 @@
-//! CLI entry point for `zenith variant` (G-70 V-4).
+//! CLI entry point for `zenith variant`.
 //!
 //! [`run_variant`] is the single public entry point.  It loads and parses the
 //! input `.zen`, calls [`expand_variants`], renders each generated variant to

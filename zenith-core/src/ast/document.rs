@@ -317,13 +317,13 @@ pub struct Document {
     /// entry declares a named size/override variant derived from a source page
     /// (`id`, `source`, `w`, `h`, optional `override` children). The engine
     /// round-trips and validates these records but does NOT generate output for
-    /// them in unit V-1; generation is a later unit.
+    /// them; generation is a later unit.
     pub variants: Vec<VariantDef>,
     /// Recipe declarations; empty when the `recipes` block is absent. Each
     /// entry declares a named generative recipe (`id`, `kind`, optional
     /// `seed`/`generator`/`bounds`/`detached`, optional `param`/`palette`/
     /// `expanded` children). The engine round-trips and validates these records
-    /// but does NOT act on them in unit RC-1; expansion is a later unit.
+    /// but does NOT act on them; expansion is a later unit.
     pub recipes: Vec<RecipeDef>,
     pub body: DocumentBody,
 }

@@ -1,11 +1,11 @@
-//! Pure in-memory variant generation engine (G-70 V-3).
+//! Pure in-memory variant generation engine.
 //!
 //! [`expand_variants`] is the single public entry point.  It consumes a parsed
 //! [`Document`], iterates `doc.variants` in stable id order, and for each
 //! definition clones the source document, builds a transaction op batch, and
 //! runs it through the same [`run_transaction`] path that `zenith merge` uses.
 //!
-//! No file I/O, no CLI parsing, no rendering.  Those live in V-4.
+//! No file I/O, no CLI parsing, no rendering.  Those live in the CLI entry point.
 
 use std::collections::BTreeMap;
 
@@ -79,9 +79,9 @@ pub fn expand_variants(doc: &Document) -> VariantExpansion {
     }
 
     // Collect into a BTreeMap keyed by id to enforce deterministic ordering
-    // without mutating the caller's slice.  Duplicate ids are caught by V-2
+    // without mutating the caller's slice.  Duplicate ids are caught by
     // validation and are not expected here; if they slip through the last
-    // writer wins (both would produce the same key anyway since V-2 blocks).
+    // writer wins (both would produce the same key anyway since validation blocks).
     let sorted: BTreeMap<&str, _> = doc.variants.iter().map(|v| (v.id.as_str(), v)).collect();
 
     // Generation consumes the variants block: each materialized variant is a

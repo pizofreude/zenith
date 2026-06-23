@@ -723,7 +723,7 @@ const POLYGON_KNOWN_PROPS: &[&str] = &[
     "style",
 ];
 
-// NOTE: polyline intentionally omits stroke-alignment (doc 09) — an author
+// NOTE: polyline intentionally omits stroke-alignment — an author
 // writing it gets a node.unknown_property warning, which is correct.
 const POLYLINE_KNOWN_PROPS: &[&str] = &[
     "id",

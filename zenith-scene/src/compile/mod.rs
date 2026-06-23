@@ -314,7 +314,7 @@ pub fn compile_page(doc: &Document, fonts: &dyn FontProvider, page_index: usize)
 
     let mut scene = Scene::new(media_w, media_h);
 
-    // ── Step 4: outermost media-edge clip (doc 09 normative rule) ────────
+    // ── Step 4: outermost media-edge clip (normative rule) ────────
     // The clip covers the entire media box so content and background may bleed
     // into the margin. With bleed = 0 this is exactly the page rectangle.
     scene.commands.push(SceneCommand::PushClip {

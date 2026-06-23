@@ -10,7 +10,7 @@ use zenith_scene::ir::{FitMode, SceneCommand};
 //
 //   S-recipe-01 — layered gradient background + translucent gradient ellipses
 //   S-recipe-02 — general node blur producing a soft-blob effect
-//                 (resolved G-06; verified against current engine 2026-06)
+//                 (verified against current engine 2026-06)
 //   S-recipe-10 — image-over-native-background with fit="contain"
 //
 // The source must use r##"…"## raw strings because .zen sources contain
@@ -48,8 +48,8 @@ const RECIPE_SRC: &str = r##"zenith version=1 {
 // ── Test 1: S-recipe-01 / S-recipe-02 / S-recipe-10 ─────────────────────────
 
 /// Locks S-recipe-01 (layered gradient background + translucent gradient
-/// ellipses), S-recipe-02 (general node blur / soft-blob; resolved G-06;
-/// verified against current engine 2026-06), and S-recipe-10 (image over
+/// ellipses), S-recipe-02 (general node blur / soft-blob; verified against
+/// current engine 2026-06), and S-recipe-10 (image over
 /// native background with fit="contain") against the current compile engine.
 ///
 /// Asserts the scene command stream contains:
@@ -168,8 +168,7 @@ fn procedural_background_emits_expected_scene_commands() {
 /// Locks S-recipe-01 / S-recipe-02 / S-recipe-10: compiling the same source
 /// twice must produce a byte-identical scene, proving the compile pipeline is
 /// deterministic and cannot silently diverge due to HashMap ordering or other
-/// non-determinism. Verified against current engine 2026-06; S-recipe-02
-/// general blur resolved G-06.
+/// non-determinism. Verified against current engine 2026-06.
 #[test]
 fn procedural_background_is_deterministic() {
     let doc = parse(RECIPE_SRC);
@@ -210,8 +209,7 @@ fn procedural_background_is_deterministic() {
 /// `apply_gradient_opacity` multiplies each stop's `.a` by `node_opacity *
 /// ctx_opacity` (see `zenith-scene/src/compile/paint.rs`).
 ///
-/// Verified against current engine 2026-06; S-recipe-02 general blur
-/// resolved G-06.
+/// Verified against current engine 2026-06.
 #[test]
 fn translucent_ellipse_opacity_bakes_into_fill() {
     let doc = parse(RECIPE_SRC);

@@ -6,8 +6,8 @@
 //! an optional `detached` link state, typed `param` children, `palette` token
 //! children, and `expanded` materialized-node children. It is a sibling of the
 //! `variants`/`provenance`/`document` blocks. The engine round-trips and
-//! validates these records but does NOT act on them in unit RC-1; expansion is
-//! deferred to a later unit.
+//! validates these records but does NOT act on them; expansion is deferred to
+//! a later unit.
 
 use std::collections::BTreeMap;
 
