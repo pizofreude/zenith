@@ -24,6 +24,7 @@ mod field;
 mod footnote;
 mod image;
 mod leaf;
+mod line_jumps;
 mod paint;
 mod pattern;
 mod table;
@@ -480,6 +481,12 @@ pub fn compile_page(doc: &Document, fonts: &dyn FontProvider, page_index: usize)
     // the emitted baselines live in, so a bleed-shifted page snaps consistently.
     root_ctx.baseline_grid = baseline_grid;
 
+    // Absolute indices, in document order, of the `StrokePolyline` emitted by
+    // each top-level connector (master-projected then page-own). Used only by
+    // the opt-in line-jump post-pass; empty/unused when the page declares no
+    // `line-jumps`, so the rest of compile is byte-identical.
+    let mut connector_strokes: Vec<usize> = Vec::new();
+
     // ── Step 7a: project the page's master (UNDER its own children) ──────
     // When `page.master` names a declared master, clone the master's children,
     // prefix every projected id with the page id (avoid cross-page collisions),
@@ -499,6 +506,7 @@ pub fn compile_page(doc: &Document, fonts: &dyn FontProvider, page_index: usize)
                 node_cx,
                 &mut scene.commands,
                 &mut diagnostics,
+                &mut connector_strokes,
                 root_ctx,
             );
         }
@@ -511,8 +519,18 @@ pub fn compile_page(doc: &Document, fonts: &dyn FontProvider, page_index: usize)
             node_cx,
             &mut scene.commands,
             &mut diagnostics,
+            &mut connector_strokes,
             root_ctx,
         );
+    }
+
+    // ── Step 7b′: opt-in connector line-jumps (hops at crossings) ────────
+    // Only "arc"/"gap" run; "none"/an unrecognized value/absent leaves the
+    // commands untouched, so a page without `line-jumps` is byte-identical.
+    if let Some(mode) = page.line_jumps.as_deref()
+        && (mode == "arc" || mode == "gap")
+    {
+        line_jumps::apply_line_jumps(&mut scene.commands, &connector_strokes, mode);
     }
 
     // ── Step 7c: footnote zone (page furniture, above the bottom margin) ─
@@ -609,6 +627,7 @@ pub(in crate::compile) fn compile_node(
     cx: NodeCtx,
     commands: &mut Vec<SceneCommand>,
     diagnostics: &mut Vec<Diagnostic>,
+    connector_strokes: &mut Vec<usize>,
     ctx: RenderCtx,
 ) -> f64 {
     // Non-printing guide nodes (`role="guide"`) are excluded from render output
@@ -675,15 +694,15 @@ pub(in crate::compile) fn compile_node(
             0.0
         }
         Node::Frame(frame) => {
-            compile_frame(frame, cx, commands, diagnostics, ctx);
+            compile_frame(frame, cx, commands, diagnostics, connector_strokes, ctx);
             0.0
         }
         Node::Group(group) => {
-            compile_group(group, cx, commands, diagnostics, ctx);
+            compile_group(group, cx, commands, diagnostics, connector_strokes, ctx);
             0.0
         }
         Node::Instance(instance) => {
-            compile_instance(instance, cx, commands, diagnostics, ctx);
+            compile_instance(instance, cx, commands, diagnostics, connector_strokes, ctx);
             0.0
         }
         Node::Field(field) => {
@@ -806,6 +825,11 @@ pub(in crate::compile) fn compile_node(
             0.0
         }
         Node::Connector(connector) => {
+            // Record the connector's stroke (top-level OR nested) at its dispatch
+            // point so the opt-in line-jump post-pass can hop it. The post-pass
+            // filters by transform depth, so rotated/bracketed connectors are
+            // excluded there, not here.
+            let start = commands.len();
             compile_connector(
                 connector,
                 commands,
@@ -817,6 +841,7 @@ pub(in crate::compile) fn compile_node(
                     ctx,
                 },
             );
+            line_jumps::record_connector_stroke(commands, start, connector_strokes);
             0.0
         }
         Node::Pattern(p) => compile_pattern(p, cx, commands, diagnostics, ctx),

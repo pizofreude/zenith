@@ -31,6 +31,7 @@ pub(in crate::compile) fn compile_instance(
     cx: NodeCtx,
     commands: &mut Vec<SceneCommand>,
     diagnostics: &mut Vec<Diagnostic>,
+    connector_strokes: &mut Vec<usize>,
     ctx: RenderCtx,
 ) {
     // Entire expansion excluded when visible=false (mirror group/frame).
@@ -90,7 +91,14 @@ pub(in crate::compile) fn compile_instance(
         unknown_props: BTreeMap::new(),
     };
 
-    compile_group(&synthetic, cx, commands, diagnostics, ctx);
+    compile_group(
+        &synthetic,
+        cx,
+        commands,
+        diagnostics,
+        connector_strokes,
+        ctx,
+    );
 }
 
 /// Apply a single [`Override`] to the first descendant in `children` (descending
