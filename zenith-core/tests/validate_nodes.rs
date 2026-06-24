@@ -877,6 +877,130 @@ fn anchor_edge_without_sibling_produces_edge_without_sibling() {
     assert!(!report.has_errors());
 }
 
+// ── node.unknown_property "did you mean?" suggestions ────────────────
+
+/// A rect with a near-miss typo `fil` (one edit from `fill`) must produce a
+/// `node.unknown_property` warning whose message contains "did you mean 'fill'?".
+#[test]
+fn rect_near_miss_unknown_prop_suggests_did_you_mean() {
+    // Parse via KDL so the unknown-prop is actually stored in `unknown_props`.
+    let src = r##"zenith version=1 {
+  project id="proj.nm" name="NearMiss"
+  tokens format="zenith-token-v1" {
+    token id="color.x" type="color" value="#ffffff"
+  }
+  styles {
+  }
+  document id="doc.nm" title="NearMiss" {
+    page id="page.nm" w=(px)800 h=(px)600 {
+      rect id="rect.nm" x=(px)0 y=(px)0 w=(px)100 h=(px)100 fil=(token)"color.x"
+    }
+  }
+}
+"##;
+    let adapter = KdlAdapter;
+    let doc = adapter.parse(src.as_bytes()).expect("parse must succeed");
+    let report = validate(&doc);
+
+    // Must have the node.unknown_property warning.
+    assert!(
+        has_code(&report, "node.unknown_property"),
+        "near-miss typo must fire node.unknown_property; got: {:?}",
+        codes(&report)
+    );
+
+    // The warning message must contain the suggestion.
+    let diag = report
+        .diagnostics
+        .iter()
+        .find(|d| d.code == "node.unknown_property")
+        .expect("diagnostic must exist");
+    assert!(
+        diag.message.contains("did you mean 'fill'?"),
+        "message must contain \"did you mean 'fill'?\"; got: {:?}",
+        diag.message
+    );
+    assert_eq!(diag.severity, Severity::Warning);
+}
+
+/// A rect with a completely unrelated unknown property (`quantum_flux`) must
+/// produce a `node.unknown_property` warning using the version-relative message,
+/// NOT a "did you mean?" suggestion.
+#[test]
+fn rect_far_miss_unknown_prop_no_suggestion() {
+    let src = r##"zenith version=1 {
+  project id="proj.fm" name="FarMiss"
+  tokens format="zenith-token-v1" {
+  }
+  styles {
+  }
+  document id="doc.fm" title="FarMiss" {
+    page id="page.fm" w=(px)800 h=(px)600 {
+      rect id="rect.fm" x=(px)0 y=(px)0 w=(px)100 h=(px)100 quantum_flux=1
+    }
+  }
+}
+"##;
+    let adapter = KdlAdapter;
+    let doc = adapter.parse(src.as_bytes()).expect("parse must succeed");
+    let report = validate(&doc);
+
+    // Must have the node.unknown_property warning.
+    assert!(
+        has_code(&report, "node.unknown_property"),
+        "far-miss unknown prop must fire node.unknown_property; got: {:?}",
+        codes(&report)
+    );
+
+    // Must NOT suggest "did you mean?" because the edit distance exceeds 2.
+    let diag = report
+        .diagnostics
+        .iter()
+        .find(|d| d.code == "node.unknown_property")
+        .expect("diagnostic must exist");
+    assert!(
+        !diag.message.contains("did you mean"),
+        "far-miss message must NOT contain \"did you mean\"; got: {:?}",
+        diag.message
+    );
+    // Must still carry the version-relative note.
+    assert!(
+        diag.message.contains("version-relative"),
+        "far-miss message must mention version-relative; got: {:?}",
+        diag.message
+    );
+    assert_eq!(diag.severity, Severity::Warning);
+}
+
+/// A correctly-spelled document (all props are recognised) must produce no
+/// `node.unknown_property` diagnostic at all.
+#[test]
+fn rect_correctly_spelled_props_no_unknown_property() {
+    let src = r##"zenith version=1 {
+  project id="proj.ok" name="AllKnown"
+  tokens format="zenith-token-v1" {
+    token id="color.ok" type="color" value="#000000"
+  }
+  styles {
+  }
+  document id="doc.ok" title="AllKnown" {
+    page id="page.ok" w=(px)800 h=(px)600 {
+      rect id="rect.ok" x=(px)0 y=(px)0 w=(px)100 h=(px)100 fill=(token)"color.ok"
+    }
+  }
+}
+"##;
+    let adapter = KdlAdapter;
+    let doc = adapter.parse(src.as_bytes()).expect("parse must succeed");
+    let report = validate(&doc);
+
+    assert!(
+        !has_code(&report, "node.unknown_property"),
+        "correctly-spelled rect must produce no node.unknown_property; got: {:?}",
+        codes(&report)
+    );
+}
+
 // ── anchor-edge with unknown value → anchor.unknown_edge ──────────────
 
 #[test]
