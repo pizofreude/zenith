@@ -94,6 +94,86 @@ fn star_zen_renders_to_valid_png() {
 }
 
 #[test]
+fn pattern_zen_renders_to_valid_png() {
+    assert_example_renders("pattern");
+}
+
+#[test]
+fn anchors_zen_renders_to_valid_png() {
+    assert_example_renders("anchors");
+}
+
+#[test]
+fn blur_zen_renders_to_valid_png() {
+    assert_example_renders("blur");
+}
+
+#[test]
+fn bold_zen_renders_to_valid_png() {
+    assert_example_renders("bold");
+}
+
+#[test]
+fn decorations_zen_renders_to_valid_png() {
+    assert_example_renders("decorations");
+}
+
+#[test]
+fn filter_zen_renders_to_valid_png() {
+    assert_example_renders("filter");
+}
+
+#[test]
+fn flowchart_zen_renders_to_valid_png() {
+    assert_example_renders("flowchart");
+}
+
+#[test]
+fn gradient_zen_renders_to_valid_png() {
+    assert_example_renders("gradient");
+}
+
+#[test]
+fn hello_zen_renders_to_valid_png() {
+    assert_example_renders("hello");
+}
+
+#[test]
+fn italic_zen_renders_to_valid_png() {
+    assert_example_renders("italic");
+}
+
+#[test]
+fn mask_zen_renders_to_valid_png() {
+    assert_example_renders("mask");
+}
+
+#[test]
+fn multipage_zen_renders_to_valid_png() {
+    assert_example_renders("multipage");
+}
+
+#[test]
+fn richtext_zen_renders_to_valid_png() {
+    assert_example_renders("richtext");
+}
+
+#[test]
+fn shadow_zen_renders_to_valid_png() {
+    assert_example_renders("shadow");
+}
+
+#[test]
+fn stroke_align_zen_renders_to_valid_png() {
+    assert_example_renders("stroke-align");
+}
+
+#[test]
+fn table_zen_renders_to_valid_png() {
+    assert_example_renders("table");
+}
+
+#[test]
 fn styled_zen_renders_to_valid_png() {
     assert_example_renders("styled");
 }
@@ -106,11 +186,6 @@ fn rounded_zen_renders_to_valid_png() {
 #[test]
 fn code_zen_renders_to_valid_png() {
     assert_example_renders("code");
-}
-
-#[test]
-fn highlight_zen_renders_to_valid_png() {
-    assert_example_renders("highlight");
 }
 
 // ── --locked sha256 verification ────────────────────────────────────────────────
