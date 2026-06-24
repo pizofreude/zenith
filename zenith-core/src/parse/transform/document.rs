@@ -28,6 +28,46 @@ use super::node::transform_node;
 use super::page::transform_page;
 use super::tokens::{transform_styles, transform_tokens};
 
+/// Canonical set of property names recognised on the document-level surface.
+///
+/// Covers both the root `zenith` node attributes (version, colorspace,
+/// doc-id, mirror-margins, page-progression, page-parity-start,
+/// facing-pages, spread-gutter, margin-*) and the required `document`
+/// child-block attributes (id, title).
+///
+/// Both the hyphenated spelling (canonical) and the underscored alias are
+/// included for each attribute that accepts either form, matching the lenient
+/// parser behaviour. Used by `zenith-core::schema` to surface the authorable
+/// attribute list for the `zenith schema document` subcommand.
+pub(crate) const DOCUMENT_KNOWN_PROPS: &[&str] = &[
+    // root `zenith` node
+    "version",
+    "colorspace",
+    "doc-id",
+    "doc_id",
+    "mirror-margins",
+    "mirror_margins",
+    "page-progression",
+    "page_progression",
+    "page-parity-start",
+    "page_parity_start",
+    "facing-pages",
+    "facing_pages",
+    "spread-gutter",
+    "spread_gutter",
+    "margin-inner",
+    "margin_inner",
+    "margin-outer",
+    "margin_outer",
+    "margin-top",
+    "margin_top",
+    "margin-bottom",
+    "margin_bottom",
+    // `document { … }` child block
+    "id",
+    "title",
+];
+
 /// Transform a parsed `KdlDocument` into a Zenith `Document` AST.
 pub fn transform(doc: &KdlDocument) -> Result<Document, ParseError> {
     // Find the single top-level `zenith` node.
@@ -670,7 +710,11 @@ fn transform_project(node: &KdlNode) -> Result<Project, ParseError> {
 // Assets
 // ---------------------------------------------------------------------------
 
-const ASSET_KNOWN_PROPS: &[&str] = &[
+/// Canonical set of property names recognised on an `asset` declaration node.
+///
+/// Used by `zenith-core::schema` to surface the authorable attribute list for
+/// the `zenith schema asset` subcommand.
+pub(crate) const ASSET_KNOWN_PROPS: &[&str] = &[
     "id",
     "kind",
     "src",

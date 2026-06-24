@@ -1,11 +1,17 @@
-//! Static schema metadata for the authorable node kinds.
+//! Static schema metadata for the authorable node kinds and non-node surfaces.
 //!
 //! Exposes the canonical list of node kinds, one-line summaries, and the
 //! recognized attribute names for each kind. The attribute list is derived
 //! directly from the parser's own `known_props_for_kind` table so the two
 //! can never silently diverge.
+//!
+//! Also exposes `page_attributes`, `asset_attributes`, and
+//! `document_attributes` for the three non-node authorable surfaces, derived
+//! from the same parser-side `PAGE_KNOWN_PROPS`, `ASSET_KNOWN_PROPS`, and
+//! `DOCUMENT_KNOWN_PROPS` constants.
 
-use crate::parse::transform::known_props_for_kind;
+use crate::parse::transform::PAGE_KNOWN_PROPS;
+use crate::parse::transform::{ASSET_KNOWN_PROPS, DOCUMENT_KNOWN_PROPS, known_props_for_kind};
 
 // ── Canonical kind list ───────────────────────────────────────────────────────
 
@@ -85,9 +91,65 @@ pub fn node_attributes(kind: &str) -> Vec<&'static str> {
     // The parser's known-props table carries BOTH spellings of hyphenated
     // attributes (e.g. `stroke-width` and `stroke_width`) for lenient parsing.
     // For the schema surface we collapse each pair to its canonical kebab-case
-    // form: map every raw name to the kebab spelling (preferring the interned
-    // kebab entry when present), then sort + dedup for deterministic output.
-    let raw = known_props_for_kind(kind);
+    // form via `dedupe_to_kebab`, then sort + dedup for deterministic output.
+    dedupe_to_kebab(known_props_for_kind(kind))
+}
+
+// ── Non-node surface summaries ────────────────────────────────────────────────
+
+/// One-line description of the `page` surface.
+pub fn page_summary() -> &'static str {
+    "Page declaration — geometry (w/h), margins, bleed, baseline grid, and workflow metadata."
+}
+
+/// One-line description of the `asset` surface.
+pub fn asset_summary() -> &'static str {
+    "Asset declaration (image/svg/font) — provenance including sha256 and AI-generation fields."
+}
+
+/// One-line description of the `document` surface (the root `zenith` node).
+pub fn document_summary() -> &'static str {
+    "Document root — colorspace, pagination, spread gutter, and document-level default margins."
+}
+
+// ── Non-node surface attribute lists ─────────────────────────────────────────
+
+/// Return the recognized attribute names for a `page` node.
+///
+/// Derived from the parser's own `PAGE_KNOWN_PROPS` constant. Alias spellings
+/// (e.g. `margin_inner` alongside `margin-inner`) are de-duplicated to their
+/// canonical kebab-case form; the result is sorted for deterministic output.
+pub fn page_attributes() -> Vec<&'static str> {
+    dedupe_to_kebab(PAGE_KNOWN_PROPS)
+}
+
+/// Return the recognized attribute names for an `asset` declaration node.
+///
+/// Derived from the parser's own `ASSET_KNOWN_PROPS` constant, sorted and
+/// de-duplicated for deterministic output.
+pub fn asset_attributes() -> Vec<&'static str> {
+    dedupe_to_kebab(ASSET_KNOWN_PROPS)
+}
+
+/// Return the recognized attribute names for the root `zenith` document node.
+///
+/// Derived from the parser's own `DOCUMENT_KNOWN_PROPS` constant. Alias
+/// spellings (e.g. `doc_id` alongside `doc-id`) are de-duplicated to their
+/// canonical kebab-case form; the result is sorted for deterministic output.
+pub fn document_attributes() -> Vec<&'static str> {
+    dedupe_to_kebab(DOCUMENT_KNOWN_PROPS)
+}
+
+// ── Internal helpers ──────────────────────────────────────────────────────────
+
+/// Collapse a raw known-props slice (which may contain both `foo-bar` and
+/// `foo_bar` spellings) to sorted, deduplicated kebab-case names.
+///
+/// For every raw name: map underscores to hyphens to get the kebab form; then
+/// find the first entry in the slice that exactly equals that kebab string.
+/// If found, use that interned static str; otherwise keep the raw entry as-is.
+/// After collecting, sort and dedup.
+fn dedupe_to_kebab(raw: &'static [&'static str]) -> Vec<&'static str> {
     let mut out: Vec<&'static str> = raw
         .iter()
         .map(|&name| {
@@ -251,6 +313,61 @@ mod tests {
         assert!(
             node_attributes("not-a-real-kind").is_empty(),
             "unrecognised kinds must return an empty slice"
+        );
+    }
+
+    // ── Non-node surface drift guards ─────────────────────────────────────────
+
+    /// Anchor check: `page_attributes()` must be non-empty and contain the
+    /// key geometry and workflow attrs we know the parser reads. This ensures
+    /// `PAGE_KNOWN_PROPS` is not accidentally emptied or truncated.
+    #[test]
+    fn page_attributes_anchor_check() {
+        let attrs = page_attributes();
+        assert!(!attrs.is_empty(), "page_attributes() must not be empty");
+        for anchor in &["w", "h", "line-jumps", "candidate-status"] {
+            assert!(
+                attrs.contains(anchor),
+                "page_attributes() must contain \"{anchor}\"; got: {attrs:?}",
+            );
+        }
+        // Alias spellings must be collapsed: only the kebab form should appear.
+        assert!(
+            !attrs.contains(&"line_jumps"),
+            "underscore alias \"line_jumps\" must be collapsed; got: {attrs:?}",
+        );
+    }
+
+    /// Anchor check: `asset_attributes()` must be non-empty and contain the
+    /// provenance fields the parser reads.
+    #[test]
+    fn asset_attributes_anchor_check() {
+        let attrs = asset_attributes();
+        assert!(!attrs.is_empty(), "asset_attributes() must not be empty");
+        for anchor in &["sha256", "ai-prompt", "ai-model", "src", "kind"] {
+            assert!(
+                attrs.contains(anchor),
+                "asset_attributes() must contain \"{anchor}\"; got: {attrs:?}",
+            );
+        }
+    }
+
+    /// Anchor check: `document_attributes()` must be non-empty and contain the
+    /// root-node fields the parser reads.
+    #[test]
+    fn document_attributes_anchor_check() {
+        let attrs = document_attributes();
+        assert!(!attrs.is_empty(), "document_attributes() must not be empty");
+        for anchor in &["title", "colorspace", "doc-id", "spread-gutter"] {
+            assert!(
+                attrs.contains(anchor),
+                "document_attributes() must contain \"{anchor}\"; got: {attrs:?}",
+            );
+        }
+        // Alias spellings must be collapsed: only the kebab form should appear.
+        assert!(
+            !attrs.contains(&"doc_id"),
+            "underscore alias \"doc_id\" must be collapsed; got: {attrs:?}",
         );
     }
 }

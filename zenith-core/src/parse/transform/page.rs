@@ -8,6 +8,44 @@
 
 use kdl::KdlNode;
 
+/// Canonical set of property names recognised on a `page` node.
+///
+/// Both the hyphenated spelling (canonical) and the underscored alias are
+/// included for each attribute that accepts either form, matching the lenient
+/// parser behaviour. Used by `zenith-core::schema` to surface the authorable
+/// attribute list and by tests as a drift guard.
+pub(crate) const PAGE_KNOWN_PROPS: &[&str] = &[
+    "id",
+    "name",
+    "w",
+    "h",
+    "background",
+    "bleed",
+    "margin-inner",
+    "margin_inner",
+    "margin-outer",
+    "margin_outer",
+    "margin-top",
+    "margin_top",
+    "margin-bottom",
+    "margin_bottom",
+    "baseline-grid",
+    "baseline_grid",
+    "line-jumps",
+    "line_jumps",
+    "parity",
+    "master",
+    "workspace-role",
+    "workspace_role",
+    "candidate-status",
+    "candidate_status",
+    "notes",
+    "promotion-target",
+    "promotion_target",
+    "cleanup-policy",
+    "cleanup_policy",
+];
+
 use crate::ast::document::{Fold, Page, SafeZone, SafeZoneType};
 use crate::ast::node::Node;
 use crate::error::{ParseError, ParseErrorCode};
