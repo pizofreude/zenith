@@ -233,6 +233,7 @@ Everything that touches the render path is **deterministic and C-free**: no time
 - **Transaction engine** — a typed op set (set fill/stroke/geometry, add/remove/reparent/group, align/distribute, page ops, token ops, find-replace, pattern detach, and more) applied as **dry-run by default**, with referential-integrity and id-uniqueness enforcement, a source diff, a scene diff, affected node ids, and an audit record.
 - **Deterministic rendering** — pixel-exact PNG via tiny-skia and print-ready PDF (native DeviceRGB/CMYK, MediaBox/TrimBox/BleedBox, no embedded timestamps), single page, all pages, or facing-page spreads. The scene IR can be dumped to JSON.
 - **Local history** — per-document identity (ULID doc-id stamped in the file, ignored by the renderer), an ephemeral session DAG for undo/redo, and a durable content-addressed version store (SHA-256 + DEFLATE) with named versions and restore — entirely off the render path.
+- **Workspace scratch candidates** — content-addressed `.zen` snapshots for design exploration, stored alongside history: `scratch new` records a candidate, `scratch list`/`show` review them, `candidate` transitions their lifecycle (draft → selected | rejected), `promote --into <page>` merges a selected candidate into the deliverable, and `finalize` drops the rejected ones. `bundle`/`unbundle` pack the whole per-doc store (history + scratch) into a portable, deterministic `.zenithbundle`.
 - **Library subsystem** — embedded preset packs (`@zenith/flowchart`, `@zenith/filters`, `@zenith/masks`, `@zenith/brand-kit`); `library add` materializes an item into a self-contained document with `libraries` + `provenance` tracking. Inspect any item with `zenith library show <pkg>#<item>`.
 - **AI-asset provenance** — when an image/illustration from an image model is composed in as an `asset`, Zenith records how it was made: `ai-prompt`, `ai-model`, `ai-provider`, `ai-seed`, `ai-license`, `ai-source-rights`, `ai-safety-status`, `ai-reuse-policy` (alongside the `sha256` content lock). Run `zenith schema asset` for the full field list.
 - **Variable-data merge** — `role="data.<column>"` bindings drive CSV mail-merge across text and image columns and multi-page templates, with a per-row JSON report and a byte-reproducible manifest.
@@ -355,16 +356,17 @@ See [`examples/connector-routing.zen`](./examples/connector-routing.zen) for a c
 
 Run `zenith <command> --help` for flags (each prints a description and an example). Every command supports `--json` for machine-readable output.
 
-| Group        | Commands                                                                    |
-| ------------ | --------------------------------------------------------------------------- |
-| **Author**   | `validate` · `fmt` · `tokens` · `inspect`                                   |
-| **Render**   | `render` (`--pdf` · `--scene` · `--all-pages` · `--spread` · `--page`)      |
-| **Edit**     | `tx` (typed transactions, dry-run by default)                               |
-| **Variants** | `variant` (one design → many sizes/formats) · `merge` (CSV data mail-merge) |
-| **Library**  | `library list` · `library add`                                              |
-| **Theme**    | `theme new` (synthesize a token pack from brand colours)                    |
-| **History**  | `history` · `undo` · `redo` · `version` · `restore` · `sync`                |
-| **Agent**    | `plugin install` · `plugin uninstall` · `plugin list` · `mcp`               |
+| Group         | Commands                                                                                                  |
+| ------------- | --------------------------------------------------------------------------------------------------------- |
+| **Author**    | `validate` · `fmt` · `tokens` · `inspect`                                                                 |
+| **Render**    | `render` (`--pdf` · `--scene` · `--all-pages` · `--spread` · `--page`)                                    |
+| **Edit**      | `tx` (typed transactions, dry-run by default)                                                             |
+| **Variants**  | `variant` (one design → many sizes/formats) · `merge` (CSV data mail-merge)                               |
+| **Library**   | `library list` · `library add`                                                                            |
+| **Theme**     | `theme new` (synthesize a token pack from brand colours)                                                  |
+| **History**   | `history` · `undo` · `redo` · `version` · `restore` · `sync`                                              |
+| **Workspace** | `scratch new/list/show` · `candidate <status>` · `promote --into <page>` · `finalize` · `bundle/unbundle` |
+| **Agent**     | `plugin install` · `plugin uninstall` · `plugin list` · `mcp`                                             |
 
 </details>
 
