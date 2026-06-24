@@ -84,6 +84,22 @@ impl KdlSource for KdlAdapter {
                             msg.push_str(&e.to_string());
                         }
                     }
+                    // KDL terminates a node at a bare newline, so attributes
+                    // split across lines without a `\` continuation are misparsed
+                    // and surface as an unclosed child block — pointing at the
+                    // `{`, not the real cause. The kdl crate exposes no error
+                    // kind, so key off its message and append a hint covering
+                    // both causes (the hint is correct either way).
+                    if let Some(m) = &d.message
+                        && m.contains("No closing")
+                        && m.contains("child block")
+                    {
+                        msg.push_str(
+                            "; hint: a node and its arguments must be on one line — if you split \
+                             attributes across lines, end each line with `\\`; otherwise a `{` is \
+                             unclosed",
+                        );
+                    }
                     let span = crate::ast::Span {
                         start: offset,
                         end: offset + d.span.len(),
@@ -445,6 +461,23 @@ mod tests {
         assert!(
             err.message.starts_with("KDL parse error at line "),
             "error message must start with location prefix; got: {:?}",
+            err.message
+        );
+    }
+
+    /// Attributes split across lines (no `\` continuation) misparse as an
+    /// unclosed child block; the error must carry the multi-line hint so the
+    /// author looks at the right cause, not the `{`.
+    #[test]
+    fn test_multiline_attributes_error_has_hint() {
+        let adapter = KdlAdapter;
+        let src = b"zenith version=1 {\n  document id=\"d\" title=\"t\" {\n    page id=\"p\" w=(px)100 h=(px)100 {\n      rect id=\"r\"\n        x=(px)10\n        y=(px)10 {\n      }\n    }\n  }\n}\n";
+        let err = adapter
+            .parse(src)
+            .expect_err("split attributes must fail to parse");
+        assert!(
+            err.message.contains("must be on one line") && err.message.contains('\\'),
+            "multi-line-attribute error must include the continuation hint; got: {:?}",
             err.message
         );
     }
