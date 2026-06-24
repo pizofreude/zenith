@@ -204,9 +204,8 @@ pattern id="bg.dots" kind="grid" x=(px)0 y=(px)0 w=(px)1080 h=(px)1080 spacing=(
 - `spacing`, like `x`/`y`/`w`/`h`, is a literal dimension (`(px)N`) — it is **not** a token
   reference. Writing `spacing=(token)"…"` leaves the grid with no spacing and fires
   `pattern.grid_missing_spacing`.
-- A token used **only** inside the motif (here `color.dot`) currently reads as `token.unused`
-  (advisory) — the validator does not descend into the template. The pattern still renders; the
-  advisory is harmless.
+- The pattern's own `fill`/`radius`/`stroke` paint a background panel behind the dots; tokens used
+  only inside the motif are counted, so they don't trip `token.unused`.
 - The bounds box clips instances at the edges.
 - `jitter=0.15` displaces each cell by up to ±15 % of `spacing` per axis (seed-derived, x/y
   uncorrelated).

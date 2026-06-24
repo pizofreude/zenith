@@ -9,7 +9,6 @@ use std::collections::BTreeMap;
 mod common;
 
 use common::*;
-use zenith_core::{UnknownProperty, UnknownValue};
 
 // ── Test 1: clean minimal doc has no errors ───────────────────────────
 

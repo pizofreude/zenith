@@ -5,10 +5,10 @@ producing a repeating layout without manual node authoring. It is deterministic:
 identical bytes out on any machine. Two kinds are supported: `grid` (row-major, evenly-spaced
 cells with optional jitter) and `scatter` (pseudo-random positions driven by a seed).
 
-> **v0 caveat — visual props are inert.** The pattern accepts and validates visual properties
-> (`fill`, `stroke`, `shadow`, `blur`, etc.) for token-usage tracking (so they don't trip
-> `token.unused`), but they **do not paint**: only the motif instances render. The pattern's own
-> visual props will become active in a future release.
+> **Background panel.** The pattern's own `fill` (solid or gradient), `radius` (uniform rounded
+> corners), and `stroke` + `stroke-width` paint a **background panel** behind the motif instances,
+> sized to the bounds box. The remaining visual properties (`shadow`, `blur`, `mask`, per-corner
+> radii, `blend-mode`) are accepted and validated for token usage but are **inert** for now.
 
 ---
 
@@ -27,9 +27,9 @@ cells with optional jitter) and `scatter` (pseudo-random positions driven by a s
 | `seed`     | i64       | Optional, default `0`                        | Pins jitter/scatter layout deterministically. Change to get a different-but-repeatable arrangement. |
 | `jitter`   | f64       | Optional, default `0.0`, range `0.0..=1.0`  | **Grid only.** Positional noise as a fraction of `spacing` per axis (x/y uncorrelated, seed-derived). Out-of-range → WARNING `pattern.jitter_out_of_range` (clamped; still renders). Ignored by scatter. |
 
-Visual/dimension props (`fill`, `stroke`, `shadow`, `filter`, `blur`, `border-*`, `radius`,
-`opacity`, `rotate`, etc.) are accepted and validated for token usage but are **inert in v0** —
-see the caveat above.
+The pattern's `fill`, `radius`, `stroke`, and `stroke-width` paint a background panel (see above);
+the other visual props (`shadow`, `blur`, `mask`, per-corner radii, `blend-mode`) are validated for
+token usage but currently inert.
 
 ---
 
@@ -44,11 +44,8 @@ directly.
 - The motif keeps its authored `x`/`y`; each clone is **translated by the instance offset**
   (the offset is added to the motif's authored x/y, not replaced).
 - The motif can be any node kind that carries geometry.
-
-> **Token-usage caveat.** Because the validator treats the motif as an opaque template and does
-> not descend into it, a token referenced **only** inside the motif (e.g. the motif's `fill`)
-> reads as `token.unused` (advisory). The pattern still renders correctly — the advisory is
-> harmless. To silence it, also reference that token elsewhere in the document at node scope.
+- Token references **inside the motif** are collected for token-usage validation, so a token used
+  only by the motif does **not** trip `token.unused`.
 
 ---
 
