@@ -96,8 +96,8 @@ pub(in crate::compile) fn render_chain_member(
                 "text.fit_failed",
                 format!(
                     "text '{}': chain content does not fit its box (overflow=\"fit\"): \
-                     needs ~{:.0}px height in {:.0}px box",
-                    text.id, content_height, box_h
+                     at {:.0}px font-size it needs ~{:.0}px height in a {:.0}px-tall box",
+                    text.id, font_size as f64, content_height, box_h
                 ),
                 text.source_span,
                 Some(text.id.clone()),

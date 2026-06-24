@@ -885,15 +885,16 @@ pub(in crate::compile) fn compile_text_sized(
 
         if height_overflow || word_overflow {
             diagnostics.push(Diagnostic::error(
-                    "text.fit_failed",
-                    format!(
-                        "text '{}': content does not fit its box (overflow=\"fit\"): \
-                         needs ~{:.0}px height in {:.0}px box (or a word wider than {:.0}px wide box)",
-                        text.id, content_height, box_h, box_w
-                    ),
-                    text.source_span,
-                    Some(text.id.clone()),
-                ));
+                "text.fit_failed",
+                format!(
+                    "text '{}': content does not fit its box (overflow=\"fit\"): \
+                         at {:.0}px font-size it needs ~{:.0}px height in a {:.0}px-tall box \
+                         (or a word wider than the {:.0}px box width)",
+                    text.id, font_size as f64, content_height, box_h, box_w
+                ),
+                text.source_span,
+                Some(text.id.clone()),
+            ));
         }
     }
 
@@ -915,8 +916,8 @@ pub(in crate::compile) fn compile_text_sized(
                 "text.overflow",
                 format!(
                     "text '{}': content is clipped at the box edge \
-                     (overflow=\"clip\"): needs ~{:.0}px height in {:.0}px box",
-                    text.id, content_height, box_h
+                     (overflow=\"clip\"): at {:.0}px font-size it needs ~{:.0}px height in a {:.0}px-tall box",
+                    text.id, font_size as f64, content_height, box_h
                 ),
                 text.source_span,
                 Some(text.id.clone()),
