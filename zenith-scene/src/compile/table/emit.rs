@@ -525,7 +525,14 @@ fn emit_cell_children(
                 dy: content_y + v_offset,
                 baseline_grid: ctx.baseline_grid,
             };
-            let _ = compile_node(&effective_child, node_cx, commands, diagnostics, child_ctx);
+            let _ = compile_node(
+                &effective_child,
+                node_cx,
+                commands,
+                diagnostics,
+                &mut Vec::new(),
+                child_ctx,
+            );
             continue;
         }
 
@@ -547,7 +554,14 @@ fn emit_cell_children(
             dy: content_y + dy_align,
             baseline_grid: ctx.baseline_grid,
         };
-        let _ = compile_node(child, node_cx, commands, diagnostics, child_ctx);
+        let _ = compile_node(
+            child,
+            node_cx,
+            commands,
+            diagnostics,
+            &mut Vec::new(),
+            child_ctx,
+        );
     }
 
     commands.push(SceneCommand::PopClip);

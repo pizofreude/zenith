@@ -17,6 +17,7 @@ pub(in crate::compile) fn compile_group(
     cx: NodeCtx,
     commands: &mut Vec<SceneCommand>,
     diagnostics: &mut Vec<Diagnostic>,
+    connector_strokes: &mut Vec<usize>,
     ctx: RenderCtx,
 ) {
     // Entire subtree excluded when visible=false.
@@ -121,7 +122,14 @@ pub(in crate::compile) fn compile_group(
         baseline_grid: ctx.baseline_grid,
     };
     for child in &group.children {
-        compile_node(child, cx, commands, diagnostics, child_ctx);
+        compile_node(
+            child,
+            cx,
+            commands,
+            diagnostics,
+            connector_strokes,
+            child_ctx,
+        );
     }
 
     if has_blur {

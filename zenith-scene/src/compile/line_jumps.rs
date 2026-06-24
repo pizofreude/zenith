@@ -31,14 +31,15 @@ const ARC_SEGMENTS: usize = 8;
 /// classification.
 const EPS: f64 = 1e-9;
 
-/// Record the index of the single `StrokePolyline` emitted by a connector whose
-/// commands occupy `commands[start..]`.
+/// Record the absolute index of the single `StrokePolyline` emitted by a
+/// connector whose commands occupy `commands[start..]`.
 ///
-/// A connector that emitted any transform/clip/layer bracket in that range (a
-/// rotated or otherwise bracketed connector) is skipped entirely — its stroke is
-/// NOT recorded, so the line-jump pass leaves it alone. Otherwise the one
-/// `StrokePolyline` in the range is recorded by its absolute index. If the range
-/// has no `StrokePolyline`, nothing is recorded.
+/// This records EVERY connector (top-level or nested) by its stroke index; it no
+/// longer inspects brackets. Whether a recorded connector actually participates
+/// in line-jumps is decided later in [`apply_line_jumps`], which filters out any
+/// connector sitting inside an active `PushTransform` (a rotation, whose raw
+/// `points` are not its on-page position). If the range has no `StrokePolyline`,
+/// nothing is recorded.
 pub(in crate::compile) fn record_connector_stroke(
     commands: &[SceneCommand],
     start: usize,
@@ -48,23 +49,34 @@ pub(in crate::compile) fn record_connector_stroke(
         Some(r) => r,
         None => return,
     };
-    let bracketed = range.iter().any(|c| {
-        matches!(
-            c,
-            SceneCommand::PushTransform { .. }
-                | SceneCommand::PushClip { .. }
-                | SceneCommand::PushLayer { .. }
-        )
-    });
-    if bracketed {
-        return;
-    }
     for (offset, cmd) in range.iter().enumerate() {
         if matches!(cmd, SceneCommand::StrokePolyline { .. }) {
             out.push(start + offset);
             return;
         }
     }
+}
+
+/// Running `PushTransform` nesting depth at command index `idx`: scan
+/// `commands[0..idx]`, `+1` on each `PushTransform`, `-1` on each `PopTransform`.
+/// A depth of `0` means no rotation is active at that point, so the connector's
+/// raw `points` are its on-page position. `PushClip` / `PushLayer` / `BeginBlur`
+/// are deliberately NOT counted — they never move geometry, and the outermost
+/// media clip is always open. Saturating subtract guards a malformed stream.
+fn transform_depth_at(commands: &[SceneCommand], idx: usize) -> usize {
+    let mut depth: usize = 0;
+    let prefix = match commands.get(..idx) {
+        Some(p) => p,
+        None => return 0,
+    };
+    for cmd in prefix {
+        if matches!(cmd, SceneCommand::PushTransform { .. }) {
+            depth += 1;
+        } else if matches!(cmd, SceneCommand::PopTransform) {
+            depth = depth.saturating_sub(1);
+        }
+    }
+    depth
 }
 
 /// A crossing of the hopping connector's segment by another connector's segment.
@@ -96,6 +108,19 @@ pub(in crate::compile) fn apply_line_jumps(
     if mode != "arc" && mode != "gap" {
         return;
     }
+
+    // Filter to connectors whose on-page position equals their raw `points`:
+    // those at `PushTransform` depth 0. A connector inside an active rotation
+    // (its own rotate, or a rotated group/frame) has a transform depth > 0, so
+    // its raw points are NOT its rendered position — it must not hop. Clip /
+    // layer / blur brackets do not move geometry and are intentionally ignored.
+    // Computed on the ORIGINAL command stream before any arc/gap rewrite.
+    let filtered: Vec<usize> = connector_strokes
+        .iter()
+        .copied()
+        .filter(|&idx| transform_depth_at(commands, idx) == 0)
+        .collect();
+    let connector_strokes: &[usize] = &filtered;
 
     // Snapshot every connector's points up front so all crossings are computed
     // against the ORIGINAL routes, independent of how earlier connectors are
@@ -627,9 +652,10 @@ mod tests {
         assert_eq!(polyline_points(&cmds[0]), polyline_points(&before[0]));
     }
 
-    /// record_connector_stroke skips a bracketed (transform-wrapped) connector.
+    /// record_connector_stroke now records a transform-wrapped connector too;
+    /// the rotation exclusion happens later in the depth filter, not here.
     #[test]
-    fn record_skips_bracketed() {
+    fn record_includes_bracketed() {
         let cmds = vec![
             SceneCommand::PushTransform {
                 angle_deg: 10.0,
@@ -641,7 +667,7 @@ mod tests {
         ];
         let mut out = Vec::new();
         record_connector_stroke(&cmds, 0, &mut out);
-        assert!(out.is_empty(), "bracketed connector must be skipped");
+        assert_eq!(out, vec![1], "stroke index recorded regardless of bracket");
     }
 
     /// record_connector_stroke records the single stroke for a plain connector.
@@ -651,5 +677,61 @@ mod tests {
         let mut out = Vec::new();
         record_connector_stroke(&cmds, 0, &mut out);
         assert_eq!(out, vec![0]);
+    }
+
+    /// The transform-depth filter excludes a connector between a PushTransform and
+    /// its PopTransform, but includes one outside any PushTransform — even when a
+    /// lone PushClip (which never moves geometry) is open around it. Here the two
+    /// strokes cross at (50, 50): the included one would normally hop, the excluded
+    /// one (inside a rotation) must be left untouched.
+    #[test]
+    fn depth_filter_excludes_inside_transform() {
+        // idx 0: PushClip (open, never moves geometry)
+        // idx 1: horizontal stroke at depth 0 (clip only) → INCLUDED
+        // idx 2: PushTransform
+        // idx 3: vertical stroke at transform depth 1 → EXCLUDED
+        // idx 4: PopTransform
+        let mut cmds = vec![
+            SceneCommand::PushClip {
+                x: 0.0,
+                y: 0.0,
+                w: 100.0,
+                h: 100.0,
+            },
+            stroke(vec![0.0, 50.0, 100.0, 50.0]),
+            SceneCommand::PushTransform {
+                angle_deg: 30.0,
+                cx: 50.0,
+                cy: 50.0,
+            },
+            stroke(vec![50.0, 0.0, 50.0, 100.0]),
+            SceneCommand::PopTransform,
+        ];
+        assert_eq!(
+            transform_depth_at(&cmds, 1),
+            0,
+            "stroke at idx 1 is depth 0"
+        );
+        assert_eq!(
+            transform_depth_at(&cmds, 3),
+            1,
+            "stroke at idx 3 is depth 1"
+        );
+
+        let before_h = polyline_points(&cmds[1]);
+        let before_v = polyline_points(&cmds[3]);
+        // Pass both recorded strokes; only the depth-0 one survives the filter, so
+        // with no surviving partner to cross, NOTHING hops.
+        apply_line_jumps(&mut cmds, &[1, 3], "arc");
+        assert_eq!(
+            polyline_points(&cmds[1]),
+            before_h,
+            "depth-0 connector has no surviving partner to cross → unchanged"
+        );
+        assert_eq!(
+            polyline_points(&cmds[3]),
+            before_v,
+            "depth-1 connector is excluded → unchanged"
+        );
     }
 }

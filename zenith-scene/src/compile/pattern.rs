@@ -59,11 +59,15 @@ pub(in crate::compile) fn compile_pattern(
         dy: ctx.dy + by,
         ..ctx
     };
+    // Pattern motif instances are self-contained and replicated inside a
+    // `PushClip`; their connectors do NOT participate in page line-jumps, so the
+    // recorded strokes go to a throwaway accumulator.
     compile_node(
         &pattern.motif,
         cx,
         &mut scratch_cmds,
         &mut scratch_diags,
+        &mut Vec::new(),
         probe_ctx,
     );
     if scratch_diags.iter().any(|d| d.severity == Severity::Error) {
@@ -175,5 +179,14 @@ fn emit_instance(
         ..ctx
     };
     let mut throwaway: Vec<Diagnostic> = Vec::new();
-    compile_node(&pattern.motif, cx, commands, &mut throwaway, inst_ctx);
+    // Motif connectors are clipped, replicated furniture — excluded from page
+    // line-jumps via a throwaway stroke accumulator.
+    compile_node(
+        &pattern.motif,
+        cx,
+        commands,
+        &mut throwaway,
+        &mut Vec::new(),
+        inst_ctx,
+    );
 }

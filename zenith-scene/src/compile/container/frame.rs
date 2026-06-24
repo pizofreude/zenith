@@ -28,6 +28,7 @@ pub(in crate::compile) fn compile_frame(
     cx: NodeCtx,
     commands: &mut Vec<SceneCommand>,
     diagnostics: &mut Vec<Diagnostic>,
+    connector_strokes: &mut Vec<usize>,
     ctx: RenderCtx,
 ) {
     // Entire subtree excluded when visible=false (no PushClip emitted).
@@ -166,6 +167,7 @@ pub(in crate::compile) fn compile_frame(
                 cx,
                 commands,
                 diagnostics,
+                connector_strokes,
                 child_ctx,
             );
         }
@@ -181,13 +183,21 @@ pub(in crate::compile) fn compile_frame(
                 cx,
                 commands,
                 diagnostics,
+                connector_strokes,
                 child_ctx,
             );
         }
         _ => {
             // Absolute (clip-only) model: children render at their own page coords.
             for child in &frame.children {
-                compile_node(child, cx, commands, diagnostics, child_ctx);
+                compile_node(
+                    child,
+                    cx,
+                    commands,
+                    diagnostics,
+                    connector_strokes,
+                    child_ctx,
+                );
             }
         }
     }
@@ -238,6 +248,7 @@ fn compile_frame_flow(
     cx: NodeCtx,
     commands: &mut Vec<SceneCommand>,
     diagnostics: &mut Vec<Diagnostic>,
+    connector_strokes: &mut Vec<usize>,
     child_ctx: RenderCtx,
 ) {
     let FrameBox {
@@ -276,7 +287,14 @@ fn compile_frame_flow(
         // Inject the absolute box onto a clone; compile with the SAME ctx
         // (dx/dy unchanged — injected coords are absolute page coords).
         let positioned = with_flow_box(child, content_left, cursor_y, child_w, declared_h);
-        let measured_h = compile_node(&positioned, cx, commands, diagnostics, child_ctx);
+        let measured_h = compile_node(
+            &positioned,
+            cx,
+            commands,
+            diagnostics,
+            connector_strokes,
+            child_ctx,
+        );
 
         // Advance by the declared height when present, otherwise the measured
         // intrinsic height read back from the compile.
@@ -313,6 +331,7 @@ fn compile_frame_grid(
     cx: NodeCtx,
     commands: &mut Vec<SceneCommand>,
     diagnostics: &mut Vec<Diagnostic>,
+    connector_strokes: &mut Vec<usize>,
     child_ctx: RenderCtx,
 ) {
     let FrameBox {
@@ -358,6 +377,13 @@ fn compile_frame_grid(
         // with fit="cover" fills its cell. Compile at absolute page coords
         // (dx/dy unchanged). The measured height is ignored — cells are fixed.
         let positioned = with_flow_box(child, cell_x, cell_y, col_w, Some(row_h));
-        let _ = compile_node(&positioned, cx, commands, diagnostics, child_ctx);
+        let _ = compile_node(
+            &positioned,
+            cx,
+            commands,
+            diagnostics,
+            connector_strokes,
+            child_ctx,
+        );
     }
 }

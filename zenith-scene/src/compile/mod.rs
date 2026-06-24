@@ -501,33 +501,27 @@ pub fn compile_page(doc: &Document, fonts: &dyn FontProvider, page_index: usize)
         let prefix = format!("{}/", page.id);
         container::prefix_ids_in_children(&mut projected, &prefix);
         for node in &projected {
-            let start = scene.commands.len();
             compile_node(
                 node,
                 node_cx,
                 &mut scene.commands,
                 &mut diagnostics,
+                &mut connector_strokes,
                 root_ctx,
             );
-            if matches!(node, Node::Connector(_)) {
-                line_jumps::record_connector_stroke(&scene.commands, start, &mut connector_strokes);
-            }
         }
     }
 
     // ── Step 7b: page children in source order (z-order: first = bottom) ─
     for node in &page.children {
-        let start = scene.commands.len();
         compile_node(
             node,
             node_cx,
             &mut scene.commands,
             &mut diagnostics,
+            &mut connector_strokes,
             root_ctx,
         );
-        if matches!(node, Node::Connector(_)) {
-            line_jumps::record_connector_stroke(&scene.commands, start, &mut connector_strokes);
-        }
     }
 
     // ── Step 7b′: opt-in connector line-jumps (hops at crossings) ────────
@@ -633,6 +627,7 @@ pub(in crate::compile) fn compile_node(
     cx: NodeCtx,
     commands: &mut Vec<SceneCommand>,
     diagnostics: &mut Vec<Diagnostic>,
+    connector_strokes: &mut Vec<usize>,
     ctx: RenderCtx,
 ) -> f64 {
     // Non-printing guide nodes (`role="guide"`) are excluded from render output
@@ -699,15 +694,15 @@ pub(in crate::compile) fn compile_node(
             0.0
         }
         Node::Frame(frame) => {
-            compile_frame(frame, cx, commands, diagnostics, ctx);
+            compile_frame(frame, cx, commands, diagnostics, connector_strokes, ctx);
             0.0
         }
         Node::Group(group) => {
-            compile_group(group, cx, commands, diagnostics, ctx);
+            compile_group(group, cx, commands, diagnostics, connector_strokes, ctx);
             0.0
         }
         Node::Instance(instance) => {
-            compile_instance(instance, cx, commands, diagnostics, ctx);
+            compile_instance(instance, cx, commands, diagnostics, connector_strokes, ctx);
             0.0
         }
         Node::Field(field) => {
@@ -830,6 +825,11 @@ pub(in crate::compile) fn compile_node(
             0.0
         }
         Node::Connector(connector) => {
+            // Record the connector's stroke (top-level OR nested) at its dispatch
+            // point so the opt-in line-jump post-pass can hop it. The post-pass
+            // filters by transform depth, so rotated/bracketed connectors are
+            // excluded there, not here.
+            let start = commands.len();
             compile_connector(
                 connector,
                 commands,
@@ -841,6 +841,7 @@ pub(in crate::compile) fn compile_node(
                     ctx,
                 },
             );
+            line_jumps::record_connector_stroke(commands, start, connector_strokes);
             0.0
         }
         Node::Pattern(p) => compile_pattern(p, cx, commands, diagnostics, ctx),
