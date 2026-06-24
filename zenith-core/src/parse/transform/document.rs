@@ -11,6 +11,7 @@ use crate::ast::{
     document::{ComponentDef, Document, DocumentBody, MasterDef, Page, Project, SectionDef},
     library::LibraryDef,
     node::Node,
+    preview::PreviewArtifact,
     provenance::ProvenanceDef,
     recipe::{RecipeDef, RecipeParam},
     style::StyleBlock,
@@ -28,6 +29,7 @@ use super::helpers::{
 };
 use super::node::transform_node;
 use super::page::transform_page;
+use super::preview::transform_previews;
 use super::tokens::{transform_styles, transform_tokens};
 
 /// Canonical set of property names recognised on the document-level surface.
@@ -164,6 +166,7 @@ pub fn transform(doc: &KdlDocument) -> Result<Document, ParseError> {
     let mut variants: Vec<VariantDef> = Vec::new();
     let mut recipes: Vec<RecipeDef> = Vec::new();
     let mut agent_runs: Vec<AgentRun> = Vec::new();
+    let mut previews: Vec<PreviewArtifact> = Vec::new();
     let mut body: Option<DocumentBody> = None;
 
     for child in children_doc.nodes() {
@@ -207,6 +210,9 @@ pub fn transform(doc: &KdlDocument) -> Result<Document, ParseError> {
             "agent-runs" => {
                 agent_runs = transform_agent_runs(child)?;
             }
+            "previews" => {
+                previews = transform_previews(child)?;
+            }
             "document" => {
                 body = Some(transform_document_body(child)?);
             }
@@ -249,6 +255,7 @@ pub fn transform(doc: &KdlDocument) -> Result<Document, ParseError> {
         variants,
         recipes,
         agent_runs,
+        previews,
         body,
     })
 }
