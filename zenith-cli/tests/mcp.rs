@@ -103,10 +103,11 @@ fn ping_returns_empty_result() {
 fn tools_list_is_the_small_stable_surface() {
     let resp = call(json!({ "jsonrpc": "2.0", "id": 3, "method": "tools/list" }));
     let tools = resp["result"]["tools"].as_array().expect("tools array");
-    assert_eq!(tools.len(), 13, "expected 13 top-level tools");
+    assert_eq!(tools.len(), 14, "expected 14 top-level tools");
     let names: Vec<&str> = tools.iter().filter_map(|t| t["name"].as_str()).collect();
     for expected in [
         "zenith_schema",
+        "zenith_fonts",
         "zenith_validate",
         "zenith_inspect",
         "zenith_tx",
@@ -218,6 +219,33 @@ fn schema_unknown_node_is_tool_error() {
         json!({ "surface": "node", "name": "nope" }),
     );
     assert_eq!(resp["result"]["isError"], true);
+}
+
+#[test]
+fn schema_token_returns_value_form_on_demand() {
+    let resp = tool_call(
+        "zenith_schema",
+        json!({ "surface": "token", "name": "gradient" }),
+    );
+    assert_eq!(resp["result"]["isError"], false, "{resp}");
+    let token = &structured(&resp)["token"];
+    assert_eq!(token["ty"], "gradient");
+    assert!(token["value_form"].is_string());
+    assert!(token["example"].is_string());
+}
+
+#[test]
+fn fonts_tool_lists_bundled_families() {
+    let resp = tool_call("zenith_fonts", json!({}));
+    assert_eq!(resp["result"]["isError"], false, "{resp}");
+    let bundled = structured(&resp)["bundled"]
+        .as_array()
+        .expect("bundled array");
+    let names: Vec<&str> = bundled.iter().filter_map(|v| v.as_str()).collect();
+    assert!(
+        names.contains(&"Noto Serif"),
+        "bundled fonts must include the bundled serif; got: {names:?}"
+    );
 }
 
 #[test]

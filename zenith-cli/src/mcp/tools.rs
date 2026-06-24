@@ -37,12 +37,22 @@ instead of guessing.",
                 "properties": {
                     "surface": {
                         "type": "string",
-                        "enum": ["overview", "nodes", "node", "ops", "op", "page", "asset", "document", "diagnostics"],
+                        "enum": ["overview", "nodes", "node", "ops", "op", "tokens", "token", "page", "asset", "document", "diagnostics"],
                         "description": "Which schema surface to fetch."
                     },
-                    "name": { "type": "string", "description": "Node kind (for surface=node) or op name (for surface=op)." }
+                    "name": { "type": "string", "description": "Node kind (surface=node), op name (surface=op), or token type e.g. \"gradient\" (surface=token)." }
                 },
                 "required": ["surface"]
+            }),
+        },
+        Tool {
+            name: "zenith_fonts",
+            description: "List the font families available to the renderer: Bundled (portable, \
+deterministic across machines) vs Local/system (this machine only — using one emits a `font.local` \
+advisory). Use a bundled family for reproducible output.",
+            schema: json!({
+                "type": "object",
+                "properties": {}
             }),
         },
         Tool {

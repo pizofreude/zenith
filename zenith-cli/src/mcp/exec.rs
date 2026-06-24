@@ -22,6 +22,7 @@ use crate::commands::{self, theme};
 pub fn call(name: &str, args: &Value) -> ToolResult {
     let result = match name {
         "zenith_schema" => run_schema(args),
+        "zenith_fonts" => run_fonts(args),
         "zenith_validate" => run_validate(args),
         "zenith_inspect" => run_inspect(args),
         "zenith_tokens" => run_tokens(args),
@@ -60,8 +61,20 @@ fn run_schema(args: &Value) -> Result<Value, String> {
         "asset" => commands::schema::asset(true),
         "document" => commands::schema::document(true),
         "diagnostics" => commands::schema::diagnostics(true),
+        "tokens" => commands::schema::tokens(true),
+        "token" => commands::schema::token_detail(need(name, "name (token type)")?, true),
         other => return Err(format!("unknown schema surface '{other}'")),
     };
+    if code != 0 {
+        return Err(text);
+    }
+    parse_json(&text)
+}
+
+// ── Fonts (discovery: bundled vs local/system) ────────────────────────────────
+
+fn run_fonts(_args: &Value) -> Result<Value, String> {
+    let (text, code) = commands::fonts::list(true);
     if code != 0 {
         return Err(text);
     }
