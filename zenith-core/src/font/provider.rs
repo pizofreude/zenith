@@ -245,7 +245,7 @@ impl FontProvider for BytesFontProvider {
 
 /// Build a `BytesFontProvider` preloaded with the bundled default fonts.
 ///
-/// Six faces are embedded at compile time, all Apache-2.0:
+/// Ten faces are embedded at compile time, all Apache-2.0:
 /// - Noto Sans Regular (`"Noto Sans"`, weight 400, Normal) — the proportional
 ///   default for text nodes.
 /// - Noto Sans Bold (`"Noto Sans"`, weight 700, Normal) — resolved when a node
@@ -254,6 +254,12 @@ impl FontProvider for BytesFontProvider {
 ///   span requests italic.
 /// - Noto Sans Bold Italic (`"Noto Sans"`, weight 700, Italic) — resolved for a
 ///   span that is BOTH bold and italic (completes the weight×style matrix).
+/// - Noto Serif Regular (`"Noto Serif"`, weight 400, Normal) — the bundled,
+///   portable serif family.
+/// - Noto Serif Bold (`"Noto Serif"`, weight 700, Normal).
+/// - Noto Serif Italic (`"Noto Serif"`, weight 400, Italic).
+/// - Noto Serif Bold Italic (`"Noto Serif"`, weight 700, Italic) — completes the
+///   serif weight×style matrix.
 /// - Noto Sans Mono Regular (`"Noto Sans Mono"`, weight 400, Normal) — the
 ///   monospace default for code nodes.
 /// - Noto Sans Mono Bold (`"Noto Sans Mono"`, weight 700, Normal) — resolved
@@ -264,6 +270,10 @@ pub fn default_provider() -> BytesFontProvider {
     let sans_bold: Arc<[u8]> = Arc::from(super::embedded::NOTO_SANS_BOLD);
     let sans_italic: Arc<[u8]> = Arc::from(super::embedded::NOTO_SANS_ITALIC);
     let sans_bold_italic: Arc<[u8]> = Arc::from(super::embedded::NOTO_SANS_BOLD_ITALIC);
+    let serif: Arc<[u8]> = Arc::from(super::embedded::NOTO_SERIF_REGULAR);
+    let serif_bold: Arc<[u8]> = Arc::from(super::embedded::NOTO_SERIF_BOLD);
+    let serif_italic: Arc<[u8]> = Arc::from(super::embedded::NOTO_SERIF_ITALIC);
+    let serif_bold_italic: Arc<[u8]> = Arc::from(super::embedded::NOTO_SERIF_BOLD_ITALIC);
     let mono: Arc<[u8]> = Arc::from(super::embedded::NOTO_SANS_MONO_REGULAR);
     let mono_bold: Arc<[u8]> = Arc::from(super::embedded::NOTO_SANS_MONO_BOLD);
     let mut provider = BytesFontProvider::new();
@@ -272,6 +282,17 @@ pub fn default_provider() -> BytesFontProvider {
     provider.register("Noto Sans", 700, FontStyle::Normal, sans_bold, 0, b);
     provider.register("Noto Sans", 400, FontStyle::Italic, sans_italic, 0, b);
     provider.register("Noto Sans", 700, FontStyle::Italic, sans_bold_italic, 0, b);
+    provider.register("Noto Serif", 400, FontStyle::Normal, serif, 0, b);
+    provider.register("Noto Serif", 700, FontStyle::Normal, serif_bold, 0, b);
+    provider.register("Noto Serif", 400, FontStyle::Italic, serif_italic, 0, b);
+    provider.register(
+        "Noto Serif",
+        700,
+        FontStyle::Italic,
+        serif_bold_italic,
+        0,
+        b,
+    );
     provider.register("Noto Sans Mono", 400, FontStyle::Normal, mono, 0, b);
     provider.register("Noto Sans Mono", 700, FontStyle::Normal, mono_bold, 0, b);
     provider
@@ -297,6 +318,29 @@ mod tests {
             "expected TrueType header and len > 1000, got len={}",
             data.bytes.len()
         );
+    }
+
+    #[test]
+    fn default_provider_resolves_noto_serif_matrix() {
+        let p = default_provider();
+        for (weight, style) in [
+            (400, FontStyle::Normal),
+            (700, FontStyle::Normal),
+            (400, FontStyle::Italic),
+            (700, FontStyle::Italic),
+        ] {
+            let result = p.resolve(&["Noto Serif".to_string()], weight, style);
+            assert!(
+                result.is_some(),
+                "expected Some for Noto Serif {weight} {style:?}"
+            );
+            let data = result.unwrap();
+            assert_eq!(data.source, FontSource::Bundled, "serif must be bundled");
+            assert!(
+                is_valid_tt_header(&data.bytes),
+                "expected TrueType header for Noto Serif {weight} {style:?}"
+            );
+        }
     }
 
     #[test]

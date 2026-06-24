@@ -19,3 +19,12 @@ pub const NOTO_SANS_MONO_REGULAR: &[u8] =
     include_bytes!("../../assets/fonts/NotoSansMono-Regular.ttf");
 /// Noto Sans Mono Bold — `"Noto Sans Mono"`, weight 700, normal.
 pub const NOTO_SANS_MONO_BOLD: &[u8] = include_bytes!("../../assets/fonts/NotoSansMono-Bold.ttf");
+/// Noto Serif Regular — `"Noto Serif"`, weight 400, normal.
+pub const NOTO_SERIF_REGULAR: &[u8] = include_bytes!("../../assets/fonts/NotoSerif-Regular.ttf");
+/// Noto Serif Bold — `"Noto Serif"`, weight 700, normal.
+pub const NOTO_SERIF_BOLD: &[u8] = include_bytes!("../../assets/fonts/NotoSerif-Bold.ttf");
+/// Noto Serif Italic — `"Noto Serif"`, weight 400, italic.
+pub const NOTO_SERIF_ITALIC: &[u8] = include_bytes!("../../assets/fonts/NotoSerif-Italic.ttf");
+/// Noto Serif Bold Italic — `"Noto Serif"`, weight 700, italic.
+pub const NOTO_SERIF_BOLD_ITALIC: &[u8] =
+    include_bytes!("../../assets/fonts/NotoSerif-BoldItalic.ttf");
