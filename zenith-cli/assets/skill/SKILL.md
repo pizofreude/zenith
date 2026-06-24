@@ -112,23 +112,24 @@ variants from one page; `merge` — CSV data mail-merge), **library** (`library 
 Read only the pack you need for the current sub-task (progressive disclosure). Each lives in
 `references/` next to this file.
 
-| The task involves…                                                                                    | Read / command                                             |
-| ----------------------------------------------------------------------------------------------------- | ---------------------------------------------------------- |
-| Node/attribute names, types, required/optional status                                                 | `zenith schema node <kind>` · `zenith schema nodes`        |
-| Transaction op fields and semantics                                                                   | `zenith schema op <name>` · `zenith schema ops`            |
-| Command flags and usage                                                                               | `zenith <cmd> --help`                                      |
-| Syntax errors, type mismatches, "did you mean?" — act on the diagnostic                              | `zenith validate <file> --json`                            |
-| The full agent run: scratch experiments, multiple candidates, select, promote, clean up, provenance   | `references/agentic-workflow.md` + `zenith workspace --help` |
-| Procedural grid/scatter tiling — the `pattern` node or the `detach_pattern` op                        | `references/pattern.md`                                    |
-| Recording a generated motif as a `recipes` block (provenance, seed/params, recipe `tx` ops)           | `references/recipes-model.md`                              |
-| Picking or applying a ready-made visual theme (palette + shape language)                              | `references/themes.md` + `themes/*.zen`                    |
-| Generating a theme from a brand (logo, website, brand colors)                                         | `references/themes.md` → `zenith theme new --help`         |
+| The task involves…                                                                                    | Read / command                                                                            |
+| ----------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------- |
+| Node/attribute names, types, required/optional status                                                 | `zenith schema node <kind>` · `zenith schema nodes`                                       |
+| Transaction op fields and semantics                                                                   | `zenith schema op <name>` · `zenith schema ops`                                           |
+| Command flags and usage                                                                               | `zenith <cmd> --help`                                                                     |
+| Syntax errors, type mismatches, "did you mean?" — act on the diagnostic                               | `zenith validate <file> --json`                                                           |
+| The full agent run: scratch experiments, multiple candidates, select, promote, clean up, provenance   | `references/agentic-workflow.md` + `zenith workspace --help`                              |
+| Driving Zenith where the CLI can't run (remote/CI/sandboxed/hosted agents) — the MCP server           | `references/agentic-workflow.md` (MCP section) + `zenith mcp --help`                      |
+| Procedural grid/scatter tiling — the `pattern` node or the `detach_pattern` op                        | `references/pattern.md`                                                                   |
+| Recording a generated motif as a `recipes` block (provenance, seed/params, recipe `tx` ops)           | `references/recipes-model.md`                                                             |
+| Picking or applying a ready-made visual theme (palette + shape language)                              | `references/themes.md` + `themes/*.zen`                                                   |
+| Generating a theme from a brand (logo, website, brand colors)                                         | `references/themes.md` → `zenith theme new --help`                                        |
 | Color, gradients, glows, texture, typography, "make it premium" — visual effects                      | `zenith schema` for attributes + `examples/*.zen` for runnable patterns + design judgment |
-| Page setup, anchors, safe zones, frames, grids, spreads                                               | `references/layout.md`                                     |
-| Bringing in a photo/illustration asset and composing around it                                        | `examples/image.zen` + `zenith schema node image`         |
-| Defining or applying a brand/identity, or per-project style                                           | `references/brand.md`                                      |
-| Many outputs from one design — **sizes/formats** (`zenith variant`) or **data** rows (`zenith merge`) | `references/variants.md`                                   |
-| Reporting a Zenith bug or feature request (the `gh` feedback loop)                                    | `references/reporting-issues.md`                           |
+| Page setup, anchors, safe zones, frames, grids, spreads                                               | `references/layout.md`                                                                    |
+| Bringing in a photo/illustration asset and composing around it                                        | `examples/image.zen` + `zenith schema node image`                                         |
+| Defining or applying a brand/identity, or per-project style                                           | `references/brand.md`                                                                     |
+| Many outputs from one design — **sizes/formats** (`zenith variant`) or **data** rows (`zenith merge`) | `references/variants.md`                                                                  |
+| Reporting a Zenith bug or feature request (the `gh` feedback loop)                                    | `references/reporting-issues.md`                                                          |
 
 ## Project configuration (brand / identity / style)
 
