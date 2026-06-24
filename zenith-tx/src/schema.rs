@@ -28,15 +28,17 @@ pub fn op_names() -> &'static [&'static str] {
         "distribute_nodes",
         "duplicate_node",
         "duplicate_page",
+        "finalize_run",
         "find_replace_text",
         "group",
         "move_backward",
         "move_forward",
         "move_to_back",
         "move_to_front",
-        "reparent",
-        "reorder_pages",
+        "promote_candidate",
         "remove_node",
+        "reorder_pages",
+        "reparent",
         "replace_text",
         "set_asset",
         "set_fill",
@@ -121,6 +123,12 @@ pub fn op_summary(name: &str) -> Option<&'static str> {
         "detach_pattern" => {
             Some("Materialize a pattern node into an editable group of native shapes.")
         }
+        "promote_candidate" => Some(
+            "Deep-copy a selected candidate page's content into a target export page with fresh node ids.",
+        ),
+        "finalize_run" => Some(
+            "Clean up rejected candidate pages at the end of a run by deleting or archiving them per their cleanup-policy.",
+        ),
         _ => None,
     }
 }
@@ -918,6 +926,8 @@ mod tests {
             Op::UpdateRecipe { .. } => "update_recipe",
             Op::DeleteRecipe { .. } => "delete_recipe",
             Op::DetachPattern { .. } => "detach_pattern",
+            Op::PromoteCandidate { .. } => "promote_candidate",
+            Op::FinalizeRun { .. } => "finalize_run",
         }
     }
 
@@ -966,6 +976,8 @@ mod tests {
             "update_recipe",
             "delete_recipe",
             "detach_pattern",
+            "promote_candidate",
+            "finalize_run",
         ])
     }
 
@@ -1179,6 +1191,12 @@ mod tests {
             Op::DetachPattern {
                 node: String::new(),
             },
+            Op::PromoteCandidate {
+                source_page: String::new(),
+                target_page: String::new(),
+                id_suffix: String::new(),
+            },
+            Op::FinalizeRun { run_pages: vec![] },
         ];
 
         for op in samples {

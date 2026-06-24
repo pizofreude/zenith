@@ -45,6 +45,7 @@ fn doc_with_styles(tokens: Vec<Token>, styles: Vec<Style>, pages: Vec<Page>) -> 
         variants: Vec::new(),
         recipes: Vec::new(),
         agent_runs: Vec::new(),
+        previews: Vec::new(),
         body: DocumentBody {
             id: "doc.main".to_owned(),
             title: None,
