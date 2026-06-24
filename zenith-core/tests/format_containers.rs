@@ -689,3 +689,224 @@ fn group_semantic_scalars_format_idempotency() {
         "format must be idempotent for group semantic scalars"
     );
 }
+
+/// **group protected-regions round-trip**: a group with two `protected-region`
+/// children (one with a label, one without) parses into the correct
+/// `protected_regions` vec and survives a parse → format → parse cycle with
+/// both regions preserved.
+#[test]
+fn group_protected_regions_round_trip() {
+    let src = r##"zenith version=1 {
+  project id="proj.pr" name="PR"
+  tokens format="zenith-token-v1" {
+  }
+  styles {
+  }
+  document id="doc.pr" title="PR" {
+    page id="page.pr" w=(px)800 h=(px)600 {
+      group id="grp.pr" {
+        protected-region id="region.a" x=(px)0 y=(px)0 w=(px)200 h=(px)100 label="header area"
+        protected-region id="region.b" x=(px)0 y=(px)500 w=(px)800 h=(px)100
+      }
+    }
+  }
+}
+"##;
+    let adapter = KdlAdapter;
+    let doc = adapter.parse(src.as_bytes()).expect("parse must succeed");
+    let grp = match &doc.body.pages[0].children[0] {
+        Node::Group(g) => g,
+        other => panic!("expected Group node, got {other:?}"),
+    };
+    assert_eq!(grp.protected_regions.len(), 2);
+    assert_eq!(grp.protected_regions[0].id, "region.a");
+    assert_eq!(
+        grp.protected_regions[0].label.as_deref(),
+        Some("header area")
+    );
+    assert_eq!(grp.protected_regions[1].id, "region.b");
+    assert!(grp.protected_regions[1].label.is_none());
+
+    let formatted = format_document(&doc).expect("format must succeed");
+    let text = String::from_utf8_lossy(&formatted);
+    assert!(
+        text.contains("protected-region"),
+        "formatted output must contain protected-region; got:\n{text}"
+    );
+    assert!(
+        text.contains(r#"id="region.a""#),
+        "formatted output must contain region.a id; got:\n{text}"
+    );
+    assert!(
+        text.contains(r#"label="header area""#),
+        "formatted output must contain label; got:\n{text}"
+    );
+    assert!(
+        text.contains(r#"id="region.b""#),
+        "formatted output must contain region.b id; got:\n{text}"
+    );
+
+    let doc2 = adapter
+        .parse(&formatted)
+        .expect("re-parse after format must succeed");
+    assert_eq!(
+        strip_spans(doc).body.pages[0].children,
+        strip_spans(doc2).body.pages[0].children,
+        "group with protected-regions must survive parse → format → parse"
+    );
+}
+
+/// **group editable-params round-trip**: a group with two `editable-param`
+/// children parses into the correct `editable_param_ids` vec and survives a
+/// parse → format → parse cycle.
+#[test]
+fn group_editable_params_round_trip() {
+    let src = r##"zenith version=1 {
+  project id="proj.ep" name="EP"
+  tokens format="zenith-token-v1" {
+  }
+  styles {
+  }
+  document id="doc.ep" title="EP" {
+    page id="page.ep" w=(px)800 h=(px)600 {
+      group id="grp.ep" {
+        editable-param id="color.primary"
+        editable-param id="font.size"
+      }
+    }
+  }
+}
+"##;
+    let adapter = KdlAdapter;
+    let doc = adapter.parse(src.as_bytes()).expect("parse must succeed");
+    let grp = match &doc.body.pages[0].children[0] {
+        Node::Group(g) => g,
+        other => panic!("expected Group node, got {other:?}"),
+    };
+    assert_eq!(grp.editable_param_ids.len(), 2);
+    assert_eq!(grp.editable_param_ids[0], "color.primary");
+    assert_eq!(grp.editable_param_ids[1], "font.size");
+
+    let formatted = format_document(&doc).expect("format must succeed");
+    let text = String::from_utf8_lossy(&formatted);
+    assert!(
+        text.contains("editable-param"),
+        "formatted output must contain editable-param; got:\n{text}"
+    );
+    assert!(
+        text.contains(r#"id="color.primary""#),
+        "formatted output must contain color.primary; got:\n{text}"
+    );
+    assert!(
+        text.contains(r#"id="font.size""#),
+        "formatted output must contain font.size; got:\n{text}"
+    );
+
+    let doc2 = adapter
+        .parse(&formatted)
+        .expect("re-parse after format must succeed");
+    assert_eq!(
+        strip_spans(doc).body.pages[0].children,
+        strip_spans(doc2).body.pages[0].children,
+        "group with editable-params must survive parse → format → parse"
+    );
+}
+
+/// **group child metadata absent — byte identity**: a plain group with no
+/// protected-regions and no editable-params must not emit either keyword in
+/// its formatted output, preserving byte-identity for all existing documents.
+#[test]
+fn group_child_metadata_absent_byte_identity() {
+    let src = r##"zenith version=1 {
+  project id="proj.absent" name="ABSENT"
+  tokens format="zenith-token-v1" {
+  }
+  styles {
+  }
+  document id="doc.absent" title="ABSENT" {
+    page id="page.absent" w=(px)800 h=(px)600 {
+      group id="grp.absent" {
+      }
+    }
+  }
+}
+"##;
+    let adapter = KdlAdapter;
+    let doc = adapter.parse(src.as_bytes()).expect("parse must succeed");
+    let formatted = format_document(&doc).expect("format must succeed");
+    let text = String::from_utf8_lossy(&formatted);
+    assert!(
+        !text.contains("protected-region"),
+        "plain group must not emit protected-region; got:\n{text}"
+    );
+    assert!(
+        !text.contains("editable-param"),
+        "plain group must not emit editable-param; got:\n{text}"
+    );
+}
+
+/// **group child metadata format idempotency**: formatting a document with
+/// protected-regions and editable-params twice must produce byte-identical output.
+#[test]
+fn group_child_metadata_format_idempotency() {
+    let src = r##"zenith version=1 {
+  project id="proj.idem2" name="IDEM2"
+  tokens format="zenith-token-v1" {
+  }
+  styles {
+  }
+  document id="doc.idem2" title="IDEM2" {
+    page id="page.idem2" w=(px)800 h=(px)600 {
+      group id="grp.idem2" {
+        protected-region id="region.x" x=(px)10 y=(px)20 w=(px)300 h=(px)50 label="safe"
+        editable-param id="color.accent"
+      }
+    }
+  }
+}
+"##;
+    let adapter = KdlAdapter;
+    let doc = adapter.parse(src.as_bytes()).expect("parse must succeed");
+    let first = format_document(&doc).expect("first format must succeed");
+    let doc2 = adapter.parse(&first).expect("re-parse must succeed");
+    let second = format_document(&doc2).expect("second format must succeed");
+    assert_eq!(
+        first, second,
+        "format must be idempotent for group child metadata"
+    );
+}
+
+/// **group protected-region label escaping round-trip**: a `protected-region`
+/// whose label contains an embedded double-quote and a newline character must
+/// survive a parse → format → parse round-trip with the exact label text
+/// preserved.
+#[test]
+fn group_protected_region_label_escaping_round_trip() {
+    let src = "zenith version=1 {\n  project id=\"proj.esc\" name=\"ESC\"\n  tokens format=\"zenith-token-v1\" {\n  }\n  styles {\n  }\n  document id=\"doc.esc\" title=\"ESC\" {\n    page id=\"page.esc\" w=(px)800 h=(px)600 {\n      group id=\"grp.esc\" {\n        protected-region id=\"region.q\" x=(px)0 y=(px)0 w=(px)100 h=(px)100 label=\"say \\\"hello\\\" and\\nbye\"\n      }\n    }\n  }\n}\n";
+    let adapter = KdlAdapter;
+    let doc = adapter.parse(src.as_bytes()).expect("parse must succeed");
+    let grp = match &doc.body.pages[0].children[0] {
+        Node::Group(g) => g,
+        other => panic!("expected Group node, got {other:?}"),
+    };
+    assert_eq!(grp.protected_regions.len(), 1);
+    let label = grp.protected_regions[0]
+        .label
+        .as_deref()
+        .expect("label must be present");
+    assert!(label.contains('"'), "label must contain an embedded quote");
+    assert!(
+        label.contains('\n'),
+        "label must contain an embedded newline"
+    );
+
+    let formatted = format_document(&doc).expect("format must succeed");
+    let doc2 = adapter
+        .parse(&formatted)
+        .expect("re-parse after format must succeed");
+    assert_eq!(
+        strip_spans(doc).body.pages[0].children,
+        strip_spans(doc2).body.pages[0].children,
+        "group protected-region with escaped label must survive parse → format → parse"
+    );
+}

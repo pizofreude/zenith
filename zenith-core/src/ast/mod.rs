@@ -1,6 +1,7 @@
 //! AST type re-exports for zenith-core.
 
 pub mod action;
+pub mod agent_run;
 pub mod asset;
 pub mod document;
 pub mod library;
@@ -15,6 +16,7 @@ pub mod variant;
 
 // Flat re-exports used throughout the crate.
 pub use action::ActionDef;
+pub use agent_run::{AgentRun, AgentStep, AgentStepDiagnostic, AgentStepParam};
 pub use asset::{AssetBlock, AssetDecl, AssetKind};
 pub use document::{
     ComponentDef, Document, DocumentBody, Fold, MasterDef, Page, Project, SafeZone, SafeZoneType,
@@ -24,9 +26,9 @@ pub use library::LibraryDef;
 pub use node::{
     Anchor, AnchorEdge, CodeNode, ConnectorNode, EllipseNode, FieldNode, FootnoteNode, FrameNode,
     GroupNode, ImageNode, InstanceNode, LineNode, Node, ObjectPosition, Override, PatternNode,
-    Point, PolygonNode, PolylineNode, RectNode, ShapeNode, TableCell, TableColumn, TableNode,
-    TableRow, TextNode, TextSpan, TocNode, UnknownNode, UnknownProperty, UnknownValue, anchor_xy,
-    parse_anchor, parse_anchor_edge,
+    Point, PolygonNode, PolylineNode, ProtectedRegion, RectNode, ShapeNode, TableCell, TableColumn,
+    TableNode, TableRow, TextNode, TextSpan, TocNode, UnknownNode, UnknownProperty, UnknownValue,
+    anchor_xy, parse_anchor, parse_anchor_edge,
 };
 pub use provenance::ProvenanceDef;
 pub use recipe::{RecipeDef, RecipeParam};

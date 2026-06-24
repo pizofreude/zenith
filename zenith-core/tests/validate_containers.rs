@@ -38,6 +38,8 @@ fn minimal_group(id: &str, children: Vec<Node>) -> Node {
         anchor_gap: None,
         anchor_parent: None,
         children,
+        protected_regions: Vec::new(),
+        editable_param_ids: Vec::new(),
         source_span: None,
         unknown_props: BTreeMap::new(),
     })
@@ -201,6 +203,8 @@ fn group_unknown_property_warns() {
                 anchor_gap: None,
                 anchor_parent: None,
                 children: vec![],
+                protected_regions: Vec::new(),
+                editable_param_ids: Vec::new(),
                 source_span: None,
                 unknown_props,
             })],

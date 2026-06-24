@@ -141,6 +141,8 @@ pub(super) fn apply_detach_pattern(
         intensity: None,
         layer_priority: None,
         children,
+        protected_regions: Vec::new(),
+        editable_param_ids: Vec::new(),
         anchor: None,
         anchor_zone: None,
         anchor_sibling: None,

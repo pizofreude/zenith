@@ -89,6 +89,25 @@ pub struct FrameNode {
     pub unknown_props: BTreeMap<String, UnknownProperty>,
 }
 
+/// A named text-safe rectangle declared on a [`GroupNode`] as a
+/// `protected-region` child.
+///
+/// Declared as `protected-region id="…" x=(px)N y=(px)N w=(px)N h=(px)N`
+/// (with an optional `label`). Non-rendering metadata: it is not emitted to
+/// the scene and carries no visual properties of its own. Consumers (e.g.
+/// external layout tools) may consult it to avoid placing text over UI chrome
+/// or other reserved areas.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ProtectedRegion {
+    pub id: String,
+    pub x: Dimension,
+    pub y: Dimension,
+    pub w: Dimension,
+    pub h: Dimension,
+    pub label: Option<String>,
+    pub source_span: Option<Span>,
+}
+
 /// A `group` node — a container that holds child nodes and renders them in
 /// source order (first child = bottom of z-order).
 ///
@@ -137,6 +156,13 @@ pub struct GroupNode {
     pub layer_priority: Option<i64>,
     /// Child nodes in source order.
     pub children: Vec<Node>,
+    /// Advisory text-safe rectangles declared as `protected-region` children.
+    /// Non-rendering metadata; defaults to empty (byte-identical output when absent).
+    pub protected_regions: Vec<ProtectedRegion>,
+    /// Ids of parameters that external tooling is permitted to tweak, declared
+    /// as `editable-param id="…"` children. Non-rendering metadata; defaults to
+    /// empty (byte-identical output when absent).
+    pub editable_param_ids: Vec<String>,
     /// Page-relative placement anchor (one of the nine named positions, e.g.
     /// `"bottom-right"`). When present and recognized, the compile step derives
     /// the node's x and/or y from the page and node dimensions. An explicitly-

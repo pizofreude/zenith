@@ -4,18 +4,20 @@
 use kdl::KdlNode;
 
 use crate::ast::node::{
-    FrameNode, GroupNode, InstanceNode, Override, TableCell, TableColumn, TableNode, TableRow,
-    TextSpan,
+    FrameNode, GroupNode, InstanceNode, Override, ProtectedRegion, TableCell, TableColumn,
+    TableNode, TableRow, TextSpan,
 };
-use crate::error::ParseError;
+use crate::error::{ParseError, ParseErrorCode};
 
 use super::document::transform_children;
 use super::helpers::{
-    collect_unknown_props, node_span, optional_bool_prop, optional_dimension_prop,
-    optional_f64_prop, optional_i64_prop, optional_property_value, optional_property_value_aliased,
-    optional_string_prop, optional_string_prop_aliased, optional_u32_prop, required_string_prop,
+    collect_unknown_props, entry_to_dimension, node_span, optional_bool_prop,
+    optional_dimension_prop, optional_f64_prop, optional_i64_prop, optional_property_value,
+    optional_property_value_aliased, optional_string_prop, optional_string_prop_aliased,
+    optional_u32_prop, required_string_prop,
 };
 use super::leaf::transform_span;
+use super::node::transform_node;
 
 pub(crate) const FRAME_KNOWN_PROPS: &[&str] = &[
     "id",
@@ -131,6 +133,27 @@ pub(super) fn transform_group(node: &KdlNode) -> Result<GroupNode, ParseError> {
 
     let unknown_props = collect_unknown_props(node, GROUP_KNOWN_PROPS);
 
+    // A group's children block may contain `protected-region` and
+    // `editable-param` metadata children alongside renderable nodes. Split them
+    // here, mirroring the page-level split for `safe-zone` and `fold`.
+    let mut protected_regions: Vec<ProtectedRegion> = Vec::new();
+    let mut editable_param_ids: Vec<String> = Vec::new();
+    let mut children = Vec::new();
+    if let Some(doc) = node.children() {
+        for child in doc.nodes() {
+            match child.name().value() {
+                "protected-region" => {
+                    protected_regions.push(transform_protected_region(child)?);
+                }
+                "editable-param" => {
+                    let param_id = required_string_prop(child, "id")?.to_owned();
+                    editable_param_ids.push(param_id);
+                }
+                _ => children.push(transform_node(child)?),
+            }
+        }
+    }
+
     Ok(GroupNode {
         id,
         name: optional_string_prop(node, "name").map(str::to_owned),
@@ -152,7 +175,9 @@ pub(super) fn transform_group(node: &KdlNode) -> Result<GroupNode, ParseError> {
         intensity: optional_f64_prop(node, "intensity"),
         layer_priority: optional_i64_prop(node, "layer-priority")
             .or_else(|| optional_i64_prop(node, "layer_priority")),
-        children: transform_children(node)?,
+        children,
+        protected_regions,
+        editable_param_ids,
         anchor: optional_string_prop(node, "anchor").map(str::to_owned),
         anchor_zone: optional_string_prop(node, "anchor-zone")
             .or_else(|| optional_string_prop(node, "anchor_zone"))
@@ -169,6 +194,63 @@ pub(super) fn transform_group(node: &KdlNode) -> Result<GroupNode, ParseError> {
             .or_else(|| optional_bool_prop(node, "anchor_parent")),
         source_span: node_span(node),
         unknown_props,
+    })
+}
+
+/// Transform a `protected-region` group child into a [`ProtectedRegion`].
+///
+/// Reads required `id` and `x`/`y`/`w`/`h` dimensions; `label` is optional.
+/// Mirrors [`transform_safe_zone`](super::page::transform_safe_zone) in page.rs.
+fn transform_protected_region(node: &KdlNode) -> Result<ProtectedRegion, ParseError> {
+    let id = required_string_prop(node, "id")?.to_owned();
+
+    let x = node
+        .entry("x")
+        .ok_or_else(|| {
+            ParseError::spanless(
+                ParseErrorCode::InvalidPropertyValue,
+                format!("protected-region `{id}` is missing required property `x`"),
+            )
+        })
+        .and_then(|e| entry_to_dimension(e, "x"))?;
+    let y = node
+        .entry("y")
+        .ok_or_else(|| {
+            ParseError::spanless(
+                ParseErrorCode::InvalidPropertyValue,
+                format!("protected-region `{id}` is missing required property `y`"),
+            )
+        })
+        .and_then(|e| entry_to_dimension(e, "y"))?;
+    let w = node
+        .entry("w")
+        .ok_or_else(|| {
+            ParseError::spanless(
+                ParseErrorCode::InvalidPropertyValue,
+                format!("protected-region `{id}` is missing required property `w`"),
+            )
+        })
+        .and_then(|e| entry_to_dimension(e, "w"))?;
+    let h = node
+        .entry("h")
+        .ok_or_else(|| {
+            ParseError::spanless(
+                ParseErrorCode::InvalidPropertyValue,
+                format!("protected-region `{id}` is missing required property `h`"),
+            )
+        })
+        .and_then(|e| entry_to_dimension(e, "h"))?;
+
+    let label = optional_string_prop(node, "label").map(str::to_owned);
+
+    Ok(ProtectedRegion {
+        id,
+        x,
+        y,
+        w,
+        h,
+        label,
+        source_span: node_span(node),
     })
 }
 

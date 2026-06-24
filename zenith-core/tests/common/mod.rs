@@ -16,12 +16,13 @@ use std::collections::BTreeMap;
 
 pub use zenith_core::ast::document::Fold;
 pub use zenith_core::{
-    ActionDef, AssetBlock, AssetDecl, AssetKind, CodeNode, ConnectorNode, Dimension, Document,
-    DocumentBody, EllipseNode, FieldNode, FrameNode, GroupNode, ImageNode, LibraryDef, LineNode,
-    MasterDef, Node, Page, Point, PolygonNode, PolylineNode, PropertyValue, ProvenanceDef,
-    RecipeDef, RecipeParam, RectNode, SafeZone, SafeZoneType, SectionDef, Severity, ShapeNode,
-    Style, StyleBlock, TableCell, TableColumn, TableNode, TableRow, TextNode, TextSpan, TocNode,
-    Token, TokenBlock, TokenLiteral, TokenType, TokenValue, Unit, UnknownNode, UnknownStyleProp,
+    ActionDef, AgentRun, AgentStep, AgentStepDiagnostic, AgentStepParam, AssetBlock, AssetDecl,
+    AssetKind, CodeNode, ConnectorNode, Dimension, Document, DocumentBody, EllipseNode, FieldNode,
+    FrameNode, GroupNode, ImageNode, LibraryDef, LineNode, MasterDef, Node, Page, Point,
+    PolygonNode, PolylineNode, PropertyValue, ProtectedRegion, ProvenanceDef, RecipeDef,
+    RecipeParam, RectNode, SafeZone, SafeZoneType, SectionDef, Severity, ShapeNode, Style,
+    StyleBlock, TableCell, TableColumn, TableNode, TableRow, TextNode, TextSpan, TocNode, Token,
+    TokenBlock, TokenLiteral, TokenType, TokenValue, Unit, UnknownNode, UnknownStyleProp,
     ValidationReport, VariantDef, VariantOverride, validate,
 };
 pub use zenith_core::{KdlAdapter, KdlSource};
@@ -228,6 +229,7 @@ pub fn doc_with(tokens: Vec<Token>, pages: Vec<Page>) -> Document {
         provenance: Vec::new(),
         variants: Vec::new(),
         recipes: Vec::new(),
+        agent_runs: Vec::new(),
         body: DocumentBody {
             id: "doc.main".to_owned(),
             title: None,
@@ -412,6 +414,19 @@ pub fn strip_spans(mut doc: Document) -> Document {
             param.source_span = None;
         }
     }
+    // Agent runs
+    for run in &mut doc.agent_runs {
+        run.source_span = None;
+        for step in &mut run.steps {
+            step.source_span = None;
+            for param in &mut step.params {
+                param.source_span = None;
+            }
+            for diag in &mut step.diagnostics {
+                diag.source_span = None;
+            }
+        }
+    }
     // Pages and nodes
     for page in &mut doc.body.pages {
         page.source_span = None;
@@ -444,6 +459,9 @@ pub fn strip_node_span(node: &mut Node) {
         }
         Node::Group(g) => {
             g.source_span = None;
+            for region in &mut g.protected_regions {
+                region.source_span = None;
+            }
             for child in &mut g.children {
                 strip_node_span(child);
             }
