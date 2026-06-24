@@ -11,9 +11,10 @@
 use zenith_core::{Dimension, FrameNode, GroupNode, KdlAdapter, KdlSource, Node, Page, Unit};
 
 use crate::commands::serialize_pretty;
-use crate::json_types::{AgentRunInspectJson, RecipeInspectJson};
+use crate::json_types::{AgentRunInspectJson, PreviewInspectJson, RecipeInspectJson};
 
 use super::agent_runs;
+use super::previews;
 use super::recipes;
 
 // ── Error type ────────────────────────────────────────────────────────────────
@@ -101,6 +102,8 @@ pub struct InspectOutput {
     pub recipes: Vec<RecipeInspectJson>,
     /// Empty when the document has no `agent-runs` block.
     pub agent_runs: Vec<AgentRunInspectJson>,
+    /// Empty when the document has no `previews` block.
+    pub previews: Vec<PreviewInspectJson>,
 }
 
 /// The subtree rooted at a single found node (used for `--node <ID>`).
@@ -148,11 +151,13 @@ pub fn run(src: &str, node_id: Option<&str>, json: bool) -> Result<String, Inspe
         let out = if json {
             let recipe_entries = recipes::build_recipe_entries(&doc.recipes);
             let agent_run_entries = agent_runs::build_agent_run_entries(&doc.agent_runs);
+            let preview_entries = previews::build_preview_entries(&doc.previews);
             let output = InspectOutput {
                 schema: "zenith-inspect-v1",
                 pages,
                 recipes: recipe_entries,
                 agent_runs: agent_run_entries,
+                previews: preview_entries,
             };
             serialize_pretty(&output)
         } else {
@@ -168,6 +173,12 @@ pub fn run(src: &str, node_id: Option<&str>, json: bool) -> Result<String, Inspe
                 text.push('\n');
                 text.push('\n');
                 text.push_str(&agent_run_section);
+            }
+            let preview_section = previews::render_previews_human(&doc.previews);
+            if !preview_section.is_empty() {
+                text.push('\n');
+                text.push('\n');
+                text.push_str(&preview_section);
             }
             text
         };

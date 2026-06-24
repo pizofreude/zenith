@@ -23,6 +23,7 @@ use super::passes::{
     check_footnote_refs, collect_local_ids, register_id, validate_asset_decl,
     validate_library_decl, validate_provenance_def, validate_style_block,
 };
+use super::previews::check_previews;
 use super::recipes::check_recipes;
 use super::report::ValidationReport;
 use super::variants::check_variants;
@@ -421,6 +422,11 @@ pub fn validate(doc: &Document) -> ValidationReport {
     // Validate the top-level `agent-runs` block: duplicate run/step ids, empty
     // actions, unresolved parent-step references, and unknown affected-node ids.
     check_agent_runs(doc, &all_node_ids, &mut diagnostics);
+
+    // ── Previews ──────────────────────────────────────────────────────────
+    // Validate the top-level `previews` block: unknown candidate page ids and
+    // invalid critique severity values.
+    check_previews(doc, &page_ids, &mut diagnostics);
 
     // ── Provenance records ────────────────────────────────────────────────
     // Each `origin` id participates in the GLOBAL id-uniqueness set. The record

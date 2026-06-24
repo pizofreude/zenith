@@ -268,6 +268,31 @@ pub struct AgentRunInspectJson {
     pub steps: Vec<AgentStepInspectJson>,
 }
 
+// ── Preview inspect JSON types ────────────────────────────────────────────────
+
+/// A single critique entry within a [`PreviewInspectJson`].
+#[derive(Debug, Serialize)]
+pub struct PreviewCritiqueInspectJson {
+    pub severity: String,
+    pub code: String,
+}
+
+/// A single preview entry in the `previews` array of [`crate::commands::inspect::InspectOutput`].
+#[derive(Debug, Serialize)]
+pub struct PreviewInspectJson {
+    pub candidate: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub source_hash: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub output: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub output_hash: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub parent_revision: Option<String>,
+    pub critique_count: usize,
+    pub critiques: Vec<PreviewCritiqueInspectJson>,
+}
+
 // ── Recipe inspect JSON types ─────────────────────────────────────────────────
 
 /// A single `param` entry within a [`RecipeInspectJson`].
