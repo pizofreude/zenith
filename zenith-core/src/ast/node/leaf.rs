@@ -477,9 +477,10 @@ pub struct CodeNode {
     pub h: Option<Dimension>,
     /// "clip" (default) or "visible"; v0 does not word-wrap.
     pub overflow: Option<String>,
-    /// Open string naming the source language; v0 renders plaintext regardless.
+    /// Open string naming the source language; drives built-in syntax
+    /// highlighting when the language is supported, otherwise renders as plain text.
     pub language: Option<String>,
-    /// Render line numbers (default false); parsed + preserved, NOT acted on in v0.
+    /// Render a line-number gutter (default false).
     pub line_numbers: Option<bool>,
     /// Rendered column width of a tab (default 4).
     pub tab_width: Option<u32>,
@@ -530,7 +531,8 @@ pub struct PolygonNode {
     pub fill: Option<PropertyValue>,
     pub stroke: Option<PropertyValue>,
     pub stroke_width: Option<PropertyValue>,
-    /// DEFERRED: stroke-alignment offset (rendered centered in v0)
+    /// Stroke alignment: `"center"` (default), `"inside"`, or `"outside"`.
+    /// `inside`/`outside` shift closed-shape strokes; open paths stroke centered.
     pub stroke_alignment: Option<String>,
     /// `"nonzero"` (default) or `"evenodd"`.
     pub fill_rule: Option<String>,

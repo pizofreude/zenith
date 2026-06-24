@@ -4,8 +4,8 @@
 //! from a source page. Each `variant` entry specifies a target page `id`, the
 //! `source` page it derives from, the target dimensions `w`/`h`, and an
 //! optional list of per-node property overrides. It is a sibling of the
-//! `provenance`/`document` blocks. The engine round-trips and validates these
-//! records but does NOT act on them; generation is deferred to a later unit.
+//! `provenance`/`document` blocks. Core round-trips and validates these records;
+//! variant generation itself is performed by the CLI engine (`zenith variant`).
 
 use std::collections::BTreeMap;
 

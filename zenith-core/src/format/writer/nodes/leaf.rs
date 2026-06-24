@@ -366,7 +366,6 @@ pub(super) fn write_polygon(p: &PolygonNode, out: &mut String, depth: usize) {
     write_opt_property_value(out, "fill", &p.fill);
     write_opt_property_value(out, "stroke", &p.stroke);
     write_opt_property_value(out, "stroke-width", &p.stroke_width);
-    // DEFERRED: stroke-alignment offset (rendered centered in v0)
     write_opt_str(out, "stroke-alignment", &p.stroke_alignment);
     write_opt_str(out, "fill-rule", &p.fill_rule);
     write_opt_f64(out, "opacity", &p.opacity);

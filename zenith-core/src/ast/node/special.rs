@@ -16,7 +16,7 @@ use super::common::{Node, TextSpan, UnknownProperty};
 /// properties AND a list of owned label [`TextSpan`]s (NOT child `Node`s). The
 /// background primitive emitted depends on [`ShapeNode::kind`]
 /// (`process`/`decision`/`terminator`/`ellipse`, default `process`). The owned
-/// label text is centered inside the box (label rendering is a later unit).
+/// label text is rendered centered inside the box.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ShapeNode {
     pub id: String,
@@ -37,19 +37,19 @@ pub struct ShapeNode {
     pub radius: Option<PropertyValue>,
     /// Stroke alignment (`inside`/`center`/`outside`), same model as `rect`.
     pub stroke_alignment: Option<String>,
-    /// Text inset inside the box (token-required dimension). Carried; applied to
-    /// the owned label in a later unit.
+    /// Text inset inside the box (token-required dimension), applied to the
+    /// owned label.
     pub padding: Option<PropertyValue>,
-    /// Horizontal label alignment in the box (`start`/`center`/`end`). Carried;
-    /// applied to the owned label in a later unit.
+    /// Horizontal label alignment in the box (`start`/`center`/`end`, default
+    /// `center`), applied to the owned label.
     pub h_align: Option<String>,
-    /// Vertical label alignment in the box (`top`/`middle`/`bottom`). Carried;
-    /// applied to the owned label in a later unit.
+    /// Vertical label alignment in the box (`top`/`middle`/`bottom`, default
+    /// `middle`), applied to the owned label.
     pub v_align: Option<String>,
-    /// Style ref for the owned label text. Carried; applied in a later unit.
+    /// Style ref for the owned label text, applied to the label.
     pub text_style: Option<String>,
-    /// The owned label spans (same model as a `text` node's spans). Carried +
-    /// parsed/formatted/validated now; rendered in a later unit.
+    /// The owned label spans (same model as a `text` node's spans), rendered
+    /// centered inside the box on top of the background.
     pub spans: Vec<TextSpan>,
     /// Box style ref.
     pub style: Option<String>,

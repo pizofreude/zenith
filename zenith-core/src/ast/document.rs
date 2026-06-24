@@ -315,9 +315,9 @@ pub struct Document {
     pub provenance: Vec<ProvenanceDef>,
     /// Variant declarations; empty when the `variants` block is absent. Each
     /// entry declares a named size/override variant derived from a source page
-    /// (`id`, `source`, `w`, `h`, optional `override` children). The engine
-    /// round-trips and validates these records but does NOT generate output for
-    /// them; generation is a later unit.
+    /// (`id`, `source`, `w`, `h`, optional `override` children). Core
+    /// round-trips and validates these records; variant generation is performed
+    /// by the CLI engine (`zenith variant`).
     pub variants: Vec<VariantDef>,
     /// Recipe declarations; empty when the `recipes` block is absent. Each
     /// entry declares a named generative recipe (`id`, `kind`, optional

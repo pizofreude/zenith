@@ -52,8 +52,8 @@ pub struct FrameNode {
     /// from the render.
     pub visible: Option<bool>,
     pub locked: Option<bool>,
-    /// Rotation — parsed and preserved but DEFERRED (not applied at render,
-    /// consistent with the universal rotate deferral on all node types).
+    /// Rotation in degrees, applied at render about the node's center (the
+    /// subtree rotates with it; see the compile-site notes for clip limitations).
     pub rotate: Option<Dimension>,
     /// Compositing blend mode: `"normal"` (default) or one of the 11 separable
     /// blends. `None`/`"normal"` render source-over (byte-identical).
@@ -108,8 +108,8 @@ pub struct GroupNode {
     /// When `Some(false)` the entire subtree is excluded from the render.
     pub visible: Option<bool>,
     pub locked: Option<bool>,
-    /// Rotation — parsed and preserved but DEFERRED (not applied at render,
-    /// consistent with the universal rotate deferral on all node types).
+    /// Rotation in degrees, applied at render about the node's center (the
+    /// subtree rotates with it; see the compile-site notes for clip limitations).
     pub rotate: Option<Dimension>,
     /// Compositing blend mode: `"normal"` (default) or one of the 11 separable
     /// blends. `None`/`"normal"` render source-over (byte-identical).
@@ -141,11 +141,11 @@ pub struct GroupNode {
 
 /// A single column declaration in a [`TableNode`] (a `column` child).
 ///
-/// `width` absent means an AUTO column: in this unit auto columns share the
-/// leftover table width equally (content-based auto-sizing is a later unit).
+/// `width` absent means an AUTO column: its width is content-based (the natural
+/// width its cells demand), scaled to fit the table's leftover width.
 #[derive(Debug, Clone, PartialEq)]
 pub struct TableColumn {
-    /// Explicit column width; `None` = auto (equal share of leftover width).
+    /// Explicit column width; `None` = auto (content-based width).
     pub width: Option<Dimension>,
     /// Source declaration span, when available.
     pub source_span: Option<Span>,
@@ -195,10 +195,9 @@ pub struct TableRow {
 
 /// A `table` node — a grid container of `column`/`row`/`cell` children.
 ///
-/// This unit renders single-page tables with EXPLICIT/PROPORTIONAL column
-/// widths and SEPARATE borders only. Content-based auto-sizing, border-collapse
-/// mode, header-row styling, and multi-page flow are LATER units; their AST
-/// fields are carried here so the schema stays stable.
+/// Renders tables with explicit, proportional, or content-based (auto) column
+/// widths; separate or collapsed borders; styled header rows; and multi-page
+/// flow when a table is taller than its page.
 #[derive(Debug, Clone, PartialEq)]
 pub struct TableNode {
     pub id: String,
@@ -216,7 +215,8 @@ pub struct TableNode {
     pub columns: Vec<TableColumn>,
     /// Row declarations, order = top→bottom.
     pub rows: Vec<TableRow>,
-    /// First N rows are headers (styling + repeat in later units).
+    /// First N rows are headers: styled via `header_fill`/`header_style` and
+    /// repeated atop each page slice in multi-page flow.
     pub header_rows: Option<u32>,
     /// Multi-page flow id. Tables sharing a `flows` id form ONE logical table:
     /// the FIRST member (page-order, then source-order) is the SOURCE carrying
@@ -228,8 +228,7 @@ pub struct TableNode {
     pub gap: Option<PropertyValue>,
     /// Inset inside each cell in px (token or literal).
     pub cell_padding: Option<PropertyValue>,
-    /// Border model: `"separate"` (default) or `"collapse"`. Only `"separate"`
-    /// is rendered in this unit.
+    /// Border model: `"separate"` (default) or `"collapse"`; both are rendered.
     pub border_collapse: Option<String>,
     /// Default cell background (token-required color).
     pub fill: Option<PropertyValue>,
@@ -237,9 +236,10 @@ pub struct TableNode {
     pub border: Option<PropertyValue>,
     /// Default border width (token/dimension).
     pub border_width: Option<PropertyValue>,
-    /// Header-row background override (carried; applied in a later unit).
+    /// Header-row background override, applied to header cells (precedence:
+    /// cell.fill > header_fill > table.fill).
     pub header_fill: Option<PropertyValue>,
-    /// Header text style ref (carried; applied in a later unit).
+    /// Header text style ref, applied to header-row cell text.
     pub header_style: Option<String>,
     /// Default horizontal alignment (`start`(default)/`center`/`end`).
     pub h_align: Option<String>,
@@ -249,8 +249,7 @@ pub struct TableNode {
     pub opacity: Option<f64>,
     pub visible: Option<bool>,
     pub locked: Option<bool>,
-    /// Rotation — parsed and preserved but DEFERRED at render, consistent with
-    /// the universal rotate deferral on all node types.
+    /// Rotation — parsed and preserved but not yet applied at render for tables.
     pub rotate: Option<Dimension>,
     /// Page-relative placement anchor (one of the nine named positions, e.g.
     /// `"bottom-right"`). When present and recognized, the compile step derives

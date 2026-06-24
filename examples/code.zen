@@ -1,17 +1,24 @@
 zenith version=1 {
-  project id="proj.code" name="Terminal Card Example"
+  project id="proj.highlight" name="Syntax Highlighting Example"
+  assets {
+  }
   tokens format="zenith-token-v1" {
-    token id="color.bg" type="color" value="#0f172a"
-    token id="color.ink" type="color" value="#e2e8f0"
+    token id="color.darkbg" type="color" value="#0f172a"
+    token id="color.litebg" type="color" value="#ffffff"
     token id="font.mono" type="fontFamily" value="Noto Sans Mono"
     token id="size.code" type="dimension" value=(px)14
   }
-  styles {}
-  document id="doc.code" title="Terminal Card Example" {
-    page id="page.code" w=(px)480 h=(px)260 {
-      rect id="rect.bg" x=(px)0 y=(px)0 w=(px)480 h=(px)260 fill=(token)"color.bg"
-      code id="code.snippet" x=(px)24 y=(px)24 w=(px)432 h=(px)212 fill=(token)"color.ink" font-family=(token)"font.mono" font-size=(token)"size.code" overflow="clip" tab-width=4 {
-        content "fn main() {\n\tlet name = \"Zenith\";\n\n\tprintln!(\"Hello, {name}!\");\n}"
+  styles {
+  }
+  document id="doc.highlight" title="Syntax Highlighting Example" {
+    page id="page.highlight" w=(px)520 h=(px)360 {
+      rect id="bg.dark" x=(px)0 y=(px)0 w=(px)520 h=(px)180 fill=(token)"color.darkbg"
+      code id="code.dark" x=(px)20 y=(px)18 w=(px)480 h=(px)150 overflow="clip" language="rust" tab-width=4 font-family=(token)"font.mono" font-size=(token)"size.code" {
+        content "fn main() {\n\tlet name = \"Zenith\";\n\tlet count = 42;\n\t// greet the world\n\tprintln!(\"Hello, {name}!\");\n}"
+      }
+      rect id="bg.light" x=(px)0 y=(px)180 w=(px)520 h=(px)180 fill=(token)"color.litebg"
+      code id="code.light" x=(px)20 y=(px)198 w=(px)480 h=(px)150 overflow="clip" language="rust" tab-width=4 font-family=(token)"font.mono" font-size=(token)"size.code" syntax-theme="light" {
+        content "fn main() {\n\tlet name = \"Zenith\";\n\tlet count = 42;\n\t// greet the world\n\tprintln!(\"Hello, {name}!\");\n}"
       }
     }
   }
