@@ -6,7 +6,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use zenith_core::{
-    Diagnostic, FontProvider, FontStyle, PropertyValue, ResolvedToken, ResolvedValue,
+    Diagnostic, FontProvider, FontSource, FontStyle, PropertyValue, ResolvedToken, ResolvedValue,
 };
 use zenith_layout::{ShapeRequest, TextDirection, TextLayoutEngine, ZenithGlyphRun};
 
@@ -284,29 +284,36 @@ pub(in crate::compile) fn resolve_font_weight(
 /// Resolve a requested font family against the provider, falling back to the
 /// bundled default when the requested family is unregistered.
 ///
-/// Returns `(family_to_use, fell_back)`: if the requested family resolves it is
-/// returned unchanged with `false`; otherwise `default_family` is returned with
-/// `true` so the caller can emit a `font.unresolved` advisory (worded for its
-/// own node kind) and shaping proceeds with the bundled face instead of
-/// silently dropping text. The probe weight/style match the shaping request.
+/// Returns `(family_to_use, fell_back, is_local)`:
+/// - `fell_back` is `true` when the requested family was unavailable and
+///   `default_family` was substituted, so the caller emits a `font.unresolved`
+///   advisory and shaping proceeds with the bundled face instead of silently
+///   dropping text.
+/// - `is_local` is `true` when the face that was actually resolved came from a
+///   local/system source ([`zenith_core::FontSource::Local`]), so the caller
+///   emits a `font.local` advisory. A family can resolve cleanly from local
+///   WITHOUT falling back, so `is_local` is independent of `fell_back`.
+///
+/// The probe weight/style match the shaping request. The bundled default is
+/// always [`FontSource::Bundled`], so the fast path (and any fallback to the
+/// default) is never flagged local.
 pub(in crate::compile) fn resolve_family_with_fallback(
     fonts: &dyn FontProvider,
     requested: &str,
     default_family: &str,
     weight: u16,
     style: FontStyle,
-) -> (String, bool) {
-    // Fast path: requested == default → always available, no check needed.
+) -> (String, bool, bool) {
+    // Fast path: requested == default → always available (bundled), no check.
     if requested.eq_ignore_ascii_case(default_family) {
-        return (requested.to_owned(), false);
+        return (requested.to_owned(), false, false);
     }
-    if fonts
-        .resolve(&[requested.to_owned()], weight, style)
-        .is_some()
-    {
-        (requested.to_owned(), false)
-    } else {
-        (default_family.to_owned(), true)
+    match fonts.resolve(&[requested.to_owned()], weight, style) {
+        Some(data) => {
+            let is_local = data.source == FontSource::Local;
+            (requested.to_owned(), false, is_local)
+        }
+        None => (default_family.to_owned(), true, false),
     }
 }
 

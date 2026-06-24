@@ -58,7 +58,7 @@ pub(in crate::compile) fn resolve_text_families(
     // Probe the provider with the node-level defaults (weight 400, Normal
     // style) — sufficient to confirm family availability. The advisory fires at
     // most once per text node, before any per-span shaping.
-    let (family_name, fell_back) = super::shape::resolve_family_with_fallback(
+    let (family_name, fell_back, is_local) = super::shape::resolve_family_with_fallback(
         fonts,
         &raw_family_name,
         "Noto Sans",
@@ -70,6 +70,19 @@ pub(in crate::compile) fn resolve_text_families(
             "font.unresolved",
             format!(
                 "text node '{}': font family '{}' not available, falling back to 'Noto Sans'",
+                text.id, raw_family_name
+            ),
+            text.source_span,
+            Some(text.id.clone()),
+        ));
+    }
+    if is_local {
+        diagnostics.push(Diagnostic::advisory(
+            "font.local",
+            format!(
+                "text node '{}': font family '{}' resolved from a local/system font; rendering is \
+                 NOT guaranteed deterministic across machines — bundle the font or guarantee the \
+                 target OS provides it",
                 text.id, raw_family_name
             ),
             text.source_span,

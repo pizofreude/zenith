@@ -3,10 +3,15 @@
 use std::path::Path;
 use std::sync::Arc;
 
+use std::collections::BTreeSet;
+
 use zenith_core::{
-    AssetKind, BytesAssetProvider, BytesFontProvider, Diagnostic, Document, ImageNode, Node,
-    default_provider, dim_to_px,
+    AssetKind, BytesAssetProvider, BytesFontProvider, Diagnostic, Document, FontProvider,
+    FontSource, FontStyle, ImageNode, Node, TokenLiteral, TokenType, TokenValue, default_provider,
+    dim_to_px,
 };
+
+use crate::commands::fonts::os_font_dirs;
 
 use super::entry::RenderCmdErr;
 use super::pipeline::verify_locked_sha256;
@@ -35,10 +40,22 @@ pub(crate) fn build_font_provider(
     locked: bool,
 ) -> Result<BytesFontProvider, RenderCmdErr> {
     let mut provider = default_provider();
-    let dir = match project_dir {
-        Some(d) => d,
-        None => return Ok(provider),
-    };
+    if let Some(dir) = project_dir {
+        register_project_fonts(&mut provider, doc, dir, locked)?;
+    }
+    register_local_fonts(&mut provider, doc);
+    Ok(provider)
+}
+
+/// Register every `font`-kind project asset declared in `doc` into `provider`
+/// with [`FontSource::Project`]. Extracted from [`build_font_provider`] so the
+/// project pass and the local-system pass are clearly separated.
+fn register_project_fonts(
+    provider: &mut BytesFontProvider,
+    doc: &Document,
+    dir: &Path,
+    locked: bool,
+) -> Result<(), RenderCmdErr> {
     for decl in &doc.assets.assets {
         if decl.kind != AssetKind::Font {
             continue;
@@ -71,7 +88,7 @@ pub(crate) fn build_font_provider(
         let arc: Arc<[u8]> = Arc::from(bytes.as_slice());
         match zenith_layout::face_metadata(&arc, 0) {
             Ok(m) => {
-                provider.register(&m.family, m.weight, m.style, arc, 0);
+                provider.register(&m.family, m.weight, m.style, arc, 0, FontSource::Project);
             }
             Err(e) => {
                 if locked {
@@ -90,7 +107,77 @@ pub(crate) fn build_font_provider(
             }
         }
     }
-    Ok(provider)
+    Ok(())
+}
+
+/// Register machine-local/system fonts as a LAST-RESORT resolution source.
+///
+/// Scans the OS font directories ([`os_font_dirs`]) and registers each face with
+/// [`FontSource::Local`] — but ONLY when the provider does not already resolve
+/// that `(family, weight, style)`. Because bundled and project faces are
+/// registered first, this `is_none()` guard guarantees local fonts NEVER shadow
+/// a bundled or project face: a document that uses only bundled fonts resolves
+/// to exactly the same bytes as before this pass existed (the byte-identical
+/// invariant). A face that resolves from here later trips a `font.local`
+/// advisory at compile time.
+///
+/// Read failures are skipped silently (no panic, no hard error): a local font is
+/// a best-effort convenience, not a required asset.
+fn register_local_fonts(provider: &mut BytesFontProvider, doc: &Document) {
+    // Scanning the OS font directories reads and parses every installed font, so
+    // do it ONLY when the document actually needs a family that bundled/project
+    // fonts cannot satisfy. In a valid document every `font-family` reference
+    // resolves through a `fontFamily` token, so those token values are the
+    // complete set of families the document can request. A document using only
+    // bundled families never touches the filesystem here — keeping render fast
+    // and byte-identical.
+    let wanted: BTreeSet<String> = doc
+        .tokens
+        .tokens
+        .iter()
+        .filter(|t| t.token_type == TokenType::FontFamily)
+        .filter_map(|t| match &t.value {
+            TokenValue::Literal(TokenLiteral::String(s)) => Some(s.clone()),
+            _ => None,
+        })
+        .collect();
+    let needs_scan = wanted.iter().any(|fam| {
+        provider
+            .resolve(std::slice::from_ref(fam), 400, FontStyle::Normal)
+            .is_none()
+    });
+    if !needs_scan {
+        return;
+    }
+
+    for entry in zenith_core::scan_font_dirs(&os_font_dirs()) {
+        // Bundled/project ALWAYS win: only register a local face for a slot the
+        // provider cannot already satisfy. This preserves byte-identical output
+        // for documents whose families are covered by bundled/project fonts.
+        if provider
+            .resolve(
+                std::slice::from_ref(&entry.family),
+                entry.weight,
+                entry.style,
+            )
+            .is_some()
+        {
+            continue;
+        }
+        let bytes = match std::fs::read(&entry.path) {
+            Ok(b) => b,
+            Err(_) => continue,
+        };
+        let arc: Arc<[u8]> = Arc::from(bytes.as_slice());
+        provider.register(
+            &entry.family,
+            entry.weight,
+            entry.style,
+            arc,
+            entry.index,
+            FontSource::Local,
+        );
+    }
 }
 
 /// Build a [`BytesAssetProvider`] from a parsed document and the project

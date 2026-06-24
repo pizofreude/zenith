@@ -14,6 +14,24 @@ pub enum FontStyle {
     Italic,
 }
 
+/// Where a resolved font face came from, in resolution-priority order.
+///
+/// This is the provenance of a registered face. It drives the `font.local`
+/// advisory: a face resolved from [`FontSource::Local`] is sourced from the
+/// machine running the render, so the output is NOT guaranteed deterministic
+/// across machines. `Bundled` and `Project` faces travel with the engine /
+/// document and are portable.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FontSource {
+    /// Embedded in the engine binary (the bundled Noto faces). Fully portable.
+    Bundled,
+    /// Declared as a `font`-kind project asset and shipped with the document.
+    Project,
+    /// Discovered on the local/system font directories of the render machine.
+    /// Non-deterministic across machines — emits a `font.local` advisory.
+    Local,
+}
+
 /// Resolved font bytes ready for shaping or outlining. Cheap to clone (`Arc`).
 #[derive(Clone)]
 pub struct FontData {
@@ -23,6 +41,8 @@ pub struct FontData {
     pub bytes: Arc<[u8]>,
     /// Face index within a font collection (0 for single-face fonts).
     pub index: u32,
+    /// Provenance of this face (bundled / project / local-system).
+    pub source: FontSource,
 }
 
 impl std::fmt::Debug for FontData {
@@ -31,6 +51,7 @@ impl std::fmt::Debug for FontData {
             .field("id", &self.id)
             .field("bytes_len", &self.bytes.len())
             .field("index", &self.index)
+            .field("source", &self.source)
             .finish()
     }
 }
@@ -107,6 +128,10 @@ impl BytesFontProvider {
     /// when the base id is already taken by a *different* face, so every
     /// registered face keeps a unique id. Returns the assigned stable id as a
     /// convenience; callers may register purely for the side effect.
+    ///
+    /// `source` records the provenance of the face ([`FontSource`]); it is
+    /// carried on the resolved [`FontData`] so the compile stage can emit a
+    /// `font.local` advisory when a face resolves from the local system.
     pub fn register(
         &mut self,
         family: &str,
@@ -114,6 +139,7 @@ impl BytesFontProvider {
         style: FontStyle,
         bytes: Arc<[u8]>,
         index: u32,
+        source: FontSource,
     ) -> String {
         let family_lower = family.to_lowercase();
         let family_kebab = family_lower.replace(' ', "-");
@@ -148,6 +174,7 @@ impl BytesFontProvider {
             id: id.clone(),
             bytes,
             index,
+            source,
         };
 
         self.by_key.insert(key, data.clone());
@@ -240,12 +267,13 @@ pub fn default_provider() -> BytesFontProvider {
     let mono: Arc<[u8]> = Arc::from(super::embedded::NOTO_SANS_MONO_REGULAR);
     let mono_bold: Arc<[u8]> = Arc::from(super::embedded::NOTO_SANS_MONO_BOLD);
     let mut provider = BytesFontProvider::new();
-    provider.register("Noto Sans", 400, FontStyle::Normal, sans, 0);
-    provider.register("Noto Sans", 700, FontStyle::Normal, sans_bold, 0);
-    provider.register("Noto Sans", 400, FontStyle::Italic, sans_italic, 0);
-    provider.register("Noto Sans", 700, FontStyle::Italic, sans_bold_italic, 0);
-    provider.register("Noto Sans Mono", 400, FontStyle::Normal, mono, 0);
-    provider.register("Noto Sans Mono", 700, FontStyle::Normal, mono_bold, 0);
+    let b = FontSource::Bundled;
+    provider.register("Noto Sans", 400, FontStyle::Normal, sans, 0, b);
+    provider.register("Noto Sans", 700, FontStyle::Normal, sans_bold, 0, b);
+    provider.register("Noto Sans", 400, FontStyle::Italic, sans_italic, 0, b);
+    provider.register("Noto Sans", 700, FontStyle::Italic, sans_bold_italic, 0, b);
+    provider.register("Noto Sans Mono", 400, FontStyle::Normal, mono, 0, b);
+    provider.register("Noto Sans Mono", 700, FontStyle::Normal, mono_bold, 0, b);
     provider
 }
 
@@ -474,6 +502,7 @@ mod tests {
             FontStyle::Normal,
             dummy_bytes.clone(),
             0,
+            FontSource::Project,
         );
         assert_eq!(id, "test-family-400-normal");
 
@@ -486,7 +515,14 @@ mod tests {
     fn stable_id_format() {
         let mut p = BytesFontProvider::new();
         let bytes: Arc<[u8]> = Arc::from(vec![0u8; 4].as_slice());
-        let id = p.register("My Font", 700, FontStyle::Italic, bytes, 0);
+        let id = p.register(
+            "My Font",
+            700,
+            FontStyle::Italic,
+            bytes,
+            0,
+            FontSource::Local,
+        );
         assert_eq!(id, "my-font-700-italic");
     }
 
@@ -494,8 +530,22 @@ mod tests {
     fn re_registering_same_face_reuses_id() {
         let mut p = BytesFontProvider::new();
         let bytes: Arc<[u8]> = Arc::from(vec![1u8; 8].as_slice());
-        let id1 = p.register("Inter", 400, FontStyle::Normal, bytes.clone(), 0);
-        let id2 = p.register("Inter", 400, FontStyle::Normal, bytes, 0);
+        let id1 = p.register(
+            "Inter",
+            400,
+            FontStyle::Normal,
+            bytes.clone(),
+            0,
+            FontSource::Project,
+        );
+        let id2 = p.register(
+            "Inter",
+            400,
+            FontStyle::Normal,
+            bytes,
+            0,
+            FontSource::Project,
+        );
         assert_eq!(id1, id2, "same face re-registration keeps a stable id");
     }
 
@@ -506,12 +556,53 @@ mod tests {
         let mut p = BytesFontProvider::new();
         let a: Arc<[u8]> = Arc::from(vec![0xAAu8; 4].as_slice());
         let b: Arc<[u8]> = Arc::from(vec![0xBBu8; 4].as_slice());
-        let id_a = p.register("My Font", 400, FontStyle::Normal, a, 0);
-        let id_b = p.register("my-font", 400, FontStyle::Normal, b, 0);
+        let id_a = p.register("My Font", 400, FontStyle::Normal, a, 0, FontSource::Local);
+        let id_b = p.register("my-font", 400, FontStyle::Normal, b, 0, FontSource::Local);
         assert_eq!(id_a, "my-font-400-normal");
         assert_ne!(id_a, id_b, "colliding families must not share an id");
         // Both remain resolvable by their distinct ids, with their own bytes.
         assert_eq!(p.by_id(&id_a).unwrap().bytes[0], 0xAA);
         assert_eq!(p.by_id(&id_b).unwrap().bytes[0], 0xBB);
+    }
+
+    #[test]
+    fn resolve_carries_registered_source() {
+        // A face registered as Local resolves with source == Local; a bundled
+        // face resolves with source == Bundled. This provenance drives the
+        // `font.local` advisory at compile time.
+        let mut p = BytesFontProvider::new();
+        let bytes: Arc<[u8]> = Arc::from(vec![0u8; 8].as_slice());
+        p.register(
+            "Local Face",
+            400,
+            FontStyle::Normal,
+            bytes,
+            0,
+            FontSource::Local,
+        );
+        let local = p
+            .resolve(&["Local Face".to_string()], 400, FontStyle::Normal)
+            .expect("local face resolves");
+        assert_eq!(local.source, FontSource::Local);
+
+        let bundled = default_provider()
+            .resolve(&["Noto Sans".to_string()], 400, FontStyle::Normal)
+            .expect("bundled face resolves");
+        assert_eq!(bundled.source, FontSource::Bundled);
+    }
+
+    #[test]
+    fn default_provider_faces_are_all_bundled() {
+        // Every face the default provider exposes must be Bundled — the
+        // byte-identical-when-bundled invariant relies on this.
+        let p = default_provider();
+        for face in p.all_faces() {
+            assert_eq!(
+                face.source,
+                FontSource::Bundled,
+                "default provider face {} must be Bundled",
+                face.id
+            );
+        }
     }
 }

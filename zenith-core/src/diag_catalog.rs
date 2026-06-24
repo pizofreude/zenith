@@ -239,6 +239,11 @@ pub const DIAGNOSTIC_CODES: &[DiagnosticCodeInfo] = &[
         "Text contains character(s) with no glyph in any registered font.",
     ),
     info(
+        "font.local",
+        Severity::Advisory,
+        "A font resolved from a local/system source; rendering is not deterministic across machines.",
+    ),
+    info(
         "font.unresolved",
         Severity::Advisory,
         "A text/code node's font family is unavailable; falling back to a default.",
@@ -696,5 +701,11 @@ mod tests {
             glyph_missing.is_governable(),
             "font.glyph_missing must be governable"
         );
+
+        // `font.local` must be a governable Advisory so `deny "font.local"` can
+        // gate CI renders that resolved a machine-local font.
+        let local = lookup("font.local").expect("font.local must be catalogued");
+        assert_eq!(local.severity, Severity::Advisory);
+        assert!(local.is_governable(), "font.local must be governable");
     }
 }

@@ -40,7 +40,10 @@ pub use color::{
 };
 pub use diagnostics::{Diagnostic, Severity};
 pub use error::{FormatError, ParseError, ParseErrorCode};
-pub use font::{BytesFontProvider, FontData, FontProvider, FontStyle, default_provider};
+pub use font::{
+    BytesFontProvider, FontData, FontProvider, FontSource, FontStyle, LocalFontEntry,
+    default_provider, scan_font_dirs,
+};
 pub use parse::{KdlAdapter, KdlSource, parse_diagnostic_policy};
 pub use tokens::{
     HighlightToken, ResolvedFilter, ResolvedFilterOp, ResolvedGradient, ResolvedMask,

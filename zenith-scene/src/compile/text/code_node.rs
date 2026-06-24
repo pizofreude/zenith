@@ -153,7 +153,7 @@ pub(in crate::compile) fn compile_code(
     let raw_family_name = resolve_font_family_name(font_family_prop, resolved, "Noto Sans Mono");
     // Probe the provider before shaping to avoid silently dropping lines
     // when the requested mono family is unregistered.
-    let (family_name, fell_back) = resolve_family_with_fallback(
+    let (family_name, fell_back, is_local) = resolve_family_with_fallback(
         fonts,
         &raw_family_name,
         "Noto Sans Mono",
@@ -165,6 +165,19 @@ pub(in crate::compile) fn compile_code(
             "font.unresolved",
             format!(
                 "code node '{}': font family '{}' not available, falling back to 'Noto Sans Mono'",
+                code.id, raw_family_name
+            ),
+            code.source_span,
+            Some(code.id.clone()),
+        ));
+    }
+    if is_local {
+        diagnostics.push(Diagnostic::advisory(
+            "font.local",
+            format!(
+                "code node '{}': font family '{}' resolved from a local/system font; rendering is \
+                 NOT guaranteed deterministic across machines — bundle the font or guarantee the \
+                 target OS provides it",
                 code.id, raw_family_name
             ),
             code.source_span,

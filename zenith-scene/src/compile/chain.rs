@@ -174,13 +174,26 @@ fn resolve_chain_style(
         .as_ref()
         .or_else(|| style_prop(&source.style, style_map, "font-family"));
     let raw_family_name = resolve_font_family_name(font_family_prop, resolved, "Noto Sans");
-    let (family_name, fell_back) =
+    let (family_name, fell_back, is_local) =
         resolve_family_with_fallback(fonts, &raw_family_name, "Noto Sans", 400, FontStyle::Normal);
     if fell_back {
         diagnostics.push(Diagnostic::advisory(
             "font.unresolved",
             format!(
                 "text node '{}': font family '{}' not available, falling back to 'Noto Sans'",
+                source.id, raw_family_name
+            ),
+            source.source_span,
+            Some(source.id.clone()),
+        ));
+    }
+    if is_local {
+        diagnostics.push(Diagnostic::advisory(
+            "font.local",
+            format!(
+                "text node '{}': font family '{}' resolved from a local/system font; rendering is \
+                 NOT guaranteed deterministic across machines — bundle the font or guarantee the \
+                 target OS provides it",
                 source.id, raw_family_name
             ),
             source.source_span,
