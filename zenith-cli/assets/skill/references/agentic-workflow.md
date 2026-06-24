@@ -22,13 +22,13 @@ back to intent:
 
 ## 2. Scratch experiments (don't pollute the final)
 
-Zenith has no first-class "scratch" page role yet, so use a **naming + page convention**:
+Tag experiment pages with the page **`workspace-role`** metadata field (free-form, e.g.
+`workspace-role="scratch"`) plus a clear naming convention (`zenith schema page` lists the fields):
 
 - Final pages: `page.<name>` (e.g. `page.hero`).
-- Experiments: `page.scratch.<topic>.<NN>` (e.g. `page.scratch.bg.01`).
-- Keep experiments in a separate working copy or clearly-named pages, render them, and delete
-  the losers before final export. Nothing in a `scratch.*` page should reach the deliverable
-  unless you deliberately promote it (step 5).
+- Experiments: `page.scratch.<topic>.<NN>` (e.g. `page.scratch.bg.01`), tagged `workspace-role="scratch"`.
+- Keep experiments clearly tagged, render them, and delete the losers before final export. Nothing
+  in a scratch page should reach the deliverable unless you deliberately promote it (step 5).
 
 ## 3. Generate multiple candidates from one plan
 
@@ -36,8 +36,11 @@ Explore directions instead of committing to the first idea:
 
 - Create several candidate pages (`page.scratch.bg.01/02/03`), each a different take on the
   _same_ plan and palette tokens.
-- Because there is no candidate-set metadata yet, record the variant intent and any
-  generation parameters/seed in a `note` on each page so the choice is replayable.
+- Track each candidate's lifecycle on the page itself: **`candidate-status`** (`"draft"` →
+  `"selected"`/`"rejected"`; other values warn via `page.invalid_candidate_status`), point the
+  winner at its destination with **`promotion-target`** (the final page id/label), and record the
+  variant intent, seed, or cleanup intent in **`notes`** / **`cleanup-policy`** so the choice is
+  replayable. (`zenith schema page` lists these fields.)
 - Keep all candidates referencing the **same tokens** so a later palette change is one edit.
 
 ## 4. Render-preview and self-critique
@@ -104,7 +107,9 @@ which is why steps 1–3 insist on ids, tokens, and groups.
 
 ## Known gaps (do not pretend these exist)
 
-These are on the roadmap but **not** implemented; do not generate source that assumes them:
-first-class scratch/candidate roles, a `promote_candidate` op, a source-level recipe/seed
-model, brush/stamp definitions, a built-in critique report, and structured run-log provenance.
-Use the conventions above with today's primitives until the engine ships these.
+The page workflow-metadata fields above (`workspace-role`, `candidate-status`, `promotion-target`,
+`notes`, `cleanup-policy`) are recorded and validated, but the engine does **not act** on them yet:
+there is no automated `promote_candidate`/cleanup transaction op — promotion and deletion are still
+manual (step 5). Also **not** implemented; do not generate source that assumes them: brush/stamp
+definitions, a built-in critique report, and structured run-log provenance. Use the conventions
+above with today's primitives until the engine ships these.

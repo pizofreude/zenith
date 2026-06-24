@@ -299,7 +299,9 @@ pub enum ThemeSub {
 /// Arguments for `zenith theme new`.
 #[derive(Debug, Args)]
 #[command(after_help = "EXAMPLE:\n  \
-zenith theme new acme --scheme light --primary '#3b5bdb' --accent '#f76707' --out acme.zen")]
+zenith theme new acme --scheme light --primary '#3b5bdb' --accent '#f76707' --out acme.zen\n\n\
+NOTE: quote every hex value — a bare # starts a comment in most shells, so an\n  \
+unquoted --primary #3b5bdb is silently dropped and reads as a missing value.")]
 pub struct ThemeNewArgs {
     /// Theme name (used in ids and the preview title), e.g. `acme`.
     pub name: String,
@@ -308,7 +310,10 @@ pub struct ThemeNewArgs {
     #[arg(long, value_name = "light|dark")]
     pub scheme: String,
 
-    /// Primary brand colour as `#rrggbb`.
+    /// Primary brand colour as `#rrggbb`. Quote it: most shells treat a bare
+    /// `#` as the start of a comment, so write `--primary '#3b5bdb'` (or
+    /// `"#3b5bdb"`) — an unquoted `#3b5bdb` is dropped and this flag will
+    /// appear to have no value.
     #[arg(long, value_name = "HEX")]
     pub primary: String,
 
