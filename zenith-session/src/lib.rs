@@ -6,6 +6,7 @@
 //! # Module layout
 //!
 //! - [`adapter`] — injectable trait boundaries (filesystem, clock, RNG)
+//! - [`bundle`] — deterministic DEFLATE bundle/unbundle for portable transfer
 //! - [`datadir`] — platform data-directory resolution
 //! - [`docid`] — ULID document-identity minting
 //! - [`error`] — [`SessionError`] (the single error type for this crate)
@@ -24,6 +25,7 @@
 //! - [`tier2`] — Tier-2 durable version history: bounded flat list in `versions.jsonl`
 
 pub mod adapter;
+pub mod bundle;
 pub mod datadir;
 pub mod docid;
 pub mod error;
@@ -41,6 +43,7 @@ pub mod session;
 pub mod store;
 pub mod tier2;
 
+pub use bundle::{bundle, unbundle};
 pub use datadir::{resolve_data_dir, resolve_data_dir_with};
 pub use docid::mint_ulid;
 pub use error::SessionError;

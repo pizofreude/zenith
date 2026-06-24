@@ -1,5 +1,6 @@
 //! Integration tests for `zenith workspace scratch`, `zenith workspace candidate`,
-//! and `zenith workspace promote`.
+//! `zenith workspace promote`, `zenith workspace bundle`, and
+//! `zenith workspace unbundle`.
 //!
 //! Uses the `_in` variants of the command functions so that a tempdir-rooted
 //! `StorePaths` is passed explicitly — no real data directory is touched and
@@ -9,7 +10,8 @@
 use tempfile::TempDir;
 use zenith_cli::cli::ScratchNewArgs;
 use zenith_cli::commands::workspace::{
-    candidate_set_status_in, promote_in, scratch_list_in, scratch_new_in, scratch_show_in,
+    bundle_doc_in, candidate_set_status_in, promote_in, scratch_list_in, scratch_new_in,
+    scratch_show_in, unbundle_doc_in,
 };
 use zenith_session::StorePaths;
 
@@ -436,5 +438,85 @@ fn promote_missing_target_page_errors() {
     assert!(
         msg.contains("page.does-not-exist"),
         "error must mention the missing page id; got: {msg}"
+    );
+}
+
+// ── Bundle / unbundle tests ───────────────────────────────────────────────────
+
+#[test]
+fn bundle_unbundle_roundtrip_through_cli_fns() {
+    let (_tmp, paths, doc_path) = setup();
+
+    // Record a scratch candidate so the store has content worth bundling.
+    scratch_new_in(
+        &paths,
+        FIXTURE.as_bytes(),
+        &doc_path,
+        &new_args(
+            &doc_path,
+            None,
+            "draft",
+            Some("bundle-test"),
+            None,
+            None,
+            None,
+        ),
+    )
+    .unwrap();
+
+    // Bundle the doc into a temp file.
+    let bundle_file = _tmp.path().join("test.zenithbundle");
+    let confirm = bundle_doc_in(&paths, &doc_path, &bundle_file).unwrap();
+    assert!(
+        confirm.contains(DOC_ID),
+        "confirmation must contain doc_id; got: {confirm}"
+    );
+    assert!(bundle_file.exists(), "bundle file must exist on disk");
+
+    // Unbundle into a completely fresh store root.
+    let tmp2 = TempDir::new().unwrap();
+    let paths2 = StorePaths::new(tmp2.path());
+    let restored_id = unbundle_doc_in(&paths2, &bundle_file).unwrap();
+    assert_eq!(restored_id, DOC_ID, "restored doc_id must match original");
+
+    // The scratch candidate list must be accessible in the fresh store.
+    let out = scratch_list_in(&paths2, &doc_path, false).unwrap();
+    assert!(
+        out.contains("cand0"),
+        "fresh store must contain the bundled candidate; got: {out}"
+    );
+}
+
+#[test]
+fn bundle_missing_doc_errors() {
+    let tmp = TempDir::new().unwrap();
+    let paths = StorePaths::new(tmp.path());
+    // Create a doc_path that has a doc-id but whose store directory was never created.
+    let doc_path = tmp.path().join("ghost.zen");
+    std::fs::write(&doc_path, FIXTURE).unwrap();
+
+    let bundle_file = tmp.path().join("ghost.zenithbundle");
+    let result = bundle_doc_in(&paths, &doc_path, &bundle_file);
+    assert!(result.is_err(), "bundling a non-existent store must error");
+    let msg = result.unwrap_err();
+    assert!(
+        msg.contains(DOC_ID),
+        "error must mention the doc_id; got: {msg}"
+    );
+}
+
+#[test]
+fn unbundle_bad_file_errors() {
+    let tmp = TempDir::new().unwrap();
+    let paths = StorePaths::new(tmp.path());
+    let bad_file = tmp.path().join("bad.zenithbundle");
+    std::fs::write(&bad_file, b"not-a-bundle").unwrap();
+
+    let result = unbundle_doc_in(&paths, &bad_file);
+    assert!(result.is_err(), "bad bundle file must error");
+    let msg = result.unwrap_err();
+    assert!(
+        msg.contains("magic"),
+        "error must mention 'magic'; got: {msg}"
     );
 }

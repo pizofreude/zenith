@@ -32,6 +32,39 @@ pub enum WorkspaceSub {
     /// version history. The candidate must have status `selected`; use
     /// `zenith workspace candidate` to transition it first.
     Promote(PromoteArgs),
+
+    /// Pack a document's entire session store into a portable `.zenithbundle` file.
+    ///
+    /// The bundle is a deterministic, C-free DEFLATE archive containing every
+    /// object, version record, run log, scratch candidate, and metadata file
+    /// for the document. Same store bytes in → same bundle bytes out.
+    Bundle(BundleArgs),
+
+    /// Restore a document's session store from a `.zenithbundle` file.
+    ///
+    /// Extracts the bundle into the default store directory and prints the
+    /// restored doc-id.
+    Unbundle(UnbundleArgs),
+}
+
+/// Arguments for `zenith workspace bundle`.
+#[derive(Debug, Args)]
+#[command(after_help = "EXAMPLE:\n  zenith workspace bundle poster.zen --out poster.zenithbundle")]
+pub struct BundleArgs {
+    /// Path to the `.zen` document whose store to bundle.
+    pub doc: PathBuf,
+
+    /// Output path for the `.zenithbundle` file.
+    #[arg(long)]
+    pub out: PathBuf,
+}
+
+/// Arguments for `zenith workspace unbundle`.
+#[derive(Debug, Args)]
+#[command(after_help = "EXAMPLE:\n  zenith workspace unbundle poster.zenithbundle")]
+pub struct UnbundleArgs {
+    /// Path to the `.zenithbundle` file to restore.
+    pub bundle: PathBuf,
 }
 
 /// Arguments for `zenith workspace scratch`.
