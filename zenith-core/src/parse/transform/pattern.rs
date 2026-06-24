@@ -74,6 +74,10 @@ const PATTERN_KNOWN_PROPS: &[&str] = &[
     "anchor_zone",
     "anchor-sibling",
     "anchor_sibling",
+    "anchor-edge",
+    "anchor_edge",
+    "anchor-gap",
+    "anchor_gap",
     "anchor-parent",
     "anchor_parent",
     "kind",
@@ -172,6 +176,11 @@ pub(super) fn transform_pattern(node: &KdlNode) -> Result<PatternNode, ParseErro
         anchor_sibling: optional_string_prop(node, "anchor-sibling")
             .or_else(|| optional_string_prop(node, "anchor_sibling"))
             .map(str::to_owned),
+        anchor_edge: optional_string_prop(node, "anchor-edge")
+            .or_else(|| optional_string_prop(node, "anchor_edge"))
+            .map(str::to_owned),
+        anchor_gap: optional_dimension_prop(node, "anchor-gap")
+            .or_else(|| optional_dimension_prop(node, "anchor_gap")),
         anchor_parent: optional_bool_prop(node, "anchor-parent")
             .or_else(|| optional_bool_prop(node, "anchor_parent")),
         kind,

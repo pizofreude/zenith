@@ -144,6 +144,8 @@ fn synth_footnote_text(fnote: &FootnoteNode, marker: &str, x: f64, y: f64, w: f6
         anchor: None,
         anchor_zone: None,
         anchor_sibling: None,
+        anchor_edge: None,
+        anchor_gap: None,
         anchor_parent: None,
         spans,
         source_span: fnote.source_span,

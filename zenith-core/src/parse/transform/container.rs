@@ -41,6 +41,10 @@ const FRAME_KNOWN_PROPS: &[&str] = &[
     "anchor_zone",
     "anchor-sibling",
     "anchor_sibling",
+    "anchor-edge",
+    "anchor_edge",
+    "anchor-gap",
+    "anchor_gap",
     "anchor-parent",
     "anchor_parent",
 ];
@@ -76,6 +80,11 @@ pub(super) fn transform_frame(node: &KdlNode) -> Result<FrameNode, ParseError> {
         anchor_sibling: optional_string_prop(node, "anchor-sibling")
             .or_else(|| optional_string_prop(node, "anchor_sibling"))
             .map(str::to_owned),
+        anchor_edge: optional_string_prop(node, "anchor-edge")
+            .or_else(|| optional_string_prop(node, "anchor_edge"))
+            .map(str::to_owned),
+        anchor_gap: optional_dimension_prop(node, "anchor-gap")
+            .or_else(|| optional_dimension_prop(node, "anchor_gap")),
         anchor_parent: optional_bool_prop(node, "anchor-parent")
             .or_else(|| optional_bool_prop(node, "anchor_parent")),
         source_span: node_span(node),
@@ -104,6 +113,10 @@ const GROUP_KNOWN_PROPS: &[&str] = &[
     "anchor_zone",
     "anchor-sibling",
     "anchor_sibling",
+    "anchor-edge",
+    "anchor_edge",
+    "anchor-gap",
+    "anchor_gap",
     "anchor-parent",
     "anchor_parent",
 ];
@@ -137,6 +150,11 @@ pub(super) fn transform_group(node: &KdlNode) -> Result<GroupNode, ParseError> {
         anchor_sibling: optional_string_prop(node, "anchor-sibling")
             .or_else(|| optional_string_prop(node, "anchor_sibling"))
             .map(str::to_owned),
+        anchor_edge: optional_string_prop(node, "anchor-edge")
+            .or_else(|| optional_string_prop(node, "anchor_edge"))
+            .map(str::to_owned),
+        anchor_gap: optional_dimension_prop(node, "anchor-gap")
+            .or_else(|| optional_dimension_prop(node, "anchor_gap")),
         anchor_parent: optional_bool_prop(node, "anchor-parent")
             .or_else(|| optional_bool_prop(node, "anchor_parent")),
         source_span: node_span(node),
@@ -199,6 +217,10 @@ const TABLE_KNOWN_PROPS: &[&str] = &[
     "anchor_zone",
     "anchor-sibling",
     "anchor_sibling",
+    "anchor-edge",
+    "anchor_edge",
+    "anchor-gap",
+    "anchor_gap",
     "anchor-parent",
     "anchor_parent",
 ];
@@ -301,6 +323,11 @@ pub(super) fn transform_table(node: &KdlNode) -> Result<TableNode, ParseError> {
         anchor_sibling: optional_string_prop(node, "anchor-sibling")
             .or_else(|| optional_string_prop(node, "anchor_sibling"))
             .map(str::to_owned),
+        anchor_edge: optional_string_prop(node, "anchor-edge")
+            .or_else(|| optional_string_prop(node, "anchor_edge"))
+            .map(str::to_owned),
+        anchor_gap: optional_dimension_prop(node, "anchor-gap")
+            .or_else(|| optional_dimension_prop(node, "anchor_gap")),
         anchor_parent: optional_bool_prop(node, "anchor-parent")
             .or_else(|| optional_bool_prop(node, "anchor_parent")),
         source_span: node_span(node),

@@ -67,6 +67,12 @@ pub struct ShapeNode {
     /// Optional sibling node id for sibling-relative anchor positioning.
     /// See [`RectNode::anchor_sibling`](super::RectNode::anchor_sibling).
     pub anchor_sibling: Option<String>,
+    /// Adjacent-placement edge relative to `anchor-sibling`: `above`/`below`/`before`/`after`.
+    /// See [`RectNode::anchor_edge`](super::RectNode::anchor_edge).
+    pub anchor_edge: Option<String>,
+    /// Gap (px) between this node and its `anchor-sibling` edge when `anchor-edge` is set.
+    /// See [`RectNode::anchor_gap`](super::RectNode::anchor_gap).
+    pub anchor_gap: Option<Dimension>,
     /// Parent-relative anchor toggle. See [`RectNode::anchor_parent`](super::RectNode::anchor_parent).
     pub anchor_parent: Option<bool>,
     /// Source declaration span, when available.
@@ -272,6 +278,12 @@ pub struct FieldNode {
     /// Optional sibling node id for sibling-relative anchor positioning.
     /// See [`RectNode::anchor_sibling`](super::RectNode::anchor_sibling).
     pub anchor_sibling: Option<String>,
+    /// Adjacent-placement edge relative to `anchor-sibling`: `above`/`below`/`before`/`after`.
+    /// See [`RectNode::anchor_edge`](super::RectNode::anchor_edge).
+    pub anchor_edge: Option<String>,
+    /// Gap (px) between this node and its `anchor-sibling` edge when `anchor-edge` is set.
+    /// See [`RectNode::anchor_gap`](super::RectNode::anchor_gap).
+    pub anchor_gap: Option<Dimension>,
     /// Parent-relative anchor toggle. See [`RectNode::anchor_parent`](super::RectNode::anchor_parent).
     pub anchor_parent: Option<bool>,
     /// Source declaration span, when available.
@@ -369,6 +381,12 @@ pub struct TocNode {
     /// Optional sibling node id for sibling-relative anchor positioning.
     /// See [`RectNode::anchor_sibling`](super::RectNode::anchor_sibling).
     pub anchor_sibling: Option<String>,
+    /// Adjacent-placement edge relative to `anchor-sibling`: `above`/`below`/`before`/`after`.
+    /// See [`RectNode::anchor_edge`](super::RectNode::anchor_edge).
+    pub anchor_edge: Option<String>,
+    /// Gap (px) between this node and its `anchor-sibling` edge when `anchor-edge` is set.
+    /// See [`RectNode::anchor_gap`](super::RectNode::anchor_gap).
+    pub anchor_gap: Option<Dimension>,
     /// Parent-relative anchor toggle. See [`RectNode::anchor_parent`](super::RectNode::anchor_parent).
     pub anchor_parent: Option<bool>,
     /// Source declaration span, when available.

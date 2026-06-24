@@ -26,6 +26,8 @@ pub(super) fn write_frame(f: &FrameNode, out: &mut String, depth: usize) {
     write_opt_str(out, "anchor", &f.anchor);
     write_opt_str(out, "anchor-zone", &f.anchor_zone);
     write_opt_str(out, "anchor-sibling", &f.anchor_sibling);
+    write_opt_str(out, "anchor-edge", &f.anchor_edge);
+    write_opt_dimension(out, "anchor-gap", &f.anchor_gap);
     write_opt_bool(out, "anchor-parent", &f.anchor_parent);
     write_opt_dimension(out, "x", &f.x);
     write_opt_dimension(out, "y", &f.y);
@@ -74,6 +76,8 @@ pub(super) fn write_group(g: &GroupNode, out: &mut String, depth: usize) {
     write_opt_str(out, "anchor", &g.anchor);
     write_opt_str(out, "anchor-zone", &g.anchor_zone);
     write_opt_str(out, "anchor-sibling", &g.anchor_sibling);
+    write_opt_str(out, "anchor-edge", &g.anchor_edge);
+    write_opt_dimension(out, "anchor-gap", &g.anchor_gap);
     write_opt_bool(out, "anchor-parent", &g.anchor_parent);
     write_opt_dimension(out, "x", &g.x);
     write_opt_dimension(out, "y", &g.y);
@@ -117,6 +121,8 @@ pub(super) fn write_table(t: &TableNode, out: &mut String, depth: usize) {
     write_opt_str(out, "anchor", &t.anchor);
     write_opt_str(out, "anchor-zone", &t.anchor_zone);
     write_opt_str(out, "anchor-sibling", &t.anchor_sibling);
+    write_opt_str(out, "anchor-edge", &t.anchor_edge);
+    write_opt_dimension(out, "anchor-gap", &t.anchor_gap);
     write_opt_bool(out, "anchor-parent", &t.anchor_parent);
     write_opt_dimension(out, "x", &t.x);
     write_opt_dimension(out, "y", &t.y);

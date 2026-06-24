@@ -30,6 +30,8 @@ pub(super) fn write_rect(r: &RectNode, out: &mut String, depth: usize) {
     write_opt_str(out, "anchor", &r.anchor);
     write_opt_str(out, "anchor-zone", &r.anchor_zone);
     write_opt_str(out, "anchor-sibling", &r.anchor_sibling);
+    write_opt_str(out, "anchor-edge", &r.anchor_edge);
+    write_opt_dimension(out, "anchor-gap", &r.anchor_gap);
     write_opt_bool(out, "anchor-parent", &r.anchor_parent);
     write_opt_dimension(out, "x", &r.x);
     write_opt_dimension(out, "y", &r.y);
@@ -92,6 +94,8 @@ pub(super) fn write_image(i: &ImageNode, out: &mut String, depth: usize) {
     write_opt_str(out, "anchor", &i.anchor);
     write_opt_str(out, "anchor-zone", &i.anchor_zone);
     write_opt_str(out, "anchor-sibling", &i.anchor_sibling);
+    write_opt_str(out, "anchor-edge", &i.anchor_edge);
+    write_opt_dimension(out, "anchor-gap", &i.anchor_gap);
     write_opt_bool(out, "anchor-parent", &i.anchor_parent);
     out.push_str(" asset=\"");
     out.push_str(&i.asset);
@@ -146,6 +150,8 @@ pub(super) fn write_ellipse(e: &EllipseNode, out: &mut String, depth: usize) {
     write_opt_str(out, "anchor", &e.anchor);
     write_opt_str(out, "anchor-zone", &e.anchor_zone);
     write_opt_str(out, "anchor-sibling", &e.anchor_sibling);
+    write_opt_str(out, "anchor-edge", &e.anchor_edge);
+    write_opt_dimension(out, "anchor-gap", &e.anchor_gap);
     write_opt_bool(out, "anchor-parent", &e.anchor_parent);
     write_opt_dimension(out, "x", &e.x);
     write_opt_dimension(out, "y", &e.y);
@@ -232,6 +238,8 @@ pub(super) fn write_text(t: &TextNode, out: &mut String, depth: usize) {
     write_opt_str(out, "anchor", &t.anchor);
     write_opt_str(out, "anchor-zone", &t.anchor_zone);
     write_opt_str(out, "anchor-sibling", &t.anchor_sibling);
+    write_opt_str(out, "anchor-edge", &t.anchor_edge);
+    write_opt_dimension(out, "anchor-gap", &t.anchor_gap);
     write_opt_bool(out, "anchor-parent", &t.anchor_parent);
     write_opt_dimension(out, "x", &t.x);
     write_opt_dimension(out, "y", &t.y);
@@ -307,6 +315,8 @@ pub(super) fn write_code(c: &CodeNode, out: &mut String, depth: usize) {
     write_opt_str(out, "anchor", &c.anchor);
     write_opt_str(out, "anchor-zone", &c.anchor_zone);
     write_opt_str(out, "anchor-sibling", &c.anchor_sibling);
+    write_opt_str(out, "anchor-edge", &c.anchor_edge);
+    write_opt_dimension(out, "anchor-gap", &c.anchor_gap);
     write_opt_bool(out, "anchor-parent", &c.anchor_parent);
     write_opt_dimension(out, "x", &c.x);
     write_opt_dimension(out, "y", &c.y);
@@ -445,6 +455,8 @@ pub(super) fn write_pattern(p: &PatternNode, out: &mut String, depth: usize) {
     write_opt_str(out, "anchor", &p.anchor);
     write_opt_str(out, "anchor-zone", &p.anchor_zone);
     write_opt_str(out, "anchor-sibling", &p.anchor_sibling);
+    write_opt_str(out, "anchor-edge", &p.anchor_edge);
+    write_opt_dimension(out, "anchor-gap", &p.anchor_gap);
     write_opt_bool(out, "anchor-parent", &p.anchor_parent);
     write_opt_dimension(out, "x", &p.x);
     write_opt_dimension(out, "y", &p.y);

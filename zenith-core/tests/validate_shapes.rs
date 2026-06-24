@@ -784,6 +784,8 @@ fn minimal_shape(id: &str, kind: Option<&str>, h_align: Option<&str>) -> Node {
         anchor: None,
         anchor_zone: None,
         anchor_sibling: None,
+        anchor_edge: None,
+        anchor_gap: None,
         anchor_parent: None,
         source_span: None,
         unknown_props: BTreeMap::new(),

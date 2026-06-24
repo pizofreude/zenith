@@ -46,6 +46,10 @@ const SHAPE_KNOWN_PROPS: &[&str] = &[
     "anchor_zone",
     "anchor-sibling",
     "anchor_sibling",
+    "anchor-edge",
+    "anchor_edge",
+    "anchor-gap",
+    "anchor_gap",
     "anchor-parent",
     "anchor_parent",
 ];
@@ -101,6 +105,11 @@ pub(super) fn transform_shape(node: &KdlNode) -> Result<ShapeNode, ParseError> {
         anchor_sibling: optional_string_prop(node, "anchor-sibling")
             .or_else(|| optional_string_prop(node, "anchor_sibling"))
             .map(str::to_owned),
+        anchor_edge: optional_string_prop(node, "anchor-edge")
+            .or_else(|| optional_string_prop(node, "anchor_edge"))
+            .map(str::to_owned),
+        anchor_gap: optional_dimension_prop(node, "anchor-gap")
+            .or_else(|| optional_dimension_prop(node, "anchor_gap")),
         anchor_parent: optional_bool_prop(node, "anchor-parent")
             .or_else(|| optional_bool_prop(node, "anchor_parent")),
         source_span: node_span(node),
@@ -194,6 +203,10 @@ const FIELD_KNOWN_PROPS: &[&str] = &[
     "anchor_zone",
     "anchor-sibling",
     "anchor_sibling",
+    "anchor-edge",
+    "anchor_edge",
+    "anchor-gap",
+    "anchor_gap",
     "anchor-parent",
     "anchor_parent",
 ];
@@ -246,6 +259,11 @@ pub(super) fn transform_field(node: &KdlNode) -> Result<FieldNode, ParseError> {
         anchor_sibling: optional_string_prop(node, "anchor-sibling")
             .or_else(|| optional_string_prop(node, "anchor_sibling"))
             .map(str::to_owned),
+        anchor_edge: optional_string_prop(node, "anchor-edge")
+            .or_else(|| optional_string_prop(node, "anchor_edge"))
+            .map(str::to_owned),
+        anchor_gap: optional_dimension_prop(node, "anchor-gap")
+            .or_else(|| optional_dimension_prop(node, "anchor_gap")),
         anchor_parent: optional_bool_prop(node, "anchor-parent")
             .or_else(|| optional_bool_prop(node, "anchor_parent")),
         source_span: node_span(node),
@@ -282,6 +300,10 @@ const TOC_KNOWN_PROPS: &[&str] = &[
     "anchor_zone",
     "anchor-sibling",
     "anchor_sibling",
+    "anchor-edge",
+    "anchor_edge",
+    "anchor-gap",
+    "anchor_gap",
     "anchor-parent",
     "anchor_parent",
 ];
@@ -335,6 +357,11 @@ pub(super) fn transform_toc(node: &KdlNode) -> Result<TocNode, ParseError> {
         anchor_sibling: optional_string_prop(node, "anchor-sibling")
             .or_else(|| optional_string_prop(node, "anchor_sibling"))
             .map(str::to_owned),
+        anchor_edge: optional_string_prop(node, "anchor-edge")
+            .or_else(|| optional_string_prop(node, "anchor_edge"))
+            .map(str::to_owned),
+        anchor_gap: optional_dimension_prop(node, "anchor-gap")
+            .or_else(|| optional_dimension_prop(node, "anchor_gap")),
         anchor_parent: optional_bool_prop(node, "anchor-parent")
             .or_else(|| optional_bool_prop(node, "anchor_parent")),
         source_span: node_span(node),

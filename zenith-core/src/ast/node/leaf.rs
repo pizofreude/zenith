@@ -80,6 +80,12 @@ pub struct ImageNode {
     /// Optional sibling node id for sibling-relative anchor positioning.
     /// See [`RectNode::anchor_sibling`].
     pub anchor_sibling: Option<String>,
+    /// Adjacent-placement edge relative to `anchor-sibling`: `above`/`below`/`before`/`after`.
+    /// See [`RectNode::anchor_edge`].
+    pub anchor_edge: Option<String>,
+    /// Gap (px) between this node and its `anchor-sibling` edge when `anchor-edge` is set.
+    /// See [`RectNode::anchor_gap`].
+    pub anchor_gap: Option<Dimension>,
     /// Parent-relative anchor toggle. See [`RectNode::anchor_parent`].
     pub anchor_parent: Option<bool>,
     /// Source declaration span, when available.
@@ -170,6 +176,13 @@ pub struct RectNode {
     /// Requires `anchor` to be set; `anchor_sibling` without `anchor` has no
     /// effect and triggers an `anchor.sibling_without_anchor` warning.
     pub anchor_sibling: Option<String>,
+    /// Adjacent-placement edge relative to `anchor-sibling`: `above`/`below`/`before`/`after`.
+    /// When `Some`, positions this node's corresponding edge flush to the named
+    /// edge of `anchor-sibling`. Requires `anchor-sibling` to be set.
+    pub anchor_edge: Option<String>,
+    /// Gap (px) between this node and its `anchor-sibling` edge when `anchor-edge` is set.
+    /// A positive value pushes the node away from the sibling; negative pulls it closer.
+    pub anchor_gap: Option<Dimension>,
     /// Parent-relative anchor toggle. When `Some(true)` AND a recognized
     /// `anchor` is present (and `anchor_zone` is absent), the `anchor` is
     /// resolved relative to this node's DIRECT PARENT CONTAINER's box (a frame
@@ -277,6 +290,12 @@ pub struct EllipseNode {
     /// Optional sibling node id for sibling-relative anchor positioning.
     /// See [`RectNode::anchor_sibling`].
     pub anchor_sibling: Option<String>,
+    /// Adjacent-placement edge relative to `anchor-sibling`: `above`/`below`/`before`/`after`.
+    /// See [`RectNode::anchor_edge`].
+    pub anchor_edge: Option<String>,
+    /// Gap (px) between this node and its `anchor-sibling` edge when `anchor-edge` is set.
+    /// See [`RectNode::anchor_gap`].
+    pub anchor_gap: Option<Dimension>,
     /// Parent-relative anchor toggle. See [`RectNode::anchor_parent`].
     pub anchor_parent: Option<bool>,
     /// Source declaration span, when available.
@@ -447,6 +466,12 @@ pub struct TextNode {
     /// Optional sibling node id for sibling-relative anchor positioning.
     /// See [`RectNode::anchor_sibling`].
     pub anchor_sibling: Option<String>,
+    /// Adjacent-placement edge relative to `anchor-sibling`: `above`/`below`/`before`/`after`.
+    /// See [`RectNode::anchor_edge`].
+    pub anchor_edge: Option<String>,
+    /// Gap (px) between this node and its `anchor-sibling` edge when `anchor-edge` is set.
+    /// See [`RectNode::anchor_gap`].
+    pub anchor_gap: Option<Dimension>,
     /// Parent-relative anchor toggle. See [`RectNode::anchor_parent`].
     pub anchor_parent: Option<bool>,
     /// Source declaration span, when available.
@@ -508,6 +533,12 @@ pub struct CodeNode {
     /// Optional sibling node id for sibling-relative anchor positioning.
     /// See [`RectNode::anchor_sibling`].
     pub anchor_sibling: Option<String>,
+    /// Adjacent-placement edge relative to `anchor-sibling`: `above`/`below`/`before`/`after`.
+    /// See [`RectNode::anchor_edge`].
+    pub anchor_edge: Option<String>,
+    /// Gap (px) between this node and its `anchor-sibling` edge when `anchor-edge` is set.
+    /// See [`RectNode::anchor_gap`].
+    pub anchor_gap: Option<Dimension>,
     /// Parent-relative anchor toggle. See [`RectNode::anchor_parent`].
     pub anchor_parent: Option<bool>,
     /// Source declaration span, when available.
@@ -620,6 +651,12 @@ pub struct PatternNode {
     pub anchor_zone: Option<String>,
     /// Optional sibling node id for sibling-relative anchor positioning.
     pub anchor_sibling: Option<String>,
+    /// Adjacent-placement edge relative to `anchor-sibling`: `above`/`below`/`before`/`after`.
+    /// See [`RectNode::anchor_edge`].
+    pub anchor_edge: Option<String>,
+    /// Gap (px) between this node and its `anchor-sibling` edge when `anchor-edge` is set.
+    /// See [`RectNode::anchor_gap`].
+    pub anchor_gap: Option<Dimension>,
     /// Parent-relative anchor toggle. See [`RectNode::anchor_parent`].
     pub anchor_parent: Option<bool>,
     /// Required: the pattern kind (`"grid"` | `"scatter"`; freeform, validated later).

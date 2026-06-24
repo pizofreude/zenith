@@ -271,6 +271,8 @@ fn full_image(id: &str, asset: &str, fit: Option<&str>) -> ImageNode {
         anchor: None,
         anchor_zone: None,
         anchor_sibling: None,
+        anchor_edge: None,
+        anchor_gap: None,
         anchor_parent: None,
         source_span: None,
         unknown_props: BTreeMap::new(),

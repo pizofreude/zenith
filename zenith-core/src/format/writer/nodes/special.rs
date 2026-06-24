@@ -30,6 +30,8 @@ pub(super) fn write_shape(s: &ShapeNode, out: &mut String, depth: usize) {
     write_opt_str(out, "anchor", &s.anchor);
     write_opt_str(out, "anchor-zone", &s.anchor_zone);
     write_opt_str(out, "anchor-sibling", &s.anchor_sibling);
+    write_opt_str(out, "anchor-edge", &s.anchor_edge);
+    write_opt_dimension(out, "anchor-gap", &s.anchor_gap);
     write_opt_bool(out, "anchor-parent", &s.anchor_parent);
     write_opt_dimension(out, "x", &s.x);
     write_opt_dimension(out, "y", &s.y);
@@ -120,6 +122,8 @@ pub(super) fn write_field(f: &FieldNode, out: &mut String, depth: usize) {
     write_opt_str(out, "anchor", &f.anchor);
     write_opt_str(out, "anchor-zone", &f.anchor_zone);
     write_opt_str(out, "anchor-sibling", &f.anchor_sibling);
+    write_opt_str(out, "anchor-edge", &f.anchor_edge);
+    write_opt_dimension(out, "anchor-gap", &f.anchor_gap);
     write_opt_bool(out, "anchor-parent", &f.anchor_parent);
     out.push_str(" type=\"");
     out.push_str(&f.field_type);
@@ -166,6 +170,8 @@ pub(super) fn write_toc(t: &TocNode, out: &mut String, depth: usize) {
     write_opt_str(out, "anchor", &t.anchor);
     write_opt_str(out, "anchor-zone", &t.anchor_zone);
     write_opt_str(out, "anchor-sibling", &t.anchor_sibling);
+    write_opt_str(out, "anchor-edge", &t.anchor_edge);
+    write_opt_dimension(out, "anchor-gap", &t.anchor_gap);
     write_opt_bool(out, "anchor-parent", &t.anchor_parent);
     write_opt_str(out, "match-role", &t.match_role);
     write_opt_str(out, "match-style", &t.match_style);

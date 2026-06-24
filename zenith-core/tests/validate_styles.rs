@@ -320,6 +320,8 @@ fn minimal_code(id: &str, fill: Option<PropertyValue>) -> Node {
         anchor: None,
         anchor_zone: None,
         anchor_sibling: None,
+        anchor_edge: None,
+        anchor_gap: None,
         anchor_parent: None,
         content: String::new(),
         source_span: None,

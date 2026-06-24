@@ -688,6 +688,8 @@ fn image_at(id: &str, x: f64, y: f64, w: f64, h: f64) -> Node {
         anchor: None,
         anchor_zone: None,
         anchor_sibling: None,
+        anchor_edge: None,
+        anchor_gap: None,
         anchor_parent: None,
         source_span: None,
         unknown_props: BTreeMap::new(),
