@@ -10,6 +10,7 @@ mod duplicate;
 mod finders;
 mod group;
 mod page;
+mod promote;
 mod reorder;
 
 pub(in crate::engine) use add_remove::{apply_add_node, apply_remove_node};
@@ -21,4 +22,5 @@ pub(in crate::engine) use page::{
     AddPageSpec, apply_add_page, apply_delete_page, apply_reorder_pages, apply_set_page_size,
     parse_dimension_str,
 };
+pub(in crate::engine) use promote::apply_promote_candidate;
 pub(in crate::engine) use reorder::{ReorderKind, apply_reorder};

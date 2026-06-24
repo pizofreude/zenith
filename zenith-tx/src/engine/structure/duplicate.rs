@@ -1,6 +1,7 @@
 //! `DuplicateNode` and `DuplicatePage` application, plus the id-cloning helpers
 //! they share (leaf id setter, any-variant id setter, subtree id-suffixing).
 
+use zenith_core::ast::document::{Fold, SafeZone};
 use zenith_core::{Diagnostic, Document, Node};
 
 use super::super::{
@@ -242,7 +243,7 @@ pub(in crate::engine) fn apply_duplicate_node(
 /// read/written through the shared [`node_id_of`] reader and the
 /// [`node_set_id_any`] setter; leaf and container nodes alike get suffixed, and
 /// containers also recurse into their own children.
-fn suffix_ids_in_children(children: &mut [Node], id_suffix: &str) {
+pub(in crate::engine::structure) fn suffix_ids_in_children(children: &mut [Node], id_suffix: &str) {
     for child in children.iter_mut() {
         // Suffix this node's own id (if it has one), then recurse.
         if let Some(old_id) = node_id_of(child) {
@@ -276,6 +277,25 @@ fn suffix_ids_in_children(children: &mut [Node], id_suffix: &str) {
             | Node::Connector(_)
             | Node::Pattern(_) => {}
         }
+    }
+}
+
+/// Append `id_suffix` to every safe-zone and fold id in a cloned page and clear
+/// their source spans. Page-metadata children (safe-zones, folds) carry ids in
+/// the same namespace as nodes, so a deep page copy must suffix them too to stay
+/// collision-free. Shared by `DuplicatePage` and `PromoteCandidate`.
+pub(in crate::engine::structure) fn suffix_zone_and_fold_ids(
+    safe_zones: &mut [SafeZone],
+    folds: &mut [Fold],
+    id_suffix: &str,
+) {
+    for zone in safe_zones.iter_mut() {
+        zone.id.push_str(id_suffix);
+        zone.source_span = None;
+    }
+    for fold in folds.iter_mut() {
+        fold.id.push_str(id_suffix);
+        fold.source_span = None;
     }
 }
 
@@ -372,14 +392,7 @@ pub(in crate::engine) fn apply_duplicate_page(
 
     // 4. Suffix every descendant node id and every safe-zone id in the copy.
     suffix_ids_in_children(&mut clone.children, id_suffix);
-    for zone in clone.safe_zones.iter_mut() {
-        zone.id.push_str(id_suffix);
-        zone.source_span = None;
-    }
-    for fold in clone.folds.iter_mut() {
-        fold.id.push_str(id_suffix);
-        fold.source_span = None;
-    }
+    suffix_zone_and_fold_ids(&mut clone.safe_zones, &mut clone.folds, id_suffix);
 
     // 5. Insert the clone immediately after the source page.
     doc.body.pages.insert(position + 1, clone);

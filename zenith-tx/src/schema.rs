@@ -33,9 +33,10 @@ pub fn op_names() -> &'static [&'static str] {
         "move_forward",
         "move_to_back",
         "move_to_front",
-        "reparent",
-        "reorder_pages",
+        "promote_candidate",
         "remove_node",
+        "reorder_pages",
+        "reparent",
         "replace_text",
         "set_asset",
         "set_fill",
@@ -120,6 +121,9 @@ pub fn op_summary(name: &str) -> Option<&'static str> {
         "detach_pattern" => {
             Some("Materialize a pattern node into an editable group of native shapes.")
         }
+        "promote_candidate" => Some(
+            "Deep-copy a selected candidate page's content into a target export page with fresh node ids.",
+        ),
         _ => None,
     }
 }
@@ -179,6 +183,7 @@ mod tests {
             Op::UpdateRecipe { .. } => "update_recipe",
             Op::DeleteRecipe { .. } => "delete_recipe",
             Op::DetachPattern { .. } => "detach_pattern",
+            Op::PromoteCandidate { .. } => "promote_candidate",
         }
     }
 
@@ -227,6 +232,7 @@ mod tests {
             "update_recipe",
             "delete_recipe",
             "detach_pattern",
+            "promote_candidate",
         ])
     }
 
@@ -439,6 +445,11 @@ mod tests {
             Op::DeleteRecipe { id: String::new() },
             Op::DetachPattern {
                 node: String::new(),
+            },
+            Op::PromoteCandidate {
+                source_page: String::new(),
+                target_page: String::new(),
+                id_suffix: String::new(),
             },
         ];
 

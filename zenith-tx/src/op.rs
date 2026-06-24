@@ -872,6 +872,34 @@ pub enum Op {
         /// The id of the recipe to remove.
         id: String,
     },
+    /// Deep-copy a selected candidate page's content into a target page,
+    /// assigning fresh node ids via `id_suffix`, and mark the target as an
+    /// export page.
+    ///
+    /// The source page must have `candidate-status="selected"`. The target
+    /// page's existing children are **replaced** (children, safe-zones, and
+    /// folds). The source page is NOT mutated.
+    ///
+    /// After the copy the target page's `workspace-role` is set to `"export"`
+    /// and its `promotion-target` is cleared.
+    ///
+    /// Rejects with `tx.unknown_node` if either page id is not found.
+    /// Rejects with `tx.invalid_value` if `source_page == target_page`.
+    /// Rejects with `tx.candidate_not_selected` if the source page does not
+    /// carry `candidate-status="selected"`.
+    ///
+    /// JSON example:
+    /// ```json
+    /// {"op":"promote_candidate","source_page":"pg.cand","target_page":"pg.export","id_suffix":".p"}
+    /// ```
+    PromoteCandidate {
+        /// Id of the source candidate page (must have candidate-status="selected").
+        source_page: String,
+        /// Id of the target (export) page whose content will be replaced.
+        target_page: String,
+        /// Suffix appended to every descendant node id in the copy (keeps ids unique).
+        id_suffix: String,
+    },
     /// Materialize a `pattern` node into an editable `group` of native shapes —
     /// the "detach to native" path.
     ///
