@@ -59,4 +59,8 @@ mod visual;
 // path resolving.
 pub use driver::{validate, validate_with_policy};
 pub(in crate::validate::check) use passes::register_id;
+// `apply_policy` is re-exported up to the crate root so the CLI render path can
+// govern compile-stage diagnostics (emitted by `zenith-scene`) with the same
+// merged policy that validation uses. Self-validation stays internal.
+pub use policy::apply_policy;
 pub use report::ValidationReport;

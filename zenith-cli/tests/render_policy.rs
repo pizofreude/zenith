@@ -33,6 +33,25 @@ const DOC_WITH_UNUSED_TOKEN: &str = r##"zenith version=1 {
 }
 "##;
 
+/// A minimal valid document whose text node requests a font family that is not
+/// registered (only the bundled Noto fonts are available when no project_dir is
+/// given). Compiling it emits a `font.unresolved` advisory from `zenith-scene`.
+const DOC_WITH_UNAVAILABLE_FONT: &str = r##"zenith version=1 {
+  project id="proj.rf" name="Render Font"
+  tokens format="zenith-token-v1" {
+    token id="font.missing" type="fontFamily" value="Totally Missing Family"
+  }
+  styles {}
+  document id="doc.rf" title="Render Font" {
+    page id="page.rf" w=(px)200 h=(px)100 {
+      text id="text.rf" x=(px)0 y=(px)0 w=(px)200 h=(px)100 font-family=(token)"font.missing" {
+        span "hello"
+      }
+    }
+  }
+}
+"##;
+
 // ── Tests ─────────────────────────────────────────────────────────────────────
 
 /// Without any flags or config files, the document with an unused token renders
@@ -173,6 +192,76 @@ fn allow_flag_on_advisory_is_transparent() {
     assert_eq!(
         png_with_flags, png_no_flags,
         "--allow on a non-Error advisory must produce byte-identical output to no flags"
+    );
+}
+
+// ── Compile-stage font diagnostics governed on the render path ─────────────────
+
+/// By default, a text node with an unavailable font family renders successfully
+/// (exit 0) and surfaces the `font.unresolved` advisory on the artifact — the
+/// compile-stage diagnostic is now governable but not blocking.
+#[test]
+fn unresolved_font_advisory_shown_and_render_succeeds() {
+    let result = to_png_with_dir(
+        DOC_WITH_UNAVAILABLE_FONT,
+        None,
+        1,
+        false,
+        &CliPolicyFlags::default(),
+    );
+    let artifact = result.expect("render must succeed with the font advisory present");
+    assert!(
+        artifact
+            .diagnostics
+            .iter()
+            .any(|d| d.code == "font.unresolved"),
+        "font.unresolved advisory must be surfaced on the artifact; got: {:?}",
+        artifact.diagnostics
+    );
+}
+
+/// `--deny font.unresolved` elevates the compile-stage advisory to a blocking
+/// Error: the entry function returns `Ok` with the governed diagnostic attached
+/// at `Error` severity. The dispatch layer (`count_hard_diagnostics`) is
+/// responsible for the non-zero exit code — not the entry function.
+#[test]
+fn deny_unresolved_font_elevates_to_error_severity() {
+    let flags = CliPolicyFlags {
+        deny: vec!["font.unresolved".to_owned()],
+        ..Default::default()
+    };
+    let artifact = to_png_with_dir(DOC_WITH_UNAVAILABLE_FONT, None, 1, false, &flags)
+        .expect("entry must return Ok; dispatch decides the exit code");
+    let diag = artifact
+        .diagnostics
+        .iter()
+        .find(|d| d.code == "font.unresolved")
+        .expect("font.unresolved must be present in the artifact diagnostics");
+    assert_eq!(
+        diag.severity,
+        zenith_core::Severity::Error,
+        "--deny must elevate font.unresolved to Error severity; got {:?}",
+        diag.severity
+    );
+}
+
+/// `--allow font.unresolved` suppresses the compile-stage advisory: the render
+/// still succeeds and the advisory is absent from the artifact's diagnostics.
+#[test]
+fn allow_unresolved_font_suppresses_advisory() {
+    let flags = CliPolicyFlags {
+        allow: vec!["font.unresolved".to_owned()],
+        ..Default::default()
+    };
+    let result = to_png_with_dir(DOC_WITH_UNAVAILABLE_FONT, None, 1, false, &flags);
+    let artifact = result.expect("render must succeed when the advisory is allowed");
+    assert!(
+        !artifact
+            .diagnostics
+            .iter()
+            .any(|d| d.code == "font.unresolved"),
+        "font.unresolved must be suppressed by --allow; got: {:?}",
+        artifact.diagnostics
     );
 }
 

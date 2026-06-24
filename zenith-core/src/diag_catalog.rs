@@ -234,6 +234,16 @@ pub const DIAGNOSTIC_CODES: &[DiagnosticCodeInfo] = &[
         "Content crosses a declared fold line.",
     ),
     info(
+        "font.glyph_missing",
+        Severity::Warning,
+        "Text contains character(s) with no glyph in any registered font.",
+    ),
+    info(
+        "font.unresolved",
+        Severity::Advisory,
+        "A text/code node's font family is unavailable; falling back to a default.",
+    ),
+    info(
         "footnote.unresolved_ref",
         Severity::Warning,
         "Text span footnote-ref names an unknown footnote.",
@@ -666,5 +676,25 @@ mod tests {
         assert!(lookup("layout.off_canvas").is_some());
         assert!(lookup("policy.unknown_code").is_some());
         assert!(lookup("not.a_real_code").is_none());
+    }
+
+    #[test]
+    fn compile_font_diagnostics_are_catalogued_and_governable() {
+        // The compile-stage font diagnostics (emitted by zenith-scene) must be in
+        // the catalog so the diagnostic policy can govern them on the render path.
+        let unresolved = lookup("font.unresolved").expect("font.unresolved must be catalogued");
+        assert_eq!(unresolved.severity, Severity::Advisory);
+        assert!(
+            unresolved.is_governable(),
+            "font.unresolved must be governable"
+        );
+
+        let glyph_missing =
+            lookup("font.glyph_missing").expect("font.glyph_missing must be catalogued");
+        assert_eq!(glyph_missing.severity, Severity::Warning);
+        assert!(
+            glyph_missing.is_governable(),
+            "font.glyph_missing must be governable"
+        );
     }
 }

@@ -4,7 +4,10 @@ use std::path::Path;
 
 use sha2::{Digest, Sha256};
 
-use zenith_core::{Document, KdlAdapter, KdlSource, validate_with_policy};
+use zenith_core::{
+    Diagnostic, DiagnosticPolicy, Document, KdlAdapter, KdlSource, Severity, apply_policy,
+    validate_with_policy,
+};
 
 use crate::config::{CliPolicyFlags, load_global_and_local, merge_policy};
 
@@ -39,7 +42,7 @@ pub(super) fn verify_locked_sha256(
 }
 
 /// Parse → validate with the merged diagnostic policy, returning the parsed
-/// [`Document`].
+/// [`Document`] together with the merged [`DiagnosticPolicy`].
 ///
 /// The effective policy is `merge_policy(global, local, in_file, flags)`,
 /// mirroring the `validate` command exactly:
@@ -48,16 +51,19 @@ pub(super) fn verify_locked_sha256(
 /// - In-file policy comes from the parsed document.
 /// - CLI flags layer on top.
 ///
+/// The merged policy is returned so the render entry points can apply the SAME
+/// policy to the compile-stage diagnostics emitted by `zenith-scene` (which run
+/// after validation) — see [`govern_compile_diagnostics`].
+///
 /// A config-load error returns exit code 2. Parse errors return exit code 2.
 /// Validation errors (at least one Error-severity diagnostic after policy
 /// application) return exit code 1. With no config files and no flags the
-/// merged policy equals the in-file policy, so the result is byte-identical
-/// to the old behaviour.
+/// merged policy is empty, so the result is byte-identical to the old behaviour.
 pub(super) fn parse_validate(
     src: &str,
     start_dir: Option<&Path>,
     flags: &CliPolicyFlags,
-) -> Result<Document, RenderCmdErr> {
+) -> Result<(Document, DiagnosticPolicy), RenderCmdErr> {
     // Resolve config policy ───────────────────────────────────────────────────
     let (global, local) = load_global_and_local(start_dir)
         .map_err(|msg| RenderCmdErr::new(format!("error[config.error]: {msg}"), 2))?;
@@ -74,13 +80,40 @@ pub(super) fn parse_validate(
         let msgs: Vec<String> = report
             .diagnostics
             .iter()
-            .filter(|d| d.severity == zenith_core::Severity::Error)
+            .filter(|d| d.severity == Severity::Error)
             .map(crate::commands::format_error_diag)
             .collect();
         return Err(RenderCmdErr::new(msgs.join("\n"), 1));
     }
 
-    Ok(doc)
+    Ok((doc, merged))
+}
+
+/// Apply the merged diagnostic `policy` to a list of compile-stage diagnostics
+/// and return the governed list for attachment to the artifact.
+///
+/// Compile diagnostics (e.g. `font.unresolved`, `font.glyph_missing`) are
+/// emitted by `zenith-scene` AFTER validation, so they never pass through the
+/// validation choke point. This is the single place the render path runs them
+/// through [`zenith_core::apply_policy`] — so `deny`/`allow`/`warn` entries for
+/// those codes take effect on render exactly as they do for validation
+/// diagnostics.
+///
+/// This function is **infallible**: it applies the policy and returns the
+/// governed `Vec<Diagnostic>` directly. The caller attaches it to the artifact;
+/// the dispatch layer (`count_hard_diagnostics`) decides the exit code when any
+/// of those diagnostics are [`Severity::Error`].
+///
+/// With an empty policy this is an exact identity pass: the diagnostics are
+/// returned unchanged, so artifacts and exit codes stay byte-identical to the
+/// no-policy case. The policy only ever filters/relabels the diagnostic LIST —
+/// it never touches the already-rendered scene/PNG/PDF bytes, which are
+/// produced independently.
+pub(super) fn govern_compile_diagnostics(
+    diagnostics: Vec<Diagnostic>,
+    policy: &DiagnosticPolicy,
+) -> Vec<Diagnostic> {
+    apply_policy(diagnostics, policy)
 }
 
 /// Resolve a 1-based `page` number to a 0-based page index within `doc`.

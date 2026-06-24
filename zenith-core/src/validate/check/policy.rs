@@ -31,10 +31,7 @@ use crate::diagnostics::{Diagnostic, Severity};
 /// (last-wins). Error-severity diagnostics are never dropped or weakened. With an
 /// empty policy this returns the input unchanged (identity pass), preserving the
 /// default-off byte-identical guarantee.
-pub(super) fn apply_policy(
-    diagnostics: Vec<Diagnostic>,
-    policy: &DiagnosticPolicy,
-) -> Vec<Diagnostic> {
+pub fn apply_policy(diagnostics: Vec<Diagnostic>, policy: &DiagnosticPolicy) -> Vec<Diagnostic> {
     // Fast path: an empty policy is an exact identity pass.
     if policy.entries.is_empty() {
         return diagnostics;
