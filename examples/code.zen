@@ -1,5 +1,5 @@
 zenith version=1 {
-  project id="proj.highlight" name="Syntax Highlighting Example"
+  project id="proj.code" name="Code Syntax Highlighting Example"
   assets {
   }
   tokens format="zenith-token-v1" {
@@ -10,8 +10,8 @@ zenith version=1 {
   }
   styles {
   }
-  document id="doc.highlight" title="Syntax Highlighting Example" {
-    page id="page.highlight" w=(px)520 h=(px)360 {
+  document id="doc.code" title="Code Syntax Highlighting Example" {
+    page id="page.code" w=(px)520 h=(px)360 {
       rect id="bg.dark" x=(px)0 y=(px)0 w=(px)520 h=(px)180 fill=(token)"color.darkbg"
       code id="code.dark" x=(px)20 y=(px)18 w=(px)480 h=(px)150 overflow="clip" language="rust" tab-width=4 font-family=(token)"font.mono" font-size=(token)"size.code" {
         content "fn main() {\n\tlet name = \"Zenith\";\n\tlet count = 42;\n\t// greet the world\n\tprintln!(\"Hello, {name}!\");\n}"
