@@ -18,11 +18,11 @@ pub use zenith_core::ast::document::Fold;
 pub use zenith_core::{
     ActionDef, AssetBlock, AssetDecl, AssetKind, CodeNode, ConnectorNode, Dimension, Document,
     DocumentBody, EllipseNode, FieldNode, FrameNode, GroupNode, ImageNode, LibraryDef, LineNode,
-    MasterDef, Node, Page, Point, PolygonNode, PolylineNode, PropertyValue, ProvenanceDef,
-    RecipeDef, RecipeParam, RectNode, SafeZone, SafeZoneType, SectionDef, Severity, ShapeNode,
-    Style, StyleBlock, TableCell, TableColumn, TableNode, TableRow, TextNode, TextSpan, TocNode,
-    Token, TokenBlock, TokenLiteral, TokenType, TokenValue, Unit, UnknownNode, UnknownStyleProp,
-    ValidationReport, VariantDef, VariantOverride, validate,
+    MasterDef, Node, Page, Point, PolygonNode, PolylineNode, PropertyValue, ProtectedRegion,
+    ProvenanceDef, RecipeDef, RecipeParam, RectNode, SafeZone, SafeZoneType, SectionDef, Severity,
+    ShapeNode, Style, StyleBlock, TableCell, TableColumn, TableNode, TableRow, TextNode, TextSpan,
+    TocNode, Token, TokenBlock, TokenLiteral, TokenType, TokenValue, Unit, UnknownNode,
+    UnknownStyleProp, ValidationReport, VariantDef, VariantOverride, validate,
 };
 pub use zenith_core::{KdlAdapter, KdlSource};
 
@@ -444,6 +444,9 @@ pub fn strip_node_span(node: &mut Node) {
         }
         Node::Group(g) => {
             g.source_span = None;
+            for region in &mut g.protected_regions {
+                region.source_span = None;
+            }
             for child in &mut g.children {
                 strip_node_span(child);
             }

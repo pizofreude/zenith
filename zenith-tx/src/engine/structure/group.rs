@@ -221,6 +221,8 @@ pub(in crate::engine) fn apply_group(
         anchor_gap: None,
         anchor_parent: None,
         children: group_children,
+        protected_regions: Vec::new(),
+        editable_param_ids: Vec::new(),
         source_span: None,
         unknown_props: BTreeMap::new(),
     });

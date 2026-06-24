@@ -90,6 +90,8 @@ pub(in crate::compile) fn compile_instance(
         anchor_gap: None,
         anchor_parent: None,
         children,
+        protected_regions: Vec::new(),
+        editable_param_ids: Vec::new(),
         source_span: instance.source_span,
         unknown_props: BTreeMap::new(),
     };

@@ -3,11 +3,11 @@
 
 use std::fmt::Write as _;
 
-use crate::ast::{FrameNode, GroupNode, TableCell, TableNode, TableRow};
+use crate::ast::{FrameNode, GroupNode, ProtectedRegion, TableCell, TableNode, TableRow};
 
 use crate::format::writer::{
-    fmt_unknown_property, indent, write_opt_bool, write_opt_dimension, write_opt_f64,
-    write_opt_property_value, write_opt_str,
+    fmt_dimension, fmt_unknown_property, indent, write_opt_bool, write_opt_dimension,
+    write_opt_f64, write_opt_property_value, write_opt_str, write_opt_str_escaped,
 };
 
 use super::write_children_block;
@@ -106,9 +106,42 @@ pub(super) fn write_group(g: &GroupNode, out: &mut String, depth: usize) {
     }
 
     out.push_str(" {\n");
+    // Metadata children (protected-region, editable-param) before renderable children,
+    // mirroring the page-level safe-zone / fold ordering. Only emitted when non-empty,
+    // so an all-empty group produces byte-identical output to before.
+    for region in &g.protected_regions {
+        write_protected_region(region, out, depth + 1);
+    }
+    for param_id in &g.editable_param_ids {
+        indent(out, depth + 1);
+        out.push_str("editable-param id=\"");
+        out.push_str(param_id);
+        out.push_str("\"\n");
+    }
     write_children_block(&g.children, out, depth);
     indent(out, depth);
     out.push_str("}\n");
+}
+
+/// Emit a single `protected-region` line:
+/// `protected-region id="..." x=(px)N y=(px)N w=(px)N h=(px)N`
+/// with an optional `label="..."` (escaped). Mirrors `write_safe_zone`.
+fn write_protected_region(region: &ProtectedRegion, out: &mut String, depth: usize) {
+    indent(out, depth);
+    out.push_str("protected-region");
+    out.push_str(" id=\"");
+    out.push_str(&region.id);
+    out.push('"');
+    out.push_str(" x=");
+    out.push_str(&fmt_dimension(&region.x));
+    out.push_str(" y=");
+    out.push_str(&fmt_dimension(&region.y));
+    out.push_str(" w=");
+    out.push_str(&fmt_dimension(&region.w));
+    out.push_str(" h=");
+    out.push_str(&fmt_dimension(&region.h));
+    write_opt_str_escaped(out, "label", &region.label);
+    out.push('\n');
 }
 
 pub(super) fn write_table(t: &TableNode, out: &mut String, depth: usize) {
