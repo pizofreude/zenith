@@ -3,10 +3,8 @@
 //! - [`document`]    — error type, tree types, tree builders, node finder,
 //!   geometry helpers, human renderers, and the public `run` entry point.
 //! - [`recipes`]     — recipe-block JSON builder and human renderer.
-//! - [`previews`]    — previews block JSON builder and human renderer.
 
 mod document;
-pub mod previews;
 pub mod recipes;
 
 pub use document::{

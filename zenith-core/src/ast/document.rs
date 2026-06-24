@@ -5,7 +5,6 @@ use super::action::ActionDef;
 use super::asset::AssetBlock;
 use super::library::LibraryDef;
 use super::node::Node;
-use super::preview::PreviewArtifact;
 use super::provenance::ProvenanceDef;
 use super::recipe::RecipeDef;
 use super::style::StyleBlock;
@@ -355,11 +354,6 @@ pub struct Document {
     /// `expanded` children). The engine round-trips and validates these records
     /// but does NOT act on them; expansion is a later unit.
     pub recipes: Vec<RecipeDef>,
-    /// Preview/critique artifacts; empty when the `previews` block is absent.
-    /// Each entry records a rendered preview for a candidate page (`candidate`,
-    /// optional content-hash/output-path fields, and `critique` children). The
-    /// engine round-trips and diffs these records but does NOT act on them.
-    pub previews: Vec<PreviewArtifact>,
     pub body: DocumentBody,
 }
 
@@ -495,7 +489,6 @@ mod parity_tests {
             provenance: Vec::new(),
             variants: Vec::new(),
             recipes: Vec::new(),
-            previews: Vec::new(),
             body: DocumentBody {
                 id: "body".to_owned(),
                 title: None,
