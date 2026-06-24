@@ -119,7 +119,7 @@ rect id="card" anchor-sibling="title" anchor-edge="below" anchor-gap=(px)8 ancho
 ## Multi-size variants
 
 For square/story/banner from one design, **declare a `variants` block and run `zenith variant`**
-— a first-class, deterministic regeneration model (see `references/variants.md`). It
+— a deterministic regeneration model (see `references/variants.md`). It
 expands one canonical page into N named target sizes, with per-variant `override`s and automatic
 token propagation. Anchored nodes reflow to each size; reposition free-coordinate decorative nodes
 via overrides. (This is size/format variation — for varying *content* across data rows, that's

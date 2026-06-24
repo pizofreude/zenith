@@ -1,8 +1,7 @@
 # Recipe model — the `recipes` provenance block
 
-`references/recipes.md` is about the *techniques* (how to compose gradients, blur, grain, etc.
-into premium visuals). This file is about **recording** such a generated motif as a first-class,
-auditable `recipes` block so it can be inspected, re-parameterized, and reproduced.
+Records a generated motif as an auditable `recipes` block so it can be inspected,
+re-parameterized, and reproduced.
 
 The recipe block is **model + provenance only** — it does not add a new render primitive. The
 actual pixels come from the nodes the recipe materialized (its `expanded` nodes) and/or composed
@@ -62,8 +61,8 @@ Errors mirror token ops: `tx.duplicate_id`, `tx.unknown_recipe`.
 
 ## Workflow
 
-1. Build the motif by composing primitives (`references/recipes.md`), giving the generated nodes
-   stable ids.
+1. Build the motif by composing primitives (gradients, filters, patterns — see `examples/*.zen`),
+   giving the generated nodes stable ids.
 2. Record a `recipe` capturing `kind`, `seed`, `generator`, `param`s, the `palette` tokens, and the
    `expanded` node ids — so the look is reproducible and re-tunable, not a one-off.
 3. `zenith validate`, then `zenith inspect` to confirm the recipe and its nodes.
