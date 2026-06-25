@@ -604,6 +604,11 @@ pub const DIAGNOSTIC_CODES: &[DiagnosticCodeInfo] = &[
         "A variant override targets an unknown node.",
     ),
     info(
+        "variant.override_unknown_property",
+        Severity::Warning,
+        "A variant override carries an unrecognized property.",
+    ),
+    info(
         "variant.unknown_source",
         Severity::Error,
         "A variant `source` references an unknown page.",

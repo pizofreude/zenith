@@ -1,10 +1,11 @@
 //! Integration tests: variants block validation.
 //!
-//! Covers all four variant-check diagnostics:
+//! Covers all five variant-check diagnostics:
 //!   - `variant.duplicate_id`
 //!   - `variant.unknown_source`
 //!   - `variant.invalid_dimension`
 //!   - `variant.override_unknown_node`
+//!   - `variant.override_unknown_property`
 //!
 //! Plus a clean-variants regression guard.
 
@@ -214,6 +215,140 @@ fn override_targeting_absent_node_is_error() {
     assert!(
         has_code(&report, "variant.override_unknown_node"),
         "override targeting absent node must produce variant.override_unknown_node; got {:?}",
+        codes(&report)
+    );
+}
+
+// ── variant.override_unknown_property ─────────────────────────────────────────
+
+/// An override with an unknown property key (e.g. `foo=1`) →
+/// `variant.override_unknown_property` (Warning, not an Error).
+#[test]
+fn override_unknown_property_fires_warning() {
+    let src = r##"zenith version=1 {
+  project id="proj.oup" name="OUP"
+  tokens format="zenith-token-v1" {
+  }
+  styles {
+  }
+  variants {
+    variant id="square" source="page.main" w=(px)1080 h=(px)1080 {
+      override node="box" foo=1
+    }
+  }
+  document id="doc.oup" title="OUP" {
+    page id="page.main" w=(px)1920 h=(px)1080 {
+      rect id="box" x=(px)0 y=(px)0 w=(px)100 h=(px)100
+    }
+  }
+}
+"##;
+    let report = parse_and_validate(src);
+    assert!(
+        has_code(&report, "variant.override_unknown_property"),
+        "override with unknown property must fire variant.override_unknown_property; got {:?}",
+        codes(&report)
+    );
+    // Must be a Warning, not an Error.
+    let is_warning = report
+        .diagnostics
+        .iter()
+        .any(|d| d.code == "variant.override_unknown_property" && d.severity == Severity::Warning);
+    assert!(
+        is_warning,
+        "variant.override_unknown_property must be Warning severity; got {:?}",
+        codes(&report)
+    );
+    // A single unknown property → exactly one such diagnostic.
+    let count = report
+        .diagnostics
+        .iter()
+        .filter(|d| d.code == "variant.override_unknown_property")
+        .count();
+    assert_eq!(
+        count, 1,
+        "exactly one variant.override_unknown_property expected; got {count}"
+    );
+    // Must not block rendering (no errors from this alone).
+    assert!(
+        !report.has_errors(),
+        "unknown override property must not produce any errors; got {:?}",
+        codes(&report)
+    );
+}
+
+/// An override with `id=` instead of `node=` (the wrong-selector case) →
+/// `variant.override_unknown_property` warning for the key `id`.
+#[test]
+fn override_id_selector_fires_unknown_property_warning() {
+    let src = r##"zenith version=1 {
+  project id="proj.idsel" name="IDSel"
+  tokens format="zenith-token-v1" {
+  }
+  styles {
+  }
+  variants {
+    variant id="square" source="page.main" w=(px)1080 h=(px)1080 {
+      override node="box" id="other"
+    }
+  }
+  document id="doc.idsel" title="IDSel" {
+    page id="page.main" w=(px)1920 h=(px)1080 {
+      rect id="box" x=(px)0 y=(px)0 w=(px)100 h=(px)100
+    }
+  }
+}
+"##;
+    let report = parse_and_validate(src);
+    assert!(
+        has_code(&report, "variant.override_unknown_property"),
+        "override with id= selector must fire variant.override_unknown_property; got {:?}",
+        codes(&report)
+    );
+    // The diagnostic message must mention `id` as the offending key.
+    let mentions_id = report
+        .diagnostics
+        .iter()
+        .any(|d| d.code == "variant.override_unknown_property" && d.message.contains("'id'"));
+    assert!(
+        mentions_id,
+        "the warning message must name the offending key `id`; got messages: {:?}",
+        report
+            .diagnostics
+            .iter()
+            .filter(|d| d.code == "variant.override_unknown_property")
+            .map(|d| d.message.as_str())
+            .collect::<Vec<_>>()
+    );
+}
+
+/// An override with only known properties (node, visible, x, y, w, h, fill, text)
+/// must NOT fire `variant.override_unknown_property`.
+#[test]
+fn override_with_only_known_props_is_clean() {
+    let src = r##"zenith version=1 {
+  project id="proj.knp" name="KNP"
+  tokens format="zenith-token-v1" {
+    token id="color.red" type="color" value="#ff0000"
+  }
+  styles {
+  }
+  variants {
+    variant id="square" source="page.main" w=(px)1080 h=(px)1080 {
+      override node="box" visible=#false x=(px)10 y=(px)20 w=(px)50 h=(px)50 fill=(token)"color.red" text="hello"
+    }
+  }
+  document id="doc.knp" title="KNP" {
+    page id="page.main" w=(px)1920 h=(px)1080 {
+      rect id="box" x=(px)0 y=(px)0 w=(px)100 h=(px)100
+    }
+  }
+}
+"##;
+    let report = parse_and_validate(src);
+    assert!(
+        !has_code(&report, "variant.override_unknown_property"),
+        "override with only known props must NOT fire variant.override_unknown_property; got {:?}",
         codes(&report)
     );
 }

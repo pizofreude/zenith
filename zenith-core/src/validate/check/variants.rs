@@ -1,17 +1,20 @@
 //! Validation for the top-level `variants` block.
 //!
-//! Checks performed (all `Error` severity):
+//! Checks performed:
 //!
-//! 1. **`variant.duplicate_id`** — two `variant` entries share the same `id`.
+//! 1. **`variant.duplicate_id`** (Error) — two `variant` entries share the same `id`.
 //!    Variant ids live in their own namespace (they are not document node ids)
 //!    so a dedicated check is used rather than the global `register_id` funnel.
-//! 2. **`variant.unknown_source`** — `variant.source` names a page id that does
+//! 2. **`variant.unknown_source`** (Error) — `variant.source` names a page id that does
 //!    not exist in the document.
-//! 3. **`variant.invalid_dimension`** — `variant.w` or `variant.h` is not
+//! 3. **`variant.invalid_dimension`** (Error) — `variant.w` or `variant.h` is not
 //!    px-convertible (`dim_to_px` returns `None`) OR resolves to `<= 0.0`.
-//! 4. **`variant.override_unknown_node`** — an `override.node` names a node id
+//! 4. **`variant.override_unknown_node`** (Error) — an `override.node` names a node id
 //!    absent from the variant's source page. Suppressed when the source page
 //!    itself failed to resolve (diagnostic #2) to avoid cascading noise.
+//! 5. **`variant.override_unknown_property`** (Warning) — an `override` entry carries
+//!    an unrecognized property key. The known keys are `node`, `visible`, `text`,
+//!    `fill`, `x`, `y`, `w`, and `h`; anything else is unknown.
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -142,6 +145,35 @@ pub(in crate::validate::check) fn check_variants(
                         Some(variant.id.clone()),
                     ));
                 }
+            }
+        }
+
+        // ── 5. Override unknown properties ────────────────────────────────────
+        // Emitted for every unrecognized property on every override, regardless
+        // of whether the source page or node resolved. The known keys are:
+        // `node`, `visible`, `text`, `fill`, `x`, `y`, `w`, `h`.
+        // Iterating `unknown_props` (a BTreeMap) gives stable alphabetical order.
+        for ov in &variant.overrides {
+            for prop_name in ov.unknown_props.keys() {
+                let hint = if prop_name == "id" {
+                    format!(
+                        "variant '{}': override for node '{}' has unknown property '{}'; \
+                         did you mean `node=` instead of `id=`?",
+                        variant.id, ov.node, prop_name
+                    )
+                } else {
+                    format!(
+                        "variant '{}': override for node '{}' has unknown property '{}'; \
+                         recognized override properties are: node, visible, text, fill, x, y, w, h",
+                        variant.id, ov.node, prop_name
+                    )
+                };
+                diagnostics.push(Diagnostic::warning(
+                    "variant.override_unknown_property",
+                    hint,
+                    ov.source_span,
+                    Some(variant.id.clone()),
+                ));
             }
         }
     }
