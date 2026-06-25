@@ -102,6 +102,24 @@ impl KdlSource for KdlAdapter {
                              continue it — otherwise a `{` is genuinely unclosed.",
                         );
                     }
+                    // KDL v2 booleans require a leading `#` (`#true` / `#false`).
+                    // A bare `true` or `false` is rejected as "Expected identifier
+                    // string" because those words are reserved and not valid
+                    // identifier strings. Detect this precisely by combining the
+                    // error message with the actual source text at the error span.
+                    if let Some(m) = &d.message
+                        && m.contains("Expected identifier string")
+                    {
+                        let span_start = d.span.offset();
+                        let span_end = (span_start + d.span.len()).min(text.len());
+                        let token_text = text.get(span_start..span_end).unwrap_or("");
+                        if token_text == "true" || token_text == "false" {
+                            msg.push_str(
+                                "\n  hint: KDL booleans are `#true` / `#false` (with a leading \
+                                 `#`). Did you write a bare `true`/`false`?",
+                            );
+                        }
+                    }
                     let span = crate::ast::Span {
                         start: offset,
                         end: offset + d.span.len(),
@@ -480,6 +498,83 @@ mod tests {
         assert!(
             err.message.contains("on ONE line") && err.message.contains('\\'),
             "multi-line-attribute error must include the continuation hint; got: {:?}",
+            err.message
+        );
+    }
+
+    /// A bare `false` attribute (missing the KDL v2 `#` prefix) must produce a
+    /// parse error whose message contains the boolean hint.
+    #[test]
+    fn test_bare_bool_false_error_has_hint() {
+        let adapter = KdlAdapter;
+        // `visible=false` is invalid KDL v2 — the correct form is `visible=#false`.
+        let src = b"node visible=false";
+        let err = adapter
+            .parse(src)
+            .expect_err("bare `false` must fail to parse");
+        assert!(
+            err.message.contains("#true")
+                || err.message.contains("#false")
+                || err.message.contains("leading `#`"),
+            "bare-bool error must include the #true/#false hint; got: {:?}",
+            err.message
+        );
+    }
+
+    /// A bare `true` attribute must also trigger the boolean hint.
+    #[test]
+    fn test_bare_bool_true_error_has_hint() {
+        let adapter = KdlAdapter;
+        let src = b"node enabled=true";
+        let err = adapter
+            .parse(src)
+            .expect_err("bare `true` must fail to parse");
+        assert!(
+            err.message.contains("#true")
+                || err.message.contains("#false")
+                || err.message.contains("leading `#`"),
+            "bare-bool error must include the #true/#false hint; got: {:?}",
+            err.message
+        );
+    }
+
+    /// A correct `#false` must parse without error (no hint emitted).
+    #[test]
+    fn test_hash_false_parses_fine() {
+        // `#false` is valid KDL v2 keyword syntax; parsing a minimal document
+        // that uses it must succeed.
+        let src = r#"zenith version=1 {
+  project id="proj.hf" name="HF"
+  tokens format="zenith-token-v1" {
+  }
+  styles {
+  }
+  document id="doc.hf" title="HF" {
+    page id="page.hf" w=(px)100 h=(px)100 {
+      code id="c" x=(px)0 y=(px)0 w=(px)10 h=(px)10 line-numbers=#false tab-width=4 {
+        content "x"
+      }
+    }
+  }
+}"#;
+        let adapter = KdlAdapter;
+        adapter
+            .parse(src.as_bytes())
+            .expect("#false must parse successfully");
+    }
+
+    /// An unrelated parse error (a genuinely invalid token that is NOT a bare
+    /// bool) must NOT include the boolean hint.
+    #[test]
+    fn test_unrelated_error_no_bool_hint() {
+        let adapter = KdlAdapter;
+        // `:::` is simply invalid KDL — it has nothing to do with booleans.
+        let src = b":::";
+        let err = adapter.parse(src).expect_err("invalid KDL must fail");
+        // The hint must not appear for unrelated errors.
+        assert!(
+            !err.message.contains("leading `#`"),
+            "unrelated error must NOT contain the bool hint; got: {:?}",
             err.message
         );
     }
