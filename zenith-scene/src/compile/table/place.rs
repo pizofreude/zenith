@@ -101,3 +101,35 @@ pub(super) fn child_declared_box(node: &zenith_core::Node) -> (Option<f64>, Opti
         | Node::Unknown(_) => (None, None),
     }
 }
+
+/// The declared `y` of a cell child in pixels, when the kind carries a `y`
+/// field and it resolves. Used alongside [`child_declared_box`] to compute the
+/// bottom extent of a child within the cell content box. Kinds without a `y`
+/// field yield `None`.
+pub(super) fn child_declared_y(node: &zenith_core::Node) -> Option<f64> {
+    use zenith_core::Node;
+    let px =
+        |d: &Option<zenith_core::Dimension>| d.as_ref().and_then(|d| dim_to_px(d.value, &d.unit));
+    match node {
+        Node::Rect(n) => px(&n.y),
+        Node::Ellipse(n) => px(&n.y),
+        Node::Text(n) => px(&n.y),
+        Node::Code(n) => px(&n.y),
+        Node::Image(n) => px(&n.y),
+        Node::Frame(n) => px(&n.y),
+        Node::Group(n) => px(&n.y),
+        Node::Field(n) => px(&n.y),
+        Node::Toc(n) => px(&n.y),
+        Node::Table(n) => px(&n.y),
+        Node::Shape(n) => px(&n.y),
+        Node::Line(_)
+        | Node::Polygon(_)
+        | Node::Polyline(_)
+        | Node::Instance(_)
+        | Node::Footnote(_)
+        | Node::Connector(_)
+        | Node::Pattern(_)
+        | Node::Chart(_)
+        | Node::Unknown(_) => None,
+    }
+}

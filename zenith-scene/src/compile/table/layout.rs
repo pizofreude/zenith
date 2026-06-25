@@ -9,7 +9,7 @@ use zenith_core::{Diagnostic, FontProvider, Node, ResolvedToken, Style, TableCol
 use super::super::text::{
     MeasureEnv, measure_text_natural, measure_text_wrapped_height, resolve_text_families,
 };
-use super::place::{PlacedCell, child_declared_box};
+use super::place::{PlacedCell, child_declared_box, child_declared_y};
 
 /// Lower bound (px) a shrunk AUTO column is clamped to, so proportional shrink
 /// to fit never collapses a column to zero width (which would hide its border).
@@ -267,6 +267,9 @@ fn cell_content_height(
 ) -> f64 {
     let mut tallest = 0.0_f64;
     for child in &cell.children {
+        // Bottom extent of a child within the cell content box =
+        //   declared_y + height_contribution
+        // When neither is set: y0=0.0, h=nat_h → same as before (byte-identical).
         let h = match child {
             Node::Text(t) => {
                 let eff = header_styled_text(t, header_style);
@@ -278,8 +281,18 @@ fn cell_content_height(
                     diagnostics,
                     family_cache,
                 );
-                measure_text_wrapped_height(&eff, content_w, families, env, diagnostics)
-                    .unwrap_or(0.0)
+                let nat_h =
+                    measure_text_wrapped_height(&eff, content_w, families, env, diagnostics)
+                        .unwrap_or(0.0);
+                let y0 =
+                    t.y.as_ref()
+                        .and_then(|d| dim_to_px(d.value, &d.unit))
+                        .unwrap_or(0.0);
+                let h_decl =
+                    t.h.as_ref()
+                        .and_then(|d| dim_to_px(d.value, &d.unit))
+                        .unwrap_or(nat_h);
+                y0 + h_decl
             }
             other @ (Node::Rect(_)
             | Node::Ellipse(_)
@@ -299,7 +312,11 @@ fn cell_content_height(
             | Node::Connector(_)
             | Node::Pattern(_)
             | Node::Chart(_)
-            | Node::Unknown(_)) => child_declared_box(other).1.unwrap_or(0.0),
+            | Node::Unknown(_)) => {
+                let y0 = child_declared_y(other).unwrap_or(0.0);
+                let h_decl = child_declared_box(other).1.unwrap_or(0.0);
+                y0 + h_decl
+            }
         };
         tallest = tallest.max(h);
     }

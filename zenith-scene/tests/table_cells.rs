@@ -195,3 +195,56 @@ fn cell_text_with_explicit_geometry_unchanged() {
         "explicit-geometry cell text must ignore cell h-align (author override wins)"
     );
 }
+
+/// A single-cell table whose text carries an explicit `y` offset must size its
+/// row tall enough to contain the offset text — the content-box clip height must
+/// cover `y + text-height`, not just the bare text height. Regression: row
+/// heights once ignored a cell child's declared `y`, so the content-box clip cut
+/// the top of any author-offset cell text.
+fn offset_cell_src(text_y_px: u32) -> String {
+    format!(
+        r##"zenith version=1 {{
+  project id="proj.off" name="OFF"
+  tokens format="zenith-token-v1" {{
+    token id="color.ink" type="color" value="#000000"
+  }}
+  styles {{}}
+  document id="doc.off" title="OFF" {{
+    page id="page.off" w=(px)640 h=(px)400 {{
+      table id="t.off" x=(px)40 y=(px)40 w=(px)400 h=(px)200 cell-padding=(px)0 gap=(px)0 {{
+        column width=(px)400
+        row {{
+          cell {{ text id="cx" x=(px)0 y=(px){text_y_px} fill=(token)"color.ink" {{ span "Offset" }} }}
+        }}
+      }}
+    }}
+  }}
+}}
+"##
+    )
+}
+
+#[test]
+fn cell_text_y_offset_grows_row_so_clip_contains_text() {
+    let y_off = 40.0_f64;
+    let result = compile(&parse(&offset_cell_src(40)), &default_provider());
+
+    // The cell content-box clip must be tall enough to contain text placed at the
+    // author `y` offset; before the fix it sized to the bare wrapped text height
+    // (~text line height) and clipped the offset text.
+    let max_clip_h = result
+        .scene
+        .commands
+        .iter()
+        .filter_map(|c| match c {
+            SceneCommand::PushClip { h, .. } => Some(*h),
+            _ => None,
+        })
+        .fold(0.0_f64, f64::max);
+
+    assert!(
+        max_clip_h >= y_off,
+        "cell content clip height ({max_clip_h}) must cover the text y offset \
+         ({y_off}); a smaller clip means the offset text is cut off"
+    );
+}
