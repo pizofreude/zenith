@@ -331,15 +331,49 @@ pub(super) fn check_text_contrast(
             }
         }
         Node::Table(t) => {
-            // Recurse into each cell's children so text inside a table cell is
-            // still judged against the page background. Cell-fill-aware contrast
-            // (text on a table.fill backdrop) is a later-unit concern.
-            for row in &t.rows {
+            // Recurse into each cell's children, using the cell's effective
+            // background fill as the fallback `page_bg_rgb` so that text inside
+            // a filled cell is judged against the cell colour, not the page bg.
+            //
+            // Cell background precedence (mirrors emit.rs):
+            //   header cell: cell.fill > table.header_fill > table.fill > page bg
+            //   body cell:   cell.fill > table.fill > page bg
+            let header_rows = t.header_rows.unwrap_or(0);
+
+            // Resolve a table/cell fill PropertyValue to an opaque rgb.
+            // Table and cell fills have no style-block fallback, so we pass
+            // `&None` for the `style` argument; `resolve_fill_rgba` short-circuits
+            // cleanly and returns the same result as the inline closure would.
+            let resolve_fill = |pv: &Option<PropertyValue>| -> Option<(u8, u8, u8)> {
+                let (r, g, b, a) = resolve_fill_rgba(pv, &None, style_map, resolved_tokens)?;
+                if a >= BACKDROP_OPAQUE_ALPHA {
+                    Some((r, g, b))
+                } else {
+                    None
+                }
+            };
+
+            for (row_idx, row) in t.rows.iter().enumerate() {
+                let is_header = (row_idx as u32) < header_rows;
+
                 for cell in &row.cells {
+                    // Resolve the cell's effective background through the
+                    // precedence chain, stopping at the first opaque colour.
+                    let cell_bg: Option<(u8, u8, u8)> = if let Some(rgb) = resolve_fill(&cell.fill)
+                    {
+                        Some(rgb)
+                    } else if is_header {
+                        resolve_fill(&t.header_fill)
+                            .or_else(|| resolve_fill(&t.fill))
+                            .or(page_bg_rgb)
+                    } else {
+                        resolve_fill(&t.fill).or(page_bg_rgb)
+                    };
+
                     for (i, child) in cell.children.iter().enumerate() {
                         check_text_contrast(
                             child,
-                            page_bg_rgb,
+                            cell_bg,
                             &cell.children[..i],
                             (page_w, page_h),
                             resolved_tokens,
@@ -351,7 +385,7 @@ pub(super) fn check_text_contrast(
             }
         }
 
-        // All other leaf node types carry no text — nothing to check.
+        // Leaf node types carry no text children — nothing to check.
         Node::Rect(_)
         | Node::Ellipse(_)
         | Node::Line(_)

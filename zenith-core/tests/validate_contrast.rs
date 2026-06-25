@@ -406,6 +406,192 @@ fn contrast_bg_hint_used_as_background() {
     );
 }
 
+// ── Table cell fill regression tests ──────────────────────────────────────────
+
+/// Build a minimal `TableNode` with one body row containing one cell, where the
+/// cell holds a single text child.
+fn table_with_cell_text(
+    cell_fill: Option<PropertyValue>,
+    table_fill: Option<PropertyValue>,
+    header_fill: Option<PropertyValue>,
+    header_rows: Option<u32>,
+    text_fill_token: &str,
+) -> Node {
+    let text = minimal_text(
+        "cell.text",
+        Some(PropertyValue::TokenRef(text_fill_token.to_owned())),
+    );
+    let cell = TableCell {
+        colspan: 1,
+        rowspan: 1,
+        children: vec![text],
+        fill: cell_fill,
+        border: None,
+        border_width: None,
+        h_align: None,
+        v_align: None,
+        source_span: None,
+        unknown_props: BTreeMap::new(),
+    };
+    let row = TableRow {
+        cells: vec![cell],
+        source_span: None,
+        unknown_props: BTreeMap::new(),
+    };
+    Node::Table(Box::new(TableNode {
+        id: "table.one".to_owned(),
+        name: None,
+        role: None,
+        x: Some(px(0.0)),
+        y: Some(px(0.0)),
+        w: Some(px(400.0)),
+        h: Some(px(200.0)),
+        columns: vec![],
+        rows: vec![row],
+        header_rows,
+        flows: None,
+        gap: None,
+        cell_padding: None,
+        border_collapse: None,
+        fill: table_fill,
+        border: None,
+        border_width: None,
+        header_fill,
+        header_style: None,
+        h_align: None,
+        v_align: None,
+        style: None,
+        opacity: None,
+        visible: None,
+        locked: None,
+        rotate: None,
+        anchor: None,
+        anchor_zone: None,
+        anchor_sibling: None,
+        anchor_edge: None,
+        anchor_gap: None,
+        anchor_parent: None,
+        source_span: None,
+        unknown_props: BTreeMap::new(),
+    }))
+}
+
+/// White text (`#ffffff`) in a dark-blue-filled cell (`#003087`) on a white
+/// page must NOT fire `contrast.low` — the cell fill is the effective bg.
+/// APCA Lc of white on #003087 ≈ 83, which clears the Lc 60 threshold.
+#[test]
+fn white_text_in_dark_cell_no_false_positive() {
+    let doc = doc_with(
+        vec![
+            color_token_hex("color.page", "#ffffff"),
+            color_token_hex("color.cell", r##"#003087"##),
+            color_token_hex("color.text", "#ffffff"),
+        ],
+        vec![page_with_bg(
+            "page.one",
+            "color.page",
+            vec![table_with_cell_text(
+                Some(PropertyValue::TokenRef("color.cell".to_owned())),
+                None,
+                None,
+                None,
+                "color.text",
+            )],
+        )],
+    );
+    let report = validate(&doc);
+    assert!(
+        !has_code(&report, "contrast.low"),
+        "white text in a dark-blue cell should NOT warn contrast.low (cell fill is bg); codes: {:?}",
+        codes(&report)
+    );
+}
+
+/// White text (`#ffffff`) in a light-gray-filled cell (`#dddddd`) on a white
+/// page SHOULD still fire `contrast.low` — the cell fill is the bg and it gives
+/// insufficient contrast. APCA Lc of white on #dddddd ≈ 21 < 60.
+#[test]
+fn white_text_in_light_cell_still_warns() {
+    let doc = doc_with(
+        vec![
+            color_token_hex("color.page", "#ffffff"),
+            color_token_hex("color.cell", r##"#dddddd"##),
+            color_token_hex("color.text", "#ffffff"),
+        ],
+        vec![page_with_bg(
+            "page.one",
+            "color.page",
+            vec![table_with_cell_text(
+                Some(PropertyValue::TokenRef("color.cell".to_owned())),
+                None,
+                None,
+                None,
+                "color.text",
+            )],
+        )],
+    );
+    let report = validate(&doc);
+    assert!(
+        has_code(&report, "contrast.low"),
+        "white text in a light-gray cell should warn contrast.low; codes: {:?}",
+        codes(&report)
+    );
+}
+
+/// When a cell has NO fill and the table has NO fill, the check must fall back
+/// to the page background — existing behavior is preserved.
+#[test]
+fn cell_no_fill_falls_back_to_page_bg() {
+    // Light gray text (#aaaaaa) on white page → Lc ~46 < 60 → warns.
+    let doc = doc_with(
+        vec![
+            color_token_hex("color.page", "#ffffff"),
+            color_token_hex("color.text", r##"#aaaaaa"##),
+        ],
+        vec![page_with_bg(
+            "page.one",
+            "color.page",
+            vec![table_with_cell_text(None, None, None, None, "color.text")],
+        )],
+    );
+    let report = validate(&doc);
+    assert!(
+        has_code(&report, "contrast.low"),
+        "light-gray text in an unfilled cell must still warn via page-bg fallback; codes: {:?}",
+        codes(&report)
+    );
+}
+
+/// Table-level `fill` is used as the cell bg when cell has no per-cell fill.
+/// White text (`#ffffff`) on a dark table fill (`#003087`) should NOT warn.
+#[test]
+fn table_fill_used_when_cell_has_no_fill() {
+    let doc = doc_with(
+        vec![
+            color_token_hex("color.page", "#ffffff"),
+            color_token_hex("color.table", r##"#003087"##),
+            color_token_hex("color.text", "#ffffff"),
+        ],
+        vec![page_with_bg(
+            "page.one",
+            "color.page",
+            vec![table_with_cell_text(
+                None,
+                Some(PropertyValue::TokenRef("color.table".to_owned())),
+                None,
+                None,
+                "color.text",
+            )],
+        )],
+    );
+    let report = validate(&doc);
+    assert!(
+        !has_code(&report, "contrast.low"),
+        "white text on dark table.fill should NOT warn; codes: {:?}",
+        codes(&report)
+    );
+}
+
 /// A raw literal `contrast-bg` value is rejected as `token.raw_visual_literal`,
 /// consistent with `fill`/`stroke`.
 #[test]
