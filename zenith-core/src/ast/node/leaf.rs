@@ -460,6 +460,22 @@ pub struct TextNode {
     /// default proportional to the font size (`0.4 × font_size`). KDL:
     /// `bullet-gap=(px)16`.
     pub bullet_gap: Option<Dimension>,
+    /// Content format for this text node's span text.
+    ///
+    /// When `Some("markdown")`, the scene compile pass re-parses the concatenated
+    /// span text (AFTER data-binding substitution) as inline markdown, replacing
+    /// `node.spans` with the parsed styled spans. This enables `**bold**`,
+    /// `*italic*`, `~~strike~~`, `==highlight==`, `++underline++`, `` `code` ``,
+    /// and `[label](url)` in both literal text and data-bound (`data-ref`) content.
+    ///
+    /// `Some("plain")` or `None` keeps the current behavior — spans are used
+    /// verbatim without any markdown interpretation (byte-identical to before).
+    ///
+    /// Any other value emits a `text.invalid_format` warning and is treated as
+    /// plain (byte-identical to a node without the attribute).
+    ///
+    /// KDL: `format="markdown"`.
+    pub content_format: Option<String>,
     /// Inline text spans.
     pub spans: Vec<TextSpan>,
     /// Page-relative placement anchor (one of the nine named positions, e.g.

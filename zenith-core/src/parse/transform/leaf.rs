@@ -530,11 +530,12 @@ pub(crate) const TEXT_KNOWN_PROPS: &[&str] = &[
     "anchor_gap",
     "anchor-parent",
     "anchor_parent",
+    // content format: "markdown" opts into inline-markdown parsing of span text.
+    "format",
     // span data-binding attrs (carried on `span` children, listed here so the
     // family of recognized text/span props is documented in one place).
     "data-ref",
     "data_ref",
-    "format",
     "precision",
     "locale",
 ];
@@ -568,6 +569,9 @@ pub(super) fn transform_text(node: &KdlNode) -> Result<TextNode, ParseError> {
     let bullet = optional_string_prop(node, "bullet").map(str::to_owned);
     let bullet_gap = optional_dimension_prop(node, "bullet-gap")
         .or_else(|| optional_dimension_prop(node, "bullet_gap"));
+    // Content format: `format="markdown"` opts into inline-markdown span parsing.
+    // `format="plain"` or absent = literal (byte-identical to current behavior).
+    let content_format = optional_string_prop(node, "format").map(str::to_owned);
 
     let mut spans: Vec<TextSpan> = Vec::new();
     if let Some(children) = node.children() {
@@ -622,6 +626,7 @@ pub(super) fn transform_text(node: &KdlNode) -> Result<TextNode, ParseError> {
         text_exclusion,
         padding_left,
         text_indent,
+        content_format,
         bullet,
         bullet_gap,
         spans,

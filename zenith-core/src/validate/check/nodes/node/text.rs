@@ -228,6 +228,21 @@ pub(in crate::validate::check) fn check_text(
         diagnostics,
     );
 
+    // Validate content format value (warning, unknown → treated as plain).
+    if let Some(fmt) = t.content_format.as_deref()
+        && !matches!(fmt, "markdown" | "plain")
+    {
+        diagnostics.push(Diagnostic::warning(
+            "text.invalid_format",
+            format!(
+                "text '{}': format '{fmt}' is not one of markdown/plain; treated as plain",
+                t.id
+            ),
+            t.source_span,
+            Some(t.id.clone()),
+        ));
+    }
+
     // Validate v-align value (advisory warning, unknown → top at compile time).
     if let Some(va) = t.v_align.as_deref()
         && !matches!(va, "top" | "middle" | "bottom")

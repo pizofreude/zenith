@@ -117,7 +117,15 @@ pub fn node_content(kind: &str) -> Option<NodeContentDescriptor> {
                 `code=#true` renders the span in the bundled monospace family with a subtle \
                 background, suitable for inline code. \
                 `link=\"url\"` renders the span underlined in the default link color (unless \
-                `fill` is set) and retains the URL for future PDF annotation / GUI use.",
+                `fill` is set) and retains the URL for future PDF annotation / GUI use. \
+                The `format` node attribute (values: `markdown` | `plain`) opts into \
+                inline-markdown parsing of the concatenated span text. When `format=\"markdown\"`, \
+                the scene compile pass re-parses the span content AFTER data-binding \
+                substitution, turning `**bold**`, `*italic*`, `~~strike~~`, `==highlight==`, \
+                `++underline++`, `` `code` ``, and `[label](url)` into styled spans. \
+                Pairs well with a single `data-ref` span to parse external content as markdown \
+                without encoding marks in the document. `format=\"plain\"` or absent = literal \
+                (byte-identical to today's behavior).",
             example: concat!(
                 "span \"Hello \"\n",
                 "span \"world\" font-weight=(token)\"weight.bold\" italic=#true",

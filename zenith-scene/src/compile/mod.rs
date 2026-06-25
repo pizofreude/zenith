@@ -27,6 +27,7 @@ mod footnote;
 mod image;
 mod leaf;
 mod line_jumps;
+mod markdown_resolve;
 mod paint;
 mod pattern;
 mod table;
@@ -60,6 +61,7 @@ use leaf::{
     ConnectorEnv, RectEllipseEnv, ShapeCompileEnv, compile_connector, compile_ellipse,
     compile_line, compile_polygon, compile_polyline, compile_rect, compile_shape,
 };
+use markdown_resolve::{resolve_markdown, scan_for_markdown_text};
 use paint::{resolve_property_color, resolve_property_gradient};
 use pattern::compile_pattern;
 use table::{TableEmitCtx, compile_table};
@@ -226,6 +228,12 @@ pub fn compile_page(
         Some(ctx) => {
             let mut cloned = doc.clone();
             substitute_data_refs(&mut cloned, ctx, &mut diagnostics);
+            // ── Step 0b: markdown-resolution pass ────────────────────────
+            // For each `text` node with `format="markdown"`, concatenate the
+            // (now data-substituted) span texts and replace spans with the
+            // parsed styled spans from `parse_inline_markdown`. Nodes without
+            // `format="markdown"` are skipped (byte-identical).
+            resolve_markdown(&mut cloned);
             Some(cloned)
         }
         None => {
@@ -240,7 +248,17 @@ pub fn compile_page(
                     None,
                 ));
             }
-            None
+            // ── Step 0b: markdown-resolution pass (no-data path) ─────────
+            // Even without a data context, `format="markdown"` nodes must be
+            // resolved. Clone only when at least one markdown-format text node
+            // exists; otherwise skip entirely (byte-identical to before).
+            if scan_for_markdown_text(doc) {
+                let mut cloned = doc.clone();
+                resolve_markdown(&mut cloned);
+                Some(cloned)
+            } else {
+                None
+            }
         }
     };
     // From here on, compile against the (possibly substituted) document.

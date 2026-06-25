@@ -189,6 +189,7 @@ fn font_weight_with_missing_token_ref_produces_unknown_reference() {
         text_exclusion: None,
         padding_left: None,
         text_indent: None,
+        content_format: None,
         bullet: None,
         bullet_gap: None,
         anchor: None,

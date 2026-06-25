@@ -699,6 +699,11 @@ pub const DIAGNOSTIC_CODES: &[DiagnosticCodeInfo] = &[
         "Text with `overflow: fit` could not be scaled to fit its frame.",
     ),
     info(
+        "text.invalid_format",
+        Severity::Warning,
+        "Text `format` value is not recognized; treated as plain.",
+    ),
+    info(
         "text.invalid_v_align",
         Severity::Warning,
         "Text `v-align` value is not recognized.",
