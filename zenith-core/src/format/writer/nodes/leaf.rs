@@ -553,6 +553,9 @@ pub(super) fn write_chart(c: &ChartNode, out: &mut String, depth: usize) {
     }
     write_opt_str(out, "axis-style", &c.axis_style);
     write_opt_str(out, "bar-mode", &c.bar_mode);
+    write_opt_str(out, "point-placement", &c.point_placement);
+    write_opt_str(out, "value-labels", &c.value_labels);
+    write_opt_property_value(out, "value-color", &c.value_color);
     write_opt_property_value(out, "radius", &c.radius);
     write_opt_property_value(out, "radius-tl", &c.radius_tl);
     write_opt_property_value(out, "radius-tr", &c.radius_tr);

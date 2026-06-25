@@ -414,6 +414,9 @@ fn attribute_type_for_kind_inner(kind: &str, name: &str, fallback: &'static str)
         ("chart", "axis-min" | "axis-max") => "f64",
         ("chart", "axis-style") => "string",
         ("chart", "bar-mode") => "enum: grouped|stacked",
+        ("chart", "point-placement") => "enum: edge|center",
+        ("chart", "value-labels") => "enum: auto|none|top|center",
+        ("chart", "value-color") => "token ref: color",
         // Asset surface (non-node): kind="" is used by attribute_type() / the
         // completeness drift test for non-node attributes.
         ("", "kind") => "enum: image|svg|font",

@@ -366,6 +366,7 @@ fn substitute_chart(n: &mut ChartNode, ctx: &DataContext, diagnostics: &mut Vec<
     substitute_color_prop_opt(&mut n.border_left, ctx, &id, "border-left", diagnostics);
     substitute_color_prop_opt(&mut n.border_right, ctx, &id, "border-right", diagnostics);
     substitute_color_prop_opt(&mut n.stroke_outer, ctx, &id, "stroke-outer", diagnostics);
+    substitute_color_prop_opt(&mut n.value_color, ctx, &id, "value-color", diagnostics);
     substitute_dim_prop_opt(&mut n.radius, ctx, &id, "radius", diagnostics);
     substitute_dim_prop_opt(&mut n.radius_tl, ctx, &id, "radius-tl", diagnostics);
     substitute_dim_prop_opt(&mut n.radius_tr, ctx, &id, "radius-tr", diagnostics);
@@ -619,7 +620,7 @@ fn pattern_dim_props(n: &PatternNode) -> [&Option<PropertyValue>; 8] {
     ]
 }
 
-fn chart_color_props(n: &ChartNode) -> [&Option<PropertyValue>; 7] {
+fn chart_color_props(n: &ChartNode) -> [&Option<PropertyValue>; 8] {
     [
         &n.fill,
         &n.stroke,
@@ -628,6 +629,7 @@ fn chart_color_props(n: &ChartNode) -> [&Option<PropertyValue>; 7] {
         &n.border_left,
         &n.border_right,
         &n.stroke_outer,
+        &n.value_color,
     ]
 }
 

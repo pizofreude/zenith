@@ -715,7 +715,8 @@ pub struct ChartSeries {
 ///
 /// The common visual/geometry fields mirror [`PatternNode`]; the chart-specific
 /// fields (`kind`, `title`, `caption`, `legend`, `axis_*`, `bar_mode`,
-/// `categories`, `series`) describe the chart content.
+/// `point_placement`, `value_labels`, `value_color`, `categories`, `series`)
+/// describe the chart content.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ChartNode {
     pub id: String,
@@ -802,6 +803,16 @@ pub struct ChartNode {
     /// Bar layout mode: `"grouped"` (default) | `"stacked"`; freeform,
     /// validated later. Mirrors how `kind` is typed/documented.
     pub bar_mode: Option<String>,
+    /// X placement for line/area points: `"edge"` (default; first point on the
+    /// value axis, last at the right edge) | `"center"` (category-band centers).
+    /// freeform, validated later.
+    pub point_placement: Option<String>,
+    /// Value-label display/placement: `"auto"` (default) | `"none"` | `"top"` |
+    /// `"center"`. freeform, validated later.
+    pub value_labels: Option<String>,
+    /// Explicit color (token) for value labels; when absent the renderer
+    /// auto-picks a contrasting color.
+    pub value_color: Option<PropertyValue>,
     /// X-axis category labels (one per category slot); empty = derive index
     /// labels at render. Populated from a `categories` child node whose
     /// positional arguments are the label strings.

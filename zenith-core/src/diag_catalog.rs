@@ -449,6 +449,16 @@ pub const DIAGNOSTIC_CODES: &[DiagnosticCodeInfo] = &[
         "Chart `kind` is not one of bar|line|sparkline|pie|donut.",
     ),
     info(
+        "chart.invalid_point_placement",
+        Severity::Warning,
+        "Chart `point-placement` is not `edge` or `center`.",
+    ),
+    info(
+        "chart.invalid_value_labels",
+        Severity::Warning,
+        "Chart `value-labels` is not one of `auto`, `none`, `top`, or `center`.",
+    ),
+    info(
         "pattern.grid_missing_spacing",
         Severity::Error,
         "Grid pattern is missing required `spacing`.",

@@ -268,6 +268,118 @@ fn chart_no_categories_no_mismatch() {
     );
 }
 
+/// Valid `point-placement` values ("edge", "center") produce no diagnostic.
+#[test]
+fn chart_valid_point_placement_no_diagnostic() {
+    for value in ["edge", "center"] {
+        let src = format!(
+            r##"zenith version=1 {{
+  project id="proj.pp" name="PointPlacement"
+  styles {{
+  }}
+  document id="doc.pp" title="PointPlacement" {{
+    page id="page.pp" w=(px)800 h=(px)600 {{
+      chart id="c.pp" kind="line" point-placement="{value}" x=(px)0 y=(px)0 w=(px)400 h=(px)300 {{
+        series 1.0 2.0 label="S"
+      }}
+    }}
+  }}
+}}
+"##
+        );
+        let adapter = KdlAdapter;
+        let doc = adapter.parse(src.as_bytes()).expect("parse must succeed");
+        let report = validate(&doc);
+        assert!(
+            !has_code(&report, "chart.invalid_point_placement"),
+            "point-placement={value:?} must not fire chart.invalid_point_placement; got: {:?}",
+            codes(&report)
+        );
+    }
+}
+
+/// A bogus `point-placement` value fires `chart.invalid_point_placement`.
+#[test]
+fn chart_invalid_point_placement_fires_diagnostic() {
+    let src = r##"zenith version=1 {
+  project id="proj.ipp" name="InvalidPointPlacement"
+  styles {
+  }
+  document id="doc.ipp" title="InvalidPointPlacement" {
+    page id="page.ipp" w=(px)800 h=(px)600 {
+      chart id="c.ipp" kind="line" point-placement="left" x=(px)0 y=(px)0 w=(px)400 h=(px)300 {
+        series 1.0 2.0 label="S"
+      }
+    }
+  }
+}
+"##;
+    let adapter = KdlAdapter;
+    let doc = adapter.parse(src.as_bytes()).expect("parse must succeed");
+    let report = validate(&doc);
+    assert!(
+        has_code(&report, "chart.invalid_point_placement"),
+        "bogus point-placement must fire chart.invalid_point_placement; got: {:?}",
+        codes(&report)
+    );
+}
+
+/// Valid `value-labels` values ("auto", "none", "top", "center") produce no diagnostic.
+#[test]
+fn chart_valid_value_labels_no_diagnostic() {
+    for value in ["auto", "none", "top", "center"] {
+        let src = format!(
+            r##"zenith version=1 {{
+  project id="proj.vl" name="ValueLabels"
+  styles {{
+  }}
+  document id="doc.vl" title="ValueLabels" {{
+    page id="page.vl" w=(px)800 h=(px)600 {{
+      chart id="c.vl" kind="bar" value-labels="{value}" x=(px)0 y=(px)0 w=(px)400 h=(px)300 {{
+        series 1.0 2.0 label="S"
+      }}
+    }}
+  }}
+}}
+"##
+        );
+        let adapter = KdlAdapter;
+        let doc = adapter.parse(src.as_bytes()).expect("parse must succeed");
+        let report = validate(&doc);
+        assert!(
+            !has_code(&report, "chart.invalid_value_labels"),
+            "value-labels={value:?} must not fire chart.invalid_value_labels; got: {:?}",
+            codes(&report)
+        );
+    }
+}
+
+/// A bogus `value-labels` value fires `chart.invalid_value_labels`.
+#[test]
+fn chart_invalid_value_labels_fires_diagnostic() {
+    let src = r##"zenith version=1 {
+  project id="proj.ivl" name="InvalidValueLabels"
+  styles {
+  }
+  document id="doc.ivl" title="InvalidValueLabels" {
+    page id="page.ivl" w=(px)800 h=(px)600 {
+      chart id="c.ivl" kind="bar" value-labels="outside" x=(px)0 y=(px)0 w=(px)400 h=(px)300 {
+        series 1.0 2.0 label="S"
+      }
+    }
+  }
+}
+"##;
+    let adapter = KdlAdapter;
+    let doc = adapter.parse(src.as_bytes()).expect("parse must succeed");
+    let report = validate(&doc);
+    assert!(
+        has_code(&report, "chart.invalid_value_labels"),
+        "bogus value-labels must fire chart.invalid_value_labels; got: {:?}",
+        codes(&report)
+    );
+}
+
 /// A chart missing geometry (x/y/w/h absent) outside a flow parent fires
 /// `node.missing_geometry`, proving that geometry validation runs on chart nodes.
 #[test]

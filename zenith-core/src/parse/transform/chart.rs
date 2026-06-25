@@ -2,8 +2,9 @@
 //! carries one or more `series` data children and an optional `categories`
 //! child. The common visual/geometry props are read exactly like `pattern`;
 //! the chart-specific props (`kind`, `title`, `caption`, `legend`,
-//! `axis-min`, `axis-max`, `axis-style`, `bar-mode`) describe the chart
-//! presentation. Series and categories children are pure data (not renderable nodes).
+//! `axis-min`, `axis-max`, `axis-style`, `bar-mode`, `point-placement`,
+//! `value-labels`, `value-color`) describe the chart presentation. Series and
+//! categories children are pure data (not renderable nodes).
 
 use kdl::{KdlNode, KdlValue};
 
@@ -93,6 +94,12 @@ pub(crate) const CHART_KNOWN_PROPS: &[&str] = &[
     "axis_style",
     "bar-mode",
     "bar_mode",
+    "point-placement",
+    "point_placement",
+    "value-labels",
+    "value_labels",
+    "value-color",
+    "value_color",
 ];
 
 pub(super) fn transform_chart(node: &KdlNode) -> Result<ChartNode, ParseError> {
@@ -132,6 +139,11 @@ pub(super) fn transform_chart(node: &KdlNode) -> Result<ChartNode, ParseError> {
     let axis_style =
         optional_string_prop_aliased(node, "axis-style", "axis_style").map(str::to_owned);
     let bar_mode = optional_string_prop_aliased(node, "bar-mode", "bar_mode").map(str::to_owned);
+    let point_placement =
+        optional_string_prop_aliased(node, "point-placement", "point_placement").map(str::to_owned);
+    let value_labels =
+        optional_string_prop_aliased(node, "value-labels", "value_labels").map(str::to_owned);
+    let value_color = optional_property_value_aliased(node, "value-color", "value_color");
 
     // Series and categories: each `series` child node becomes a ChartSeries;
     // the single `categories` child carries string positional args as category labels.
@@ -265,6 +277,9 @@ pub(super) fn transform_chart(node: &KdlNode) -> Result<ChartNode, ParseError> {
         axis_max,
         axis_style,
         bar_mode,
+        point_placement,
+        value_labels,
+        value_color,
         categories,
         series,
         source_span: node_span(node),

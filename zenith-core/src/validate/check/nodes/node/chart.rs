@@ -169,6 +169,41 @@ pub(in crate::validate::check) fn check_chart(
         }
     }
 
+    // Validate point-placement against the recognized set {"edge", "center"}.
+    if let Some(point_placement) = &c.point_placement {
+        let point_placement_known = matches!(point_placement.as_str(), "edge" | "center");
+        if !point_placement_known {
+            diagnostics.push(Diagnostic::warning(
+                "chart.invalid_point_placement",
+                format!(
+                    "chart '{}': point-placement '{}' is not recognized; \
+                     expected \"edge\" or \"center\"",
+                    c.id, point_placement
+                ),
+                c.source_span,
+                Some(c.id.clone()),
+            ));
+        }
+    }
+
+    // Validate value-labels against the recognized set {"auto", "none", "top", "center"}.
+    if let Some(value_labels) = &c.value_labels {
+        let value_labels_known =
+            matches!(value_labels.as_str(), "auto" | "none" | "top" | "center");
+        if !value_labels_known {
+            diagnostics.push(Diagnostic::warning(
+                "chart.invalid_value_labels",
+                format!(
+                    "chart '{}': value-labels '{}' is not recognized; \
+                     expected \"auto\", \"none\", \"top\", or \"center\"",
+                    c.id, value_labels
+                ),
+                c.source_span,
+                Some(c.id.clone()),
+            ));
+        }
+    }
+
     // Validate categories count vs. series data length.
     // Emitted as Advisory (governable) when categories is non-empty and its count
     // does not match the maximum series value count.
@@ -195,6 +230,10 @@ pub(in crate::validate::check) fn check_chart(
         if let Some(crate::ast::value::PropertyValue::TokenRef(token_id)) = &s.color {
             referenced_token_ids.insert(token_id.clone());
         }
+    }
+    // value-color token ref — collect even though the series children are not walked.
+    if let Some(crate::ast::value::PropertyValue::TokenRef(token_id)) = &c.value_color {
+        referenced_token_ids.insert(token_id.clone());
     }
 
     // Unknown properties.

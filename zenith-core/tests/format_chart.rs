@@ -208,6 +208,130 @@ fn chart_without_categories_bar_mode_byte_identical() {
     );
 }
 
+/// **point-placement + value-labels + value-color round-trip**: a chart with all
+/// three new fields parses correctly and round-trips through format → re-parse
+/// to an identical AST.
+#[test]
+fn chart_point_placement_value_labels_value_color_round_trip() {
+    // NOTE: '#' inside color hex requires r##...## quoting.
+    let src = r##"zenith version=1 {
+  project id="proj.pp" name="PointPlacement"
+  tokens format="zenith-token-v1" {
+    token id="color.label" type="color" value="#334455"
+  }
+  styles {
+  }
+  document id="doc.pp" title="PointPlacement" {
+    page id="page.pp" w=(px)800 h=(px)600 {
+      chart id="c.pp" kind="line" point-placement="edge" value-labels="center" value-color=(token)"color.label" x=(px)50 y=(px)50 w=(px)600 h=(px)400 {
+        series 10.0 20.0 30.0 label="A"
+      }
+    }
+  }
+}
+"##;
+    let adapter = KdlAdapter;
+    let doc = adapter.parse(src.as_bytes()).expect("parse must succeed");
+
+    let chart = match &doc.body.pages[0].children[0] {
+        Node::Chart(c) => c,
+        other => panic!("expected Chart node, got {other:?}"),
+    };
+    assert_eq!(chart.id, "c.pp");
+    assert_eq!(
+        chart.point_placement,
+        Some("edge".to_owned()),
+        "point_placement must be parsed"
+    );
+    assert_eq!(
+        chart.value_labels,
+        Some("center".to_owned()),
+        "value_labels must be parsed"
+    );
+    assert_eq!(
+        chart.value_color,
+        Some(token_ref("color.label")),
+        "value_color must be parsed as TokenRef"
+    );
+
+    let formatted = format_document(&doc).expect("format must succeed");
+    let formatted_str = String::from_utf8(formatted.clone()).expect("formatted must be utf8");
+
+    assert!(
+        formatted_str.contains("point-placement=\"edge\""),
+        "formatter must emit point-placement; got:\n{formatted_str}"
+    );
+    assert!(
+        formatted_str.contains("value-labels=\"center\""),
+        "formatter must emit value-labels; got:\n{formatted_str}"
+    );
+    assert!(
+        formatted_str.contains("value-color=(token)\"color.label\""),
+        "formatter must emit value-color; got:\n{formatted_str}"
+    );
+
+    // Round-trip: re-parse equals the first parse (spans stripped).
+    let reparsed = adapter.parse(&formatted).expect("re-parse after format");
+    assert_eq!(
+        strip_spans(doc),
+        strip_spans(reparsed),
+        "chart (with point-placement + value-labels + value-color) must round-trip identically"
+    );
+}
+
+/// **New fields absent = byte-identical**: a chart without point-placement,
+/// value-labels, or value-color must not emit those keywords in the formatter
+/// output, and must still round-trip.
+#[test]
+fn chart_without_new_fields_byte_identical() {
+    let src = r##"zenith version=1 {
+  project id="proj.nf" name="NoNewFields"
+  styles {
+  }
+  document id="doc.nf" title="NoNewFields" {
+    page id="page.nf" w=(px)800 h=(px)600 {
+      chart id="c.nf" kind="bar" x=(px)50 y=(px)50 w=(px)600 h=(px)400 {
+        series 1.0 2.0 3.0 label="S"
+      }
+    }
+  }
+}
+"##;
+    let adapter = KdlAdapter;
+    let doc = adapter.parse(src.as_bytes()).expect("parse must succeed");
+
+    let chart = match &doc.body.pages[0].children[0] {
+        Node::Chart(c) => c,
+        other => panic!("expected Chart node, got {other:?}"),
+    };
+    assert_eq!(chart.point_placement, None, "point_placement must be None");
+    assert_eq!(chart.value_labels, None, "value_labels must be None");
+    assert_eq!(chart.value_color, None, "value_color must be None");
+
+    let formatted = format_document(&doc).expect("format must succeed");
+    let formatted_str = String::from_utf8(formatted.clone()).expect("formatted must be utf8");
+
+    assert!(
+        !formatted_str.contains("point-placement"),
+        "absent point-placement must not be emitted; got:\n{formatted_str}"
+    );
+    assert!(
+        !formatted_str.contains("value-labels"),
+        "absent value-labels must not be emitted; got:\n{formatted_str}"
+    );
+    assert!(
+        !formatted_str.contains("value-color"),
+        "absent value-color must not be emitted; got:\n{formatted_str}"
+    );
+
+    let reparsed = adapter.parse(&formatted).expect("re-parse after format");
+    assert_eq!(
+        strip_spans(doc),
+        strip_spans(reparsed),
+        "chart without new fields must round-trip identically"
+    );
+}
+
 /// **Absent chart is byte-identical**: a document that uses NO `chart` node
 /// formats exactly as it did before the feature existed (additive guarantee).
 #[test]
