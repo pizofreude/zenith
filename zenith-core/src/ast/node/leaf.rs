@@ -714,8 +714,8 @@ pub struct ChartSeries {
 /// treat the chart as a LEAF and never descend into them.
 ///
 /// The common visual/geometry fields mirror [`PatternNode`]; the chart-specific
-/// fields (`kind`, `title`, `caption`, `legend`, `axis_*`, `series`) describe
-/// the chart content.
+/// fields (`kind`, `title`, `caption`, `legend`, `axis_*`, `bar_mode`,
+/// `categories`, `series`) describe the chart content.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ChartNode {
     pub id: String,
@@ -799,6 +799,13 @@ pub struct ChartNode {
     pub axis_max: Option<f64>,
     /// Style string for the axis (e.g. `"hidden"`, `"minimal"`); freeform for now.
     pub axis_style: Option<String>,
+    /// Bar layout mode: `"grouped"` (default) | `"stacked"`; freeform,
+    /// validated later. Mirrors how `kind` is typed/documented.
+    pub bar_mode: Option<String>,
+    /// X-axis category labels (one per category slot); empty = derive index
+    /// labels at render. Populated from a `categories` child node whose
+    /// positional arguments are the label strings.
+    pub categories: Vec<String>,
     /// Ordered data series. Each series carries labels, an optional color, and
     /// a list of f64 data points.
     pub series: Vec<ChartSeries>,

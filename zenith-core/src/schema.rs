@@ -180,10 +180,14 @@ pub fn node_content(kind: &str) -> Option<NodeContentDescriptor> {
 
         // ── Series-bearing kind ───────────────────────────────────────────────
         "chart" => Some(NodeContentDescriptor {
-            description: "Zero or more `series` children carry the numeric data. \
+            description: "Optional `categories` child carries the X-axis category labels as \
+                positional string arguments (one per slot; absent = derive index labels at render). \
+                Zero or more `series` children carry the numeric data. \
                 Each series node takes its f64 data values as positional arguments \
-                and optional named props: label, color (token ref), data-ref.",
+                and optional named props: label, color (token ref), data-ref. \
+                Emit `categories` before any `series` children.",
             example: concat!(
+                "categories \"Q1\" \"Q2\" \"Q3\" \"Q4\"\n",
                 "series label=\"Revenue\" color=(token)\"color.primary\" 120.0 200.0 150.0 310.0\n",
                 "series label=\"Costs\" color=(token)\"color.secondary\" 80.0 90.0 100.0 120.0",
             ),
@@ -404,11 +408,12 @@ fn attribute_type_for_kind_inner(kind: &str, name: &str, fallback: &'static str)
         ("shape", "kind") => "enum: process|decision|terminator|ellipse",
         ("pattern", "kind") => "enum: grid|scatter",
         ("chart", "kind") => "enum: bar|line|sparkline|pie|donut",
-        // chart axis/legend/caption: chart-only attributes (validate/check/nodes/node/chart.rs).
+        // chart axis/legend/caption/bar-mode: chart-only attributes (validate/check/nodes/node/chart.rs).
         ("chart", "legend") => "bool",
         ("chart", "caption") => "string",
         ("chart", "axis-min" | "axis-max") => "f64",
         ("chart", "axis-style") => "string",
+        ("chart", "bar-mode") => "enum: grouped|stacked",
         // Asset surface (non-node): kind="" is used by attribute_type() / the
         // completeness drift test for non-node attributes.
         ("", "kind") => "enum: image|svg|font",

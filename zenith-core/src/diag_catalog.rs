@@ -434,6 +434,16 @@ pub const DIAGNOSTIC_CODES: &[DiagnosticCodeInfo] = &[
         "Page `parity` value is not recognized.",
     ),
     info(
+        "chart.category_count_mismatch",
+        Severity::Advisory,
+        "Chart `categories` label count does not match the series data-point count.",
+    ),
+    info(
+        "chart.invalid_bar_mode",
+        Severity::Warning,
+        "Chart `bar-mode` is not `grouped` or `stacked`.",
+    ),
+    info(
         "chart.invalid_kind",
         Severity::Error,
         "Chart `kind` is not one of bar|line|sparkline|pie|donut.",

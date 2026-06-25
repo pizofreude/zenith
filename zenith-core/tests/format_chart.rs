@@ -89,6 +89,125 @@ fn chart_parse_format_round_trip_with_series() {
     );
 }
 
+/// **Categories + bar-mode round-trip**: a `chart` with a `categories` child
+/// and `bar-mode="stacked"` and two series parses correctly, formats the
+/// `categories` line BEFORE the series lines, and re-parses to the same AST.
+#[test]
+fn chart_categories_and_bar_mode_round_trip() {
+    // NOTE: '#' inside strings requires r##...## quoting.
+    let src = r##"zenith version=1 {
+  project id="proj.cat" name="CatChart"
+  tokens format="zenith-token-v1" {
+    token id="color.a" type="color" value="#112233"
+  }
+  styles {
+  }
+  document id="doc.cat" title="CatChart" {
+    page id="page.cat" w=(px)800 h=(px)600 {
+      chart id="c.cat" kind="bar" bar-mode="stacked" x=(px)50 y=(px)50 w=(px)600 h=(px)400 {
+        categories "Q1" "Q2" "Q3"
+        series 10.0 20.0 30.0 label="A"
+        series 5.0 15.0 25.0 label="B" color=(token)"color.a"
+      }
+    }
+  }
+}
+"##;
+    let adapter = KdlAdapter;
+    let doc = adapter.parse(src.as_bytes()).expect("parse must succeed");
+
+    let chart = match &doc.body.pages[0].children[0] {
+        Node::Chart(c) => c,
+        other => panic!("expected Chart node, got {other:?}"),
+    };
+    assert_eq!(chart.id, "c.cat");
+    assert_eq!(chart.bar_mode, Some("stacked".to_owned()));
+    assert_eq!(
+        chart.categories,
+        vec!["Q1".to_owned(), "Q2".to_owned(), "Q3".to_owned()]
+    );
+    assert_eq!(chart.series.len(), 2);
+    assert_eq!(chart.series[0].values, vec![10.0, 20.0, 30.0]);
+    assert_eq!(chart.series[1].color, Some(token_ref("color.a")));
+
+    let formatted = format_document(&doc).expect("format must succeed");
+    let formatted_str = String::from_utf8(formatted.clone()).expect("formatted must be utf8");
+
+    // categories line must appear before the first series line.
+    let cat_pos = formatted_str
+        .find("categories")
+        .expect("must emit categories");
+    let series_pos = formatted_str.find("series").expect("must emit series");
+    assert!(
+        cat_pos < series_pos,
+        "categories must be emitted before series; got:\n{formatted_str}"
+    );
+    assert!(
+        formatted_str.contains("bar-mode=\"stacked\""),
+        "formatter must emit bar-mode; got:\n{formatted_str}"
+    );
+    assert!(
+        formatted_str.contains("\"Q1\""),
+        "formatter must emit Q1 category label; got:\n{formatted_str}"
+    );
+
+    // Round-trip: re-parse equals the first parse (spans stripped).
+    let reparsed = adapter.parse(&formatted).expect("re-parse after format");
+    assert_eq!(
+        strip_spans(doc),
+        strip_spans(reparsed),
+        "chart (with categories + bar-mode) must round-trip identically"
+    );
+}
+
+/// **No categories / no bar-mode = byte-identical**: a chart without those
+/// fields must not emit `categories` or `bar-mode` text in the formatted output,
+/// and must still round-trip.
+#[test]
+fn chart_without_categories_bar_mode_byte_identical() {
+    let src = r##"zenith version=1 {
+  project id="proj.plain" name="PlainChart"
+  styles {
+  }
+  document id="doc.plain" title="PlainChart" {
+    page id="page.plain" w=(px)800 h=(px)600 {
+      chart id="c.plain" kind="bar" x=(px)50 y=(px)50 w=(px)600 h=(px)400 {
+        series 1.0 2.0 3.0 label="S"
+      }
+    }
+  }
+}
+"##;
+    let adapter = KdlAdapter;
+    let doc = adapter.parse(src.as_bytes()).expect("parse must succeed");
+
+    let chart = match &doc.body.pages[0].children[0] {
+        Node::Chart(c) => c,
+        other => panic!("expected Chart node, got {other:?}"),
+    };
+    assert!(chart.categories.is_empty(), "categories must be empty");
+    assert_eq!(chart.bar_mode, None, "bar_mode must be None");
+
+    let formatted = format_document(&doc).expect("format must succeed");
+    let formatted_str = String::from_utf8(formatted.clone()).expect("formatted must be utf8");
+
+    assert!(
+        !formatted_str.contains("categories"),
+        "no categories field must not emit 'categories'; got:\n{formatted_str}"
+    );
+    assert!(
+        !formatted_str.contains("bar-mode"),
+        "no bar-mode field must not emit 'bar-mode'; got:\n{formatted_str}"
+    );
+
+    let reparsed = adapter.parse(&formatted).expect("re-parse after format");
+    assert_eq!(
+        strip_spans(doc),
+        strip_spans(reparsed),
+        "plain chart (no categories, no bar-mode) must round-trip identically"
+    );
+}
+
 /// **Absent chart is byte-identical**: a document that uses NO `chart` node
 /// formats exactly as it did before the feature existed (additive guarantee).
 #[test]

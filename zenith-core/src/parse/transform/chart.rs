@@ -1,8 +1,9 @@
 //! Transform for the `chart` node: the data-visualization primitive that
-//! carries one or more `series` data children. The common visual/geometry props
-//! are read exactly like `pattern`; the chart-specific props (`kind`, `title`,
-//! `caption`, `legend`, `axis-min`, `axis-max`, `axis-style`) describe the chart
-//! presentation. Series children are pure data (not renderable nodes).
+//! carries one or more `series` data children and an optional `categories`
+//! child. The common visual/geometry props are read exactly like `pattern`;
+//! the chart-specific props (`kind`, `title`, `caption`, `legend`,
+//! `axis-min`, `axis-max`, `axis-style`, `bar-mode`) describe the chart
+//! presentation. Series and categories children are pure data (not renderable nodes).
 
 use kdl::{KdlNode, KdlValue};
 
@@ -90,6 +91,8 @@ pub(crate) const CHART_KNOWN_PROPS: &[&str] = &[
     "axis_max",
     "axis-style",
     "axis_style",
+    "bar-mode",
+    "bar_mode",
 ];
 
 pub(super) fn transform_chart(node: &KdlNode) -> Result<ChartNode, ParseError> {
@@ -128,48 +131,76 @@ pub(super) fn transform_chart(node: &KdlNode) -> Result<ChartNode, ParseError> {
         optional_f64_prop(node, "axis-max").or_else(|| optional_f64_prop(node, "axis_max"));
     let axis_style =
         optional_string_prop_aliased(node, "axis-style", "axis_style").map(str::to_owned);
+    let bar_mode = optional_string_prop_aliased(node, "bar-mode", "bar_mode").map(str::to_owned);
 
-    // Series: each `series` child node in the chart's block becomes a ChartSeries.
-    // Positional arguments are the f64 data values; named props are label/color/data-ref.
+    // Series and categories: each `series` child node becomes a ChartSeries;
+    // the single `categories` child carries string positional args as category labels.
+    // Both are pure data children — not renderable nodes.
     let mut series: Vec<ChartSeries> = Vec::new();
+    let mut categories: Vec<String> = Vec::new();
     if let Some(children_block) = node.children() {
         for child in children_block.nodes() {
-            if child.name().value() != "series" {
-                // Non-series children are silently ignored at parse time.
-                // The validator will flag unrecognised child node names if needed.
-                continue;
-            }
-            // Collect positional f64 arguments as data values.
-            let mut values: Vec<f64> = Vec::new();
-            for entry in child.entries() {
-                if entry.name().is_some() {
-                    // Named prop — handled separately below.
-                    continue;
+            match child.name().value() {
+                "series" => {
+                    // Collect positional f64 arguments as data values.
+                    let mut values: Vec<f64> = Vec::new();
+                    for entry in child.entries() {
+                        if entry.name().is_some() {
+                            // Named prop — handled separately below.
+                            continue;
+                        }
+                        match entry.value() {
+                            KdlValue::Float(v) => values.push(*v),
+                            KdlValue::Integer(n) => values.push(*n as f64),
+                            other => {
+                                return Err(ParseError::spanless(
+                                    ParseErrorCode::InvalidPropertyValue,
+                                    format!(
+                                        "chart '{id}': series value must be a number, got: {other:?}"
+                                    ),
+                                ));
+                            }
+                        }
+                    }
+
+                    let label = optional_string_prop(child, "label").map(str::to_owned);
+                    let color = optional_property_value(child, "color");
+                    let data_ref = optional_string_prop(child, "data-ref")
+                        .or_else(|| optional_string_prop(child, "data_ref"))
+                        .map(str::to_owned);
+
+                    series.push(ChartSeries {
+                        label,
+                        color,
+                        data_ref,
+                        values,
+                    });
                 }
-                match entry.value() {
-                    KdlValue::Float(v) => values.push(*v),
-                    KdlValue::Integer(n) => values.push(*n as f64),
-                    other => {
-                        return Err(ParseError::spanless(
-                            ParseErrorCode::InvalidPropertyValue,
-                            format!("chart '{id}': series value must be a number, got: {other:?}"),
-                        ));
+                "categories" => {
+                    // Collect positional string arguments as category labels.
+                    for entry in child.entries() {
+                        if entry.name().is_some() {
+                            // Named props are not expected on a categories node; skip.
+                            continue;
+                        }
+                        match entry.value() {
+                            KdlValue::String(s) => categories.push(s.clone()),
+                            other => {
+                                return Err(ParseError::spanless(
+                                    ParseErrorCode::InvalidPropertyValue,
+                                    format!(
+                                        "chart '{id}': category label must be a string, got: {other:?}"
+                                    ),
+                                ));
+                            }
+                        }
                     }
                 }
+                _ => {
+                    // Other children are silently ignored at parse time.
+                    // The validator will flag unrecognised child node names if needed.
+                }
             }
-
-            let label = optional_string_prop(child, "label").map(str::to_owned);
-            let color = optional_property_value(child, "color");
-            let data_ref = optional_string_prop(child, "data-ref")
-                .or_else(|| optional_string_prop(child, "data_ref"))
-                .map(str::to_owned);
-
-            series.push(ChartSeries {
-                label,
-                color,
-                data_ref,
-                values,
-            });
         }
     }
 
@@ -233,6 +264,8 @@ pub(super) fn transform_chart(node: &KdlNode) -> Result<ChartNode, ParseError> {
         axis_min,
         axis_max,
         axis_style,
+        bar_mode,
+        categories,
         series,
         source_span: node_span(node),
         unknown_props,

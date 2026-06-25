@@ -552,6 +552,7 @@ pub(super) fn write_chart(c: &ChartNode, out: &mut String, depth: usize) {
         let _ = write!(out, " axis-max={v}");
     }
     write_opt_str(out, "axis-style", &c.axis_style);
+    write_opt_str(out, "bar-mode", &c.bar_mode);
     write_opt_property_value(out, "radius", &c.radius);
     write_opt_property_value(out, "radius-tl", &c.radius_tl);
     write_opt_property_value(out, "radius-tr", &c.radius_tr);
@@ -590,10 +591,24 @@ pub(super) fn write_chart(c: &ChartNode, out: &mut String, depth: usize) {
         out.push_str(&fmt_unknown_property(prop));
     }
 
-    // Series children: one `series` line per entry with data values as positional
-    // args and label/color/data-ref as named props. The block is always emitted
-    // (even when empty) so parse → format → parse is byte-stable.
+    // Child block: always emitted (even when empty) so parse → format → parse is byte-stable.
+    // Order: categories line first (when non-empty), then series lines.
     out.push_str(" {\n");
+
+    // Categories child: emitted only when non-empty (empty = absent, byte-identical).
+    if !c.categories.is_empty() {
+        indent(out, depth + 1);
+        out.push_str("categories");
+        for label in &c.categories {
+            out.push_str(" \"");
+            out.push_str(&escape_kdl_string(label));
+            out.push('"');
+        }
+        out.push('\n');
+    }
+
+    // Series children: one `series` line per entry with data values as positional
+    // args and label/color/data-ref as named props.
     for s in &c.series {
         indent(out, depth + 1);
         out.push_str("series");

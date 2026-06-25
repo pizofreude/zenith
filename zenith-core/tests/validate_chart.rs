@@ -128,6 +128,146 @@ fn chart_duplicate_id_fires_id_duplicate() {
     );
 }
 
+/// Valid `bar-mode` values ("grouped", "stacked") produce no `chart.invalid_bar_mode`.
+#[test]
+fn chart_valid_bar_mode_no_diagnostic() {
+    for bar_mode in ["grouped", "stacked"] {
+        let src = format!(
+            r##"zenith version=1 {{
+  project id="proj.bm" name="BarMode"
+  styles {{
+  }}
+  document id="doc.bm" title="BarMode" {{
+    page id="page.bm" w=(px)800 h=(px)600 {{
+      chart id="c.bm" kind="bar" bar-mode="{bar_mode}" x=(px)0 y=(px)0 w=(px)400 h=(px)300 {{
+        series 1.0 2.0 label="S"
+      }}
+    }}
+  }}
+}}
+"##
+        );
+        let adapter = KdlAdapter;
+        let doc = adapter.parse(src.as_bytes()).expect("parse must succeed");
+        let report = validate(&doc);
+        assert!(
+            !has_code(&report, "chart.invalid_bar_mode"),
+            "bar-mode={bar_mode:?} must not fire chart.invalid_bar_mode; got: {:?}",
+            codes(&report)
+        );
+    }
+}
+
+/// A bogus `bar-mode` value fires `chart.invalid_bar_mode`.
+#[test]
+fn chart_invalid_bar_mode_fires_diagnostic() {
+    let src = r##"zenith version=1 {
+  project id="proj.ibm" name="InvalidBarMode"
+  styles {
+  }
+  document id="doc.ibm" title="InvalidBarMode" {
+    page id="page.ibm" w=(px)800 h=(px)600 {
+      chart id="c.ibm" kind="bar" bar-mode="clustered" x=(px)0 y=(px)0 w=(px)400 h=(px)300 {
+        series 1.0 2.0 label="S"
+      }
+    }
+  }
+}
+"##;
+    let adapter = KdlAdapter;
+    let doc = adapter.parse(src.as_bytes()).expect("parse must succeed");
+    let report = validate(&doc);
+    assert!(
+        has_code(&report, "chart.invalid_bar_mode"),
+        "bogus bar-mode must fire chart.invalid_bar_mode; got: {:?}",
+        codes(&report)
+    );
+}
+
+/// Matching categories count and series data count produces no mismatch diagnostic.
+#[test]
+fn chart_matching_categories_no_mismatch() {
+    let src = r##"zenith version=1 {
+  project id="proj.mc" name="MatchCat"
+  styles {
+  }
+  document id="doc.mc" title="MatchCat" {
+    page id="page.mc" w=(px)800 h=(px)600 {
+      chart id="c.mc" kind="bar" x=(px)0 y=(px)0 w=(px)400 h=(px)300 {
+        categories "Q1" "Q2" "Q3"
+        series 10.0 20.0 30.0 label="S1"
+        series 5.0 15.0 25.0 label="S2"
+      }
+    }
+  }
+}
+"##;
+    let adapter = KdlAdapter;
+    let doc = adapter.parse(src.as_bytes()).expect("parse must succeed");
+    let report = validate(&doc);
+    assert!(
+        !has_code(&report, "chart.category_count_mismatch"),
+        "matching categories must not fire chart.category_count_mismatch; got: {:?}",
+        codes(&report)
+    );
+}
+
+/// Mismatched categories count vs. series data count fires `chart.category_count_mismatch`.
+#[test]
+fn chart_category_count_mismatch_fires_diagnostic() {
+    // categories has 3 labels but series has 2 data points.
+    let src = r##"zenith version=1 {
+  project id="proj.cm" name="CatMismatch"
+  styles {
+  }
+  document id="doc.cm" title="CatMismatch" {
+    page id="page.cm" w=(px)800 h=(px)600 {
+      chart id="c.cm" kind="bar" x=(px)0 y=(px)0 w=(px)400 h=(px)300 {
+        categories "Q1" "Q2" "Q3"
+        series 10.0 20.0 label="S"
+      }
+    }
+  }
+}
+"##;
+    let adapter = KdlAdapter;
+    let doc = adapter.parse(src.as_bytes()).expect("parse must succeed");
+    let report = validate(&doc);
+    assert!(
+        has_code(&report, "chart.category_count_mismatch"),
+        "category/series count mismatch must fire chart.category_count_mismatch; got: {:?}",
+        codes(&report)
+    );
+}
+
+/// An empty `categories` (absent) produces no mismatch diagnostic even when
+/// series lengths differ.
+#[test]
+fn chart_no_categories_no_mismatch() {
+    let src = r##"zenith version=1 {
+  project id="proj.nc2" name="NoCatMismatch"
+  styles {
+  }
+  document id="doc.nc2" title="NoCatMismatch" {
+    page id="page.nc2" w=(px)800 h=(px)600 {
+      chart id="c.nc2" kind="bar" x=(px)0 y=(px)0 w=(px)400 h=(px)300 {
+        series 1.0 2.0 3.0 label="S1"
+        series 10.0 20.0 label="S2"
+      }
+    }
+  }
+}
+"##;
+    let adapter = KdlAdapter;
+    let doc = adapter.parse(src.as_bytes()).expect("parse must succeed");
+    let report = validate(&doc);
+    assert!(
+        !has_code(&report, "chart.category_count_mismatch"),
+        "absent categories must not fire chart.category_count_mismatch; got: {:?}",
+        codes(&report)
+    );
+}
+
 /// A chart missing geometry (x/y/w/h absent) outside a flow parent fires
 /// `node.missing_geometry`, proving that geometry validation runs on chart nodes.
 #[test]

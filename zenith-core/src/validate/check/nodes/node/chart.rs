@@ -149,6 +149,46 @@ pub(in crate::validate::check) fn check_chart(
         ));
     }
 
+    // Validate bar-mode against the recognized set {"grouped", "stacked"}.
+    // Unknown values are a Warning (governable) — mirrors kind's validation style
+    // but Advisory→Warning because the value is semantically meaningful at render
+    // time and a typo would silently fall back to default.
+    if let Some(bar_mode) = &c.bar_mode {
+        let bar_mode_known = matches!(bar_mode.as_str(), "grouped" | "stacked");
+        if !bar_mode_known {
+            diagnostics.push(Diagnostic::warning(
+                "chart.invalid_bar_mode",
+                format!(
+                    "chart '{}': bar-mode '{}' is not recognized; \
+                     expected \"grouped\" or \"stacked\"",
+                    c.id, bar_mode
+                ),
+                c.source_span,
+                Some(c.id.clone()),
+            ));
+        }
+    }
+
+    // Validate categories count vs. series data length.
+    // Emitted as Advisory (governable) when categories is non-empty and its count
+    // does not match the maximum series value count.
+    if !c.categories.is_empty() {
+        let max_series_len = c.series.iter().map(|s| s.values.len()).max().unwrap_or(0);
+        if c.categories.len() != max_series_len {
+            diagnostics.push(Diagnostic::advisory(
+                "chart.category_count_mismatch",
+                format!(
+                    "chart '{}': {} category labels but {} data points per series",
+                    c.id,
+                    c.categories.len(),
+                    max_series_len,
+                ),
+                c.source_span,
+                Some(c.id.clone()),
+            ));
+        }
+    }
+
     // Series color token refs — series are pure data but their color props are
     // PropertyValue token refs that must be counted as used.
     for s in &c.series {
