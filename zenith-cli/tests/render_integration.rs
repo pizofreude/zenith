@@ -189,6 +189,11 @@ fn table_zen_renders_to_valid_png() {
 }
 
 #[test]
+fn chart_zen_renders_to_valid_png() {
+    assert_example_renders("chart");
+}
+
+#[test]
 fn noise_zen_renders_to_valid_png() {
     assert_example_renders("noise");
 }
