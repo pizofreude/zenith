@@ -164,7 +164,7 @@ jobs:
       - name: Stamp release version into server.json
         run: |
           VERSION="${{ needs.validate-version.outputs.version }}"
-          jq --arg v "$VERSION" '.version = $v | .packages[0].version = $v' server.json > server.json.tmp
+          jq --arg v "$VERSION" '.version = $v' server.json > server.json.tmp
           mv server.json.tmp server.json
           cat server.json
       - name: Install mcp-publisher
