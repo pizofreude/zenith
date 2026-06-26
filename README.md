@@ -24,7 +24,7 @@ Plain-text <strong>.zen</strong> design files that you can read, diff, review, v
   <a href="https://github.com/zenitheditor/zenith/releases"><img src="https://img.shields.io/github/v/release/zenitheditor/zenith?include_prereleases&label=release" alt="Latest GitHub release"></a>
   <a href="https://crates.io/crates/zenith-tool"><img src="https://img.shields.io/crates/v/zenith-tool?label=crates.io" alt="zenith-tool on crates.io"></a>
   <a href="https://crates.io/crates/zenith-tool"><img src="https://img.shields.io/crates/d/zenith-tool?label=downloads" alt="crates.io downloads"></a>
-  <a href="https://registry.modelcontextprotocol.io/server/io.github.zenitheditor/zenith"><img src="https://img.shields.io/badge/MCP-registry-5b5bd6" alt="MCP registry listing"></a>
+  <a href="https://github.com/mcp/zenitheditor/zenith"><img src="https://img.shields.io/badge/MCP-registry-5b5bd6" alt="MCP registry listing"></a>
   <a href="https://github.com/zenitheditor/zenith-showcase"><img src="https://img.shields.io/badge/showcase-examples-0a7f5a" alt="Zenith showcase examples"></a>
   <a href="LICENSE"><img src="https://img.shields.io/github/license/zenitheditor/zenith" alt="License"></a>
 </p>
