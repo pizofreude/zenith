@@ -48,6 +48,7 @@ zenith validate examples/<name>.zen --json
 | Decorations                              | [`decorations.zen`](decorations.zen) | ![decorations](decorations.png) |
 | Code (syntax highlighting, dark + light) | [`code.zen`](code.zen)               | ![code](code.png)               |
 | Inline markdown from an external file     | [`markdown.zen`](markdown.zen)       | ![markdown](markdown.png)       |
+| Block-level markdown article (headings, paragraphs, per-role styling) | [`article.zen`](article.zen) | ![article](article.png) |
 
 ## Layout & composition
 

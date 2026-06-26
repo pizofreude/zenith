@@ -228,6 +228,11 @@ fn markdown_zen_renders_to_valid_png() {
     assert_example_renders("markdown");
 }
 
+#[test]
+fn article_zen_renders_to_valid_png() {
+    assert_example_renders("article");
+}
+
 // ── --locked sha256 verification ────────────────────────────────────────────────
 
 /// Path to the workspace-root `examples/` directory (where `assets/swatch.png`
