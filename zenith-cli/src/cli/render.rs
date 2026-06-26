@@ -83,6 +83,8 @@ pub struct RenderArgs {
     /// `(data)"field.path"` references. JSON nested keys flatten to dot-paths
     /// (`{"a":{"b":1}}` → `"a.b"`); a JSON array uses the first element. CSV
     /// header row gives field names; the first data row supplies values.
+    /// Produces a SINGLE render bound to the first object/row; for BATCH output
+    /// (one PNG per CSV row with a provenance manifest) use `zenith merge` instead.
     #[arg(long, value_name = "FILE")]
     pub data: Option<PathBuf>,
 }

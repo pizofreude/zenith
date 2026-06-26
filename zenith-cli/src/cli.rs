@@ -115,7 +115,9 @@ pub enum Command {
     /// Mail-merge a .zen template with a CSV, writing one PNG per row. Mark variable
     /// nodes with role="data.<column>" (text nodes substitute their text; image nodes substitute
     /// their asset path) where <column> matches a CSV header. Use this for localized posts,
-    /// personalized graphics, certificates, badges, and campaign variants.
+    /// personalized graphics, certificates, badges, and campaign variants. For a SINGLE
+    /// data-bound render (first object/row, via `(data)"field.path"` references) use
+    /// `zenith render --data` instead.
     Merge(MergeArgs),
 
     /// Discover and materialize reusable design assets (tokens, components, actions).
