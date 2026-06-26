@@ -15,16 +15,18 @@ Plain-text <strong>.zen</strong> design files that you can read, diff, review, v
   <a href="#quick-start"><strong>Quick start</strong></a> 
   <a href="#what-it-does"><strong>Features</strong></a> 
   <a href="#validation--the-safety-net"><strong>Validation</strong></a>
-  <a href="#command-surface"><strong>Commands</strong></a>
+  <a href="#command-surface"><strong>Commands</strong></a> 
   <a href="#use-with-your-coding-agent"><strong>Agents</strong></a>
 </p>
 
 <p>
-  <a href="LICENSE"><img src="https://img.shields.io/badge/license-Apache--2.0-blue" alt="License: Apache-2.0"></a>
-  <a href="https://doc.rust-lang.org/edition-guide/rust-2024/index.html"><img src="https://img.shields.io/badge/edition-2024-purple" alt="Edition 2024"></a>
-  <img src="https://img.shields.io/badge/unsafe-forbidden-green" alt="Unsafe: forbidden">
-  <img src="https://img.shields.io/badge/deps-C--free-green" alt="C-free dependencies">
-  <a href="#status"><img src="https://img.shields.io/badge/status-pre--0.1-yellow" alt="Status: pre-0.1"></a>
+  <a href="https://github.com/zenitheditor/zenith/actions/workflows/ci.yml"><img src="https://github.com/zenitheditor/zenith/actions/workflows/ci.yml/badge.svg" alt="CI status"></a>
+  <a href="https://github.com/zenitheditor/zenith/releases"><img src="https://img.shields.io/github/v/release/zenitheditor/zenith?include_prereleases&label=release" alt="Latest GitHub release"></a>
+  <a href="https://crates.io/crates/zenith-tool"><img src="https://img.shields.io/crates/v/zenith-tool?label=crates.io" alt="zenith-tool on crates.io"></a>
+  <a href="https://crates.io/crates/zenith-tool"><img src="https://img.shields.io/crates/d/zenith-tool?label=downloads" alt="crates.io downloads"></a>
+  <a href="https://registry.modelcontextprotocol.io/server/io.github.zenitheditor/zenith"><img src="https://img.shields.io/badge/MCP-registry-5b5bd6" alt="MCP registry listing"></a>
+  <a href="https://github.com/zenitheditor/zenith-showcase"><img src="https://img.shields.io/badge/showcase-examples-0a7f5a" alt="Zenith showcase examples"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/github/license/zenitheditor/zenith" alt="License"></a>
 </p>
 
 <sub><i>Every banner and diagram in this README is itself created using Zenith — source in <a href="assets/showcase">assets/showcase/</a>.</i></sub>
