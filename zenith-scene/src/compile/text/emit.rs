@@ -107,15 +107,14 @@ pub(in crate::compile) fn emit_lines_profiled<F>(
             None => {}
         }
 
-        // Left indent (blockquote / list item in the chain block flow): shift the
-        // text origin right by `left_indent_px` and shrink the usable width by the
-        // same so wrapped/aligned text stays inside the box. `0.0` (every existing
-        // path) leaves the arithmetic untouched → output byte-identical. RTL
-        // applies the same left-side shift (a documented nuance: an RTL blockquote
-        // would conventionally indent on the right, not yet handled).
+        // Block indent (blockquote / list item in the chain block flow): narrow the
+        // usable width by `left_indent_px` on the LEADING edge — the left for LTR
+        // (shift the origin right), the right for RTL (keep the origin, just shrink
+        // the box) so the indent sits on the side where the script begins. `0.0`
+        // (every existing path) leaves the arithmetic untouched → byte-identical.
         let indent = line.left_indent_px;
-        let text_x = geom_x + indent;
         let box_w = (geom_w - indent).max(0.0);
+        let text_x = if is_rtl { geom_x } else { geom_x + indent };
         // Per-line scalars: use the line's own override when present, else fall
         // back to the node-global values. When `line_style` is `None` for every
         // line (all existing paths) the values are identical to the old hoisted
