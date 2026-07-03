@@ -1,8 +1,8 @@
 //! `zenith new` — scaffold a fresh, valid `.zen` document.
 //!
-//! Wiring only: the scaffolding logic lives in [`scaffold`] and the page-size
-//! resolution (named formats, explicit dimensions, orientation, page count) in
-//! [`page`].
+//! Wiring only: the scaffolding logic lives in the private `scaffold` submodule
+//! and the page-size resolution (named formats, explicit dimensions,
+//! orientation, page count) in [`page`].
 
 pub mod page;
 mod scaffold;
