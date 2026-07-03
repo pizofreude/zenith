@@ -389,7 +389,11 @@ pub struct VariantArgs {
 
 /// Arguments for `zenith new`.
 #[derive(Debug, Args)]
-#[command(after_help = "EXAMPLE:\n  zenith new poster.zen --name \"Launch Poster\"")]
+#[command(after_help = "EXAMPLES:\n  \
+    zenith new poster.zen --name \"Launch Poster\"\n  \
+    zenith new flyer.zen --format a4\n  \
+    zenith new deck.zen --format letter --landscape --pages 12\n  \
+    zenith new banner.zen --width 1600 --height 400")]
 pub struct NewArgs {
     /// Path to create the new document at (must not already exist). A `.zen`
     /// extension is appended if absent, and missing parent directories are created.
@@ -399,6 +403,28 @@ pub struct NewArgs {
     /// "Untitled"; the id slug is derived from this, else from the file stem.
     #[arg(long, value_name = "NAME")]
     pub name: Option<String>,
+
+    /// Named paper format for the page size (e.g. a4, b5, letter). Sets width
+    /// and height; `--width`/`--height` override a single axis. Omit for the
+    /// default 1080×1080 square.
+    #[arg(long, value_enum, value_name = "FORMAT")]
+    pub format: Option<crate::commands::new::PaperFormat>,
+
+    /// Page width in document pixels. Overrides the width from `--format`.
+    #[arg(long, value_name = "PX", value_parser = clap::value_parser!(u32).range(1..))]
+    pub width: Option<u32>,
+
+    /// Page height in document pixels. Overrides the height from `--format`.
+    #[arg(long, value_name = "PX", value_parser = clap::value_parser!(u32).range(1..))]
+    pub height: Option<u32>,
+
+    /// Use landscape orientation (swap the width and height of `--format`).
+    #[arg(long)]
+    pub landscape: bool,
+
+    /// Number of pages to create (each a stable `page.N` id at the page size).
+    #[arg(long, default_value_t = 1, value_name = "N", value_parser = clap::value_parser!(u32).range(1..))]
+    pub pages: u32,
 }
 
 /// Arguments for `zenith validate`.

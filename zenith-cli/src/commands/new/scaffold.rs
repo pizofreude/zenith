@@ -6,15 +6,19 @@
 //! hand-authoring boilerplate.
 //!
 //! The template is synthesized from a slug (derived from `--name`, else from the
-//! target path's file stem), canonicalized through the engine formatter
-//! ([`crate::commands::fmt::run`]), then run through the shared history pipeline
-//! ([`crate::history::record_edit_in`]) with op_kind `"document.new"` so the
-//! written bytes carry the stamped identity and the first version is durable.
+//! target path's file stem) at the requested [`PageSpec`] geometry, canonicalized
+//! through the engine formatter ([`crate::commands::fmt::run`]), then run through
+//! the shared history pipeline ([`crate::history::record_edit_in`]) with op_kind
+//! `"document.new"` so the written bytes carry the stamped identity and the first
+//! version is durable.
 
 use std::path::{Path, PathBuf};
 
+use zenith_core::{KdlAdapter, KdlSource as _};
 use zenith_session::StorePaths;
+use zenith_session::adapter::{OsClock, OsRng};
 
+use super::page::PageSpec;
 use crate::history::record_edit_in;
 
 // ── Result / error types ────────────────────────────────────────────────────────
@@ -47,8 +51,9 @@ pub struct NewResult {
 ///
 /// Refuses to overwrite an existing `path` (returns `Err` without touching it).
 /// `name` is the optional display name; when absent, "Untitled" is used and the
-/// slug is derived from `path`'s file stem.
-pub fn run(path: &Path, name: Option<&str>) -> Result<NewResult, NewErr> {
+/// slug is derived from `path`'s file stem. `page` gives the per-page dimensions
+/// and page count.
+pub fn run(path: &Path, name: Option<&str>, page: PageSpec) -> Result<NewResult, NewErr> {
     let paths = match zenith_session::resolve_data_dir() {
         Ok(data_dir) => StorePaths::new(data_dir),
         Err(e) => {
@@ -58,7 +63,7 @@ pub fn run(path: &Path, name: Option<&str>) -> Result<NewResult, NewErr> {
             });
         }
     };
-    run_in(&paths, path, name)
+    run_in(&paths, path, name, page)
 }
 
 /// Same as [`run`] but with an explicit store root (used by tests).
@@ -66,7 +71,12 @@ pub fn run(path: &Path, name: Option<&str>) -> Result<NewResult, NewErr> {
 /// Refuses to overwrite an existing `path`. On success, the file at `path` has
 /// been written with a freshly minted + stamped `doc-id`, and the initial
 /// version has been recorded into `paths`.
-pub fn run_in(paths: &StorePaths, path: &Path, name: Option<&str>) -> Result<NewResult, NewErr> {
+pub fn run_in(
+    paths: &StorePaths,
+    path: &Path,
+    name: Option<&str>,
+    page: PageSpec,
+) -> Result<NewResult, NewErr> {
     // A directory can't be a document target.
     if path.is_dir() {
         return Err(NewErr {
@@ -92,7 +102,7 @@ pub fn run_in(paths: &StorePaths, path: &Path, name: Option<&str>) -> Result<New
 
     // Synthesize the template, then canonicalize through the engine formatter so
     // the output is valid + canonical and any emission bug surfaces as an error.
-    let raw = emit(&slug, display_name);
+    let raw = emit(&slug, display_name, page);
     let canonical = crate::commands::fmt::run(&raw).map_err(|e| NewErr {
         message: format!(
             "internal: scaffolded document failed to format: {}",
@@ -105,12 +115,23 @@ pub fn run_in(paths: &StorePaths, path: &Path, name: Option<&str>) -> Result<New
     // history pipeline. The returned bytes carry the stamped identity.
     let recorded = record_edit_in(paths, &canonical.formatted, &target, "document.new");
 
-    if recorded.doc_id.is_empty() {
-        return Err(NewErr {
-            message: "internal: no doc-id present after recording".to_string(),
-            exit_code: 2,
+    // History recording is best-effort and must never block creating the file.
+    // In the normal path `record_edit_in` mints, stamps, and records a doc-id.
+    // If the history store is unavailable (e.g. reconcile/parse failed) it comes
+    // back with an empty id and a warning — but a brand-new document must still
+    // be born with an identity. Mint + stamp one directly so `new` always yields
+    // a valid, identity-carrying `.zen`, surfacing the recording failure as a
+    // (non-fatal) warning rather than aborting.
+    let (bytes, doc_id, warning) = if recorded.doc_id.is_empty() {
+        let (stamped, minted) = mint_and_stamp(&canonical.formatted)?;
+        let warning = Some(match recorded.warning {
+            Some(w) => format!("history unavailable, doc-id minted locally: {w}"),
+            None => "history unavailable; doc-id minted locally".to_string(),
         });
-    }
+        (stamped, minted, warning)
+    } else {
+        (recorded.bytes, recorded.doc_id, recorded.warning)
+    };
 
     // Create any missing parent directories so `new sub/dir/doc.zen` just works.
     if let Some(parent) = target.parent()
@@ -123,19 +144,45 @@ pub fn run_in(paths: &StorePaths, path: &Path, name: Option<&str>) -> Result<New
         })?;
     }
 
-    std::fs::write(&target, &recorded.bytes).map_err(|e| NewErr {
+    std::fs::write(&target, &bytes).map_err(|e| NewErr {
         message: format!("error writing '{}': {}", target.display(), e),
         exit_code: 2,
     })?;
 
     Ok(NewResult {
         path: target,
-        doc_id: recorded.doc_id,
-        warning: recorded.warning,
+        doc_id,
+        warning,
     })
 }
 
 // ── Helpers ─────────────────────────────────────────────────────────────────────
+
+/// Mint a fresh ULID doc-id and stamp it into `canonical` `.zen` bytes, returning
+/// the re-formatted bytes and the minted id.
+///
+/// Used only as a fallback when the history pipeline could not attach an id (its
+/// store was unavailable): a new document must still be created with a stable
+/// identity even when local history recording is impossible.
+fn mint_and_stamp(canonical: &[u8]) -> Result<(Vec<u8>, String), NewErr> {
+    let id = zenith_session::mint_ulid(&OsClock, &OsRng).map_err(|e| NewErr {
+        message: format!("internal: could not mint doc-id: {}", e.message),
+        exit_code: 2,
+    })?;
+    let mut doc = KdlAdapter.parse(canonical).map_err(|e| NewErr {
+        message: format!(
+            "internal: scaffolded document failed to parse: {}",
+            e.message
+        ),
+        exit_code: 2,
+    })?;
+    doc.doc_id = Some(id.clone());
+    let bytes = KdlAdapter.format(&doc).map_err(|e| NewErr {
+        message: format!("internal: failed to stamp doc-id: {}", e.message),
+        exit_code: 2,
+    })?;
+    Ok((bytes, id))
+}
 
 /// The on-disk target path: append a default `.zen` extension when `path` has
 /// none, else respect the path exactly as given.
@@ -190,12 +237,30 @@ fn slugify(input: &str) -> String {
     out
 }
 
-/// Emit the minimal valid `.zen` source for `slug` / `name`.
-fn emit(slug: &str, name: &str) -> String {
+/// Emit the minimal valid `.zen` source for `slug` / `name` at the given page
+/// geometry.
+///
+/// Each of `page.pages` pages gets a stable `page.N` id (1-based) at the
+/// requested pixel size. A single default-square page reproduces the original
+/// hard-coded template byte-for-byte after canonicalization.
+fn emit(slug: &str, name: &str, page: PageSpec) -> String {
     // `name` may contain characters that need escaping inside a KDL string; the
     // formatter re-quotes canonically, so a backslash/quote escape here is enough
     // to keep the intermediate source parseable.
     let esc = escape_kdl_string(name);
+    let PageSpec {
+        width,
+        height,
+        pages,
+    } = page;
+
+    let mut page_nodes = String::new();
+    for n in 1..=pages {
+        page_nodes.push_str(&format!(
+            "    page id=\"page.{n}\" w=(px){width} h=(px){height} background=(token)\"color.bg\" {{}}\n"
+        ));
+    }
+
     format!(
         r##"zenith version=1 {{
   project id="proj.{slug}" name="{esc}"
@@ -203,8 +268,7 @@ fn emit(slug: &str, name: &str) -> String {
     token id="color.bg" type="color" value="#ffffff"
   }}
   document id="doc.{slug}" title="{esc}" {{
-    page id="page.1" w=(px)1080 h=(px)1080 background=(token)"color.bg" {{}}
-  }}
+{page_nodes}  }}
 }}
 "##
     )
@@ -231,6 +295,7 @@ fn escape_kdl_string(s: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::commands::new::page::DEFAULT_PAGE;
 
     #[test]
     fn slug_from_name_takes_precedence() {
@@ -252,11 +317,26 @@ mod tests {
 
     #[test]
     fn template_formats_clean() {
-        let raw = emit("demo", "Demo");
+        let raw = emit("demo", "Demo", DEFAULT_PAGE);
         let r = crate::commands::fmt::run(&raw).expect("template must format");
         let s = String::from_utf8(r.formatted).unwrap();
         assert!(s.contains("doc.demo"));
         assert!(s.contains("page.1"));
+    }
+
+    #[test]
+    fn emit_honors_dimensions_and_page_count() {
+        let spec = PageSpec {
+            width: 794,
+            height: 1123,
+            pages: 3,
+        };
+        let raw = emit("demo", "Demo", spec);
+        let r = crate::commands::fmt::run(&raw).expect("template must format");
+        let s = String::from_utf8(r.formatted).unwrap();
+        assert!(s.contains("(px)794"), "width honored; got:\n{s}");
+        assert!(s.contains("(px)1123"), "height honored; got:\n{s}");
+        assert!(s.contains("page.1") && s.contains("page.2") && s.contains("page.3"));
     }
 
     #[test]

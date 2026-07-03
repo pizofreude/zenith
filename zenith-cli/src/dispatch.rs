@@ -20,23 +20,38 @@ pub fn run() -> ExitCode {
     let cli = Cli::parse();
 
     match cli.command {
-        Command::New(args) => match commands::new::run(&args.path, args.name.as_deref()) {
-            Ok(result) => {
-                if let Some(w) = &result.warning {
-                    eprintln!("warning: {w}");
+        Command::New(args) => {
+            let page = match commands::new::resolve_page(
+                args.format,
+                args.width,
+                args.height,
+                args.landscape,
+                args.pages,
+            ) {
+                Ok(p) => p,
+                Err(msg) => {
+                    eprintln!("{msg}");
+                    return ExitCode::from(2);
                 }
-                println!(
-                    "created '{}' (doc-id: {})",
-                    result.path.display(),
-                    result.doc_id
-                );
-                ExitCode::SUCCESS
+            };
+            match commands::new::run(&args.path, args.name.as_deref(), page) {
+                Ok(result) => {
+                    if let Some(w) = &result.warning {
+                        eprintln!("warning: {w}");
+                    }
+                    println!(
+                        "created '{}' (doc-id: {})",
+                        result.path.display(),
+                        result.doc_id
+                    );
+                    ExitCode::SUCCESS
+                }
+                Err(e) => {
+                    eprintln!("{}", e.message);
+                    ExitCode::from(e.exit_code)
+                }
             }
-            Err(e) => {
-                eprintln!("{}", e.message);
-                ExitCode::from(e.exit_code)
-            }
-        },
+        }
 
         Command::Validate(args) => {
             let src = match read_file(&args.path) {
