@@ -55,6 +55,11 @@ zenith library add @acme/brand#<item> --into doc.zen --page page.hero   # materi
   action (a `tx` that does `update_token_value` on `color.brand`, etc.) — preview with
   `zenith tx doc.zen brand.tx.json`, then `--apply`. No geometry changes; the palette swaps
   consistently everywhere.
+- Or merge the whole pack's token set directly, no action needed:
+  `zenith theme apply @acme/brand doc.zen` (dry-run, then `--apply`). Works for any pack that
+  carries a `tokens` block — project or embedded; `zenith library list` shows `(tokens: N)` for
+  each. Tokens applied this way carry `set="@acme/brand"` provenance. Actions remain the right
+  tool when a re-skin needs to do more than swap token values.
 - This is why the engine insists on tokens: brand application is a token-value diff, not a
   redraw.
 
@@ -72,8 +77,9 @@ can be elevated to blocking Errors via `--deny` or an in-file `diagnostics` poli
    user's brand (palette, fonts, spacing, voice).
 2. Create/locate the `libraries/<brand>.zen` pack with the brand tokens (+ an apply action).
 3. New documents: start from the brand tokens (or `templates/`), keep every fill/size a token.
-4. Existing documents: apply the brand action via `tx` (dry-run, then `--apply`), `validate`,
+4. Existing documents: apply the brand action via `tx`, or merge the whole pack with
+   `zenith theme apply @<brand-pack> <file>` (dry-run, then `--apply`), then `validate`,
    `render`, and confirm it reads on-brand.
 
-Verify op names/flags with `zenith tx --help` and `zenith library --help`; don't assume an op
-exists without checking.
+Verify op names/flags with `zenith tx --help`, `zenith theme apply --help`, and
+`zenith library --help`; don't assume an op exists without checking.

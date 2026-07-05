@@ -49,6 +49,11 @@ pub fn run() -> ExitCode {
                         result.path.display(),
                         result.doc_id
                     );
+                    if args.theme.is_none() {
+                        println!(
+                            "tip: start on a theme with --theme <name> (run `zenith library list` to see themes)"
+                        );
+                    }
                     ExitCode::SUCCESS
                 }
                 Err(e) => {

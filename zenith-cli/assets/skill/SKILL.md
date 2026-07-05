@@ -63,10 +63,14 @@ Zenith is deterministic and auditable; lean into that instead of guessing.
 
 1. **Plan in source.** Capture the brief, palette, and layer plan as `note`/`role="guide"`
    content or a sidecar, so the design can be traced back to intent.
-2. **Author / edit.** For **new** work, start from `zenith new <path>` — it scaffolds a valid,
-   minimal top-level skeleton (`zenith version=1 { project … tokens … styles … document { page … } }`)
-   with a doc-id already minted; edit that rather than hand-writing the outer structure from memory
-   (run `zenith schema document` / `zenith schema page` for the exact top-level shape). For **changes**
+2. **Author / edit.** For **new** work, start from `zenith new <path> --theme <name>` when no
+   project brand exists (`.zenith/brand.md` / `libraries/*.zen`) — it scaffolds the full theme
+   token contract (10 embedded themes: `cobalt`, `ember`, `harbor`, `lagoon`, `pine`, `poppy`,
+   `prism`, `sorbet`, `sunset`, `volt`; `zenith library list` shows them) on top of the minimal
+   top-level skeleton (`zenith version=1 { project … tokens … styles … document { page … } }`)
+   with a doc-id already minted. Fall back to a bare `zenith new <path>` only when the doc really
+   should start unthemed. Edit the scaffold rather than hand-writing the outer structure from
+   memory (run `zenith schema document` / `zenith schema page` for the exact top-level shape). For **changes**
    to existing nodes, apply a typed transaction with `zenith tx` — prefer it for edits: it is dry-run
    by default, shows a source + scene diff, and enforces id-uniqueness and referential integrity.
    Note: KDL nodes are **one per line** — a node and all its attributes go on a single line (or end
@@ -132,7 +136,7 @@ example). Most commands support `--json` for machine-readable output. The groups
 **author** (`new` — scaffold a fresh document; `validate`, `fmt`, `tokens`, `inspect`), **render**
 (`render`), **edit** (`tx` — typed, dry-run by default), **variants** (`variant` — size/format
 variants from one page; `merge` — CSV data mail-merge), **library** (`library list`/`add`),
-**theme** (`theme new`), **fonts** (`fonts` — list Bundled vs Local/system families), **workspace**
+**theme** (`theme new`, `theme apply`), **fonts** (`fonts` — list Bundled vs Local/system families), **workspace**
 (`workspace scratch`/`candidate`/`promote`/`finalize`/`bundle`/`unbundle` — store-backed scratch
 candidates), and **history** (`history`, `undo`, `redo`, `version`, `restore`, `sync`). Do not
 memorize flags from this file — ask the CLI.
@@ -148,7 +152,7 @@ Read only the pack you need for the current sub-task (progressive disclosure). E
 
 | The task involves…                                                                                                                                                                                                                                                                                                                                                                                                                | Read / command                                                                                                   |
 | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------- |
-| Starting a brand-new document, or the top-level file structure (`zenith { project tokens styles document { page } }`)                                                                                                                                                                                                                                                                                                             | `zenith new <path>` · `zenith schema document` · `zenith schema page`                                            |
+| Starting a brand-new document, or the top-level file structure (`zenith { project tokens styles document { page } }`)                                                                                                                                                                                                                                                                                                             | `zenith new <path> --theme <name>` · `zenith schema document` · `zenith schema page`                             |
 | Node/attribute names, types, required/optional status                                                                                                                                                                                                                                                                                                                                                                             | `zenith schema node <kind>` · `zenith schema nodes`                                                              |
 | Transaction op fields and semantics                                                                                                                                                                                                                                                                                                                                                                                               | `zenith schema op <name>` · `zenith schema ops`                                                                  |
 | Command flags and usage                                                                                                                                                                                                                                                                                                                                                                                                           | `zenith <cmd> --help`                                                                                            |
@@ -158,7 +162,7 @@ Read only the pack you need for the current sub-task (progressive disclosure). E
 | Driving Zenith where the CLI can't run (remote/CI/sandboxed/hosted agents) — the MCP server                                                                                                                                                                                                                                                                                                                                       | `references/agentic-workflow.md` (MCP section) + `zenith mcp --help`                                             |
 | Procedural grid/scatter tiling — the `pattern` node or the `detach_pattern` op                                                                                                                                                                                                                                                                                                                                                    | `references/pattern.md`                                                                                          |
 | Recording a generated motif as a `recipes` block (provenance, seed/params, recipe `tx` ops)                                                                                                                                                                                                                                                                                                                                       | `references/recipes-model.md`                                                                                    |
-| Picking or applying a ready-made visual theme (palette + shape language)                                                                                                                                                                                                                                                                                                                                                          | `references/themes.md` + `themes/*.zen`                                                                          |
+| Picking or applying a ready-made visual theme (palette + shape language)                                                                                                                                                                                                                                                                                                                                                          | `zenith new --theme <name>` · `zenith theme apply <name> <doc>` · `references/themes.md`                                                                          |
 | Generating a theme from a brand (logo, website, brand colors)                                                                                                                                                                                                                                                                                                                                                                     | `references/themes.md` → `zenith theme new --help`                                                               |
 | Color, gradients, glows, texture, typography, "make it premium" — visual effects                                                                                                                                                                                                                                                                                                                                                  | `zenith schema node <kind>` · `zenith schema token <type>` + design judgment                                     |
 | Page setup, anchors, safe zones, frames, grids, spreads                                                                                                                                                                                                                                                                                                                                                                           | `references/layout.md`                                                                                           |
@@ -181,11 +185,15 @@ Before authoring, check whether the project pins its own design system:
 1. **Brief for the agent** — if `.zenith/brand.md` exists in (or above) the working dir, **read
    it and conform to it** (palette, type, spacing, voice, do/don't). It overrides generic
    defaults. Scaffold one from `templates/brand.md` when the user wants to "set up a brand".
-2. **Machine brand kit** — project library packs under `libraries/*.zen` (and the embedded
-   presets) are materializable design systems. List them with `zenith library list <dir>` and
-   pull items in with `zenith library add @scope/pack#item --into <file> --page <id>`. A brand
-   kit pack can ship `actions` (typed `tx` bundles) that re-skin a document's tokens in one
-   step. See `references/brand.md`.
+2. **No brand yet** — start from an embedded theme: `zenith new <path> --theme <name>` for a new
+   doc, or `zenith theme apply <name|pack-id> <doc>` to re-skin one later. Project library packs
+   under `libraries/*.zen` (and the embedded presets) are materializable design systems too —
+   list them with `zenith library list <dir>` and pull items in with
+   `zenith library add @scope/pack#item --into <file> --page <id>`. A brand kit pack can also
+   ship `actions` (typed `tx` bundles) that re-skin a document's tokens in one step. See
+   `references/brand.md` and `references/themes.md`.
+3. **Bespoke palette** — only invent one when the user explicitly wants a look no embedded theme
+   or brand pack covers.
 
 Project config is loaded, not assumed: prefer the project's tokens/packs over inventing a new
 palette, so output stays on-brand and consistent across documents.

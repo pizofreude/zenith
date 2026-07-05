@@ -15,9 +15,11 @@ Read `references/brand.md` from the zenith skill, then:
 - **setup** → create `.zenith/brand.md` (scaffold from `templates/brand.md`) filled from the
   user's brand (palette roles, fonts, spacing, voice, do/don't), and a `libraries/<brand>.zen`
   pack holding the brand tokens (+ an `apply-<brand>` action). Confirm both with the user.
-- **apply <file>** → ensure the document's colors/fonts/sizes are tokens, then apply the brand
-  action with a transaction: `zenith tx <file> brand.tx.json` (dry-run) → review the diff →
-  `--apply`. Then `zenith validate` and `zenith render` and confirm it reads on-brand.
+- **apply <file>** → ensure the document's colors/fonts/sizes are tokens, then either apply the
+  brand action with a transaction (`zenith tx <file> brand.tx.json` (dry-run) → review the diff →
+  `--apply`), or merge the whole pack's tokens directly with
+  `zenith theme apply @<brand-pack> <file>` (dry-run, then `--apply`). Then `zenith validate` and
+  `zenith render` and confirm it reads on-brand.
 
 Prefer the project's existing tokens/packs over inventing a palette. Verify ops with
-`zenith tx --help` and `zenith library --help`.
+`zenith tx --help`, `zenith theme apply --help`, and `zenith library --help`.

@@ -2,12 +2,13 @@
 
 A **theme** is a complete set of design tokens (a palette _and_ a shape language) under a fixed
 id contract, so any document built on the contract can be re-skinned by swapping the theme.
-Themes live as `.zen` token packs in `themes/` next to this file.
+Themes ship as 10 embedded packs (`@zenith/theme.<name>`) built into the CLI — no files to
+find or copy; reach them via `zenith new --theme <name>` and `zenith theme apply <name> <doc>`.
 
 > Provenance: these are converted from daisyUI themes. daisyUI uses `oklch`; **Zenith colors
-> are sRGB hex / CMYK only**, so values are converted to hex. Each theme file is a token library
-> — validating one in isolation yields `token.unused` _advisories_ (not errors); that is
-> expected, because the preview doesn't reference every contract token.
+> are sRGB hex / CMYK only**, so values are converted to hex. A theme is a full contract, so a
+> document rarely uses every member — that rolls up into one `token.set_partially_used`
+> advisory (not an error) instead of per-token noise; see "Using a theme" below.
 
 ## The contract (token ids every theme defines)
 
@@ -53,13 +54,19 @@ Dark themes:
 
 Light/dark pairing suggestions: `sorbet`↔`pine`, `cobalt`↔`harbor`, `prism`↔`sunset`.
 
-(More themes are added over time; list the `themes/` dir to see the current set. To generate a
+(More themes are added over time; run `zenith library list` to see the current set. To generate a
 theme from brand colors — logo, website, or brand docs — run `zenith theme new --help`.)
 
 ## Using a theme
 
-**Start a new document on a theme** — copy the theme's `tokens { … }` block into your document
-(or start from `themes/<name>.zen`), then build every node with the role tokens:
+**Start a new document on a theme:**
+
+```bash
+zenith new doc.zen --theme sunset
+```
+
+This scaffolds the full contract below into `tokens { … }` and points the page background at
+`color.base.100`, so every node you add can build on the role tokens directly:
 
 ```kdl
 rect id="card" x=(px)80 y=(px)120 w=(px)600 h=(px)360 fill=(token)"color.base.200" radius=(token)"radius.box" shadow=(token)"shadow.depth"
@@ -71,10 +78,22 @@ text id="cta.t" x=(px)112 y=(px)416 w=(px)220 h=(px)40 fill=(token)"color.primar
 Because everything references the contract, putting `color.primary` text on `color.primary`
 fill uses `color.primary.content` — contrast handled by the theme.
 
-**Re-skin an existing document** that already uses the contract — apply a transaction that
-`update_token_value`s the contract tokens to another theme's values (preview with `zenith tx`,
-then `--apply`). Bundle this as a brand-kit `action` for one-step switching
-(`references/brand.md`).
+**Re-skin or switch an existing document's theme:**
+
+```bash
+zenith theme apply cobalt doc.zen           # preview the token diff (dry-run)
+zenith theme apply cobalt doc.zen --apply   # write it
+```
+
+`<pack>` is a bare embedded theme name or a full pack id (`@zenith/theme.cobalt`); it works for
+any pack that carries a `tokens` block, project or embedded (`zenith library list`). Switching
+light/dark, or between any two themes, is one `theme apply` away — no manual token editing.
+
+**Provenance:** tokens written by a theme carry `set="@zenith/theme.<name>"`. A theme file is a
+full contract, so a given document rarely uses every member; `validate` rolls those up into one
+`token.set_partially_used` advisory per set instead of a `token.unused` warning per token. Don't
+trim the contract down to just what's referenced — keeping it whole is what makes re-skinning a
+single `theme apply` instead of a hand-edit.
 
 ## Light / dark
 
@@ -84,7 +103,7 @@ swapping the token values). Pair a light theme with a dark one for the two modes
 
 ## Project default
 
-To make a theme the project default, copy its tokens into your starter/template (or a
-`libraries/<theme>.zen` pack) and reference it from `.zenith/brand.md` (`references/brand.md`).
+To make a theme the project default, note it in `.zenith/brand.md` (`references/brand.md`) so
+new documents start with `zenith new --theme <name>` and existing ones get `theme apply <name>`.
 Don't rely on an engine default — Zenith intentionally ships only default _fonts_, not a
 default palette; themes are explicit.
