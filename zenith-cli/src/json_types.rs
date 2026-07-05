@@ -84,6 +84,30 @@ pub struct TxOutputJson {
     pub changed: bool,
 }
 
+/// One skipped-token entry in the `zenith theme apply --json` extras.
+///
+/// `doc_type` is `None` when the theme token has no same-id counterpart in the
+/// document at all (an unencodable theme-side value, not a doc-side clash).
+#[derive(Debug, Serialize)]
+pub struct ThemeApplySkipJson {
+    pub id: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub doc_type: Option<String>,
+    pub theme_type: String,
+    pub reason: &'static str,
+}
+
+impl From<&crate::commands::theme::SkippedToken> for ThemeApplySkipJson {
+    fn from(s: &crate::commands::theme::SkippedToken) -> Self {
+        Self {
+            id: s.id.clone(),
+            doc_type: s.doc_type.clone(),
+            theme_type: s.theme_type.clone(),
+            reason: s.reason.label(),
+        }
+    }
+}
+
 /// Per-row result in the `merge --json` batch report.
 #[derive(Debug, Serialize)]
 pub struct MergeRowResult {

@@ -14,13 +14,12 @@
 
 use std::path::{Path, PathBuf};
 
-use zenith_core::{Document, KdlAdapter, KdlSource as _};
+use zenith_core::{KdlAdapter, KdlSource as _};
 use zenith_session::StorePaths;
 use zenith_session::adapter::{OsClock, OsRng};
 
 use super::page::PageSpec;
 use crate::history::record_edit_in;
-use crate::library::EMBEDDED_PACKS;
 
 // ── Result / error types ────────────────────────────────────────────────────────
 
@@ -76,10 +75,12 @@ pub fn run(
 ///
 /// Refuses to overwrite an existing `path`. On success, the file at `path` has
 /// been written with a freshly minted + stamped `doc-id`, and the initial
-/// version has been recorded into `paths`. When `theme` is given, it names an
-/// embedded theme pack (`@zenith/theme.<name>`, e.g. `sunset`) whose full token
-/// contract is copied in and whose `color.base.100` token becomes the page
-/// background, in place of the bare default `color.bg` token.
+/// version has been recorded into `paths`. When `theme` is given, it names a
+/// theme pack (a bare name like `sunset`, or a full pack id) resolved via
+/// [`crate::library::resolve_theme_pack`] — an embedded preset, or a project
+/// pack of the same name/id when one shadows it — whose full token contract is
+/// copied in and whose `color.base.100` token becomes the page background, in
+/// place of the bare default `color.bg` token.
 pub fn run_in(
     paths: &StorePaths,
     path: &Path,
@@ -114,7 +115,16 @@ pub fn run_in(
     // fast, before any file is touched. `theme_bg_token` is `Some` exactly when
     // a theme was applied, driving `emit`'s choice of background token and
     // tokens-block shape explicitly (no string-sentinel comparison).
-    let theme_pack = theme.map(resolve_theme_pack).transpose()?;
+    let theme_pack = theme
+        .map(|theme_name| {
+            crate::library::resolve_theme_pack(target.parent(), theme_name).map_err(|message| {
+                NewErr {
+                    message,
+                    exit_code: 2,
+                }
+            })
+        })
+        .transpose()?;
     let theme_bg_token = theme_pack.is_some().then_some("color.base.100");
 
     // Synthesize the template, then canonicalize through the engine formatter so
@@ -321,46 +331,6 @@ fn emit(slug: &str, name: &str, page: PageSpec, theme_bg_token: Option<&str>) ->
 }}
 "##
     )
-}
-
-/// Resolve `--theme <name>` to its embedded token pack's parsed [`Document`],
-/// for splicing its token block into a themed scaffold.
-///
-/// Looks up `@zenith/theme.<name>` in [`EMBEDDED_PACKS`] by exact id match. On
-/// a miss, returns a [`NewErr`] listing the available bare theme names (sorted,
-/// prefix stripped), mirroring `unknown_package_error`'s convention in
-/// `zenith-cli/src/library/add.rs`.
-fn resolve_theme_pack(name: &str) -> Result<Document, NewErr> {
-    let pkg_id = format!("@zenith/theme.{name}");
-    let source = EMBEDDED_PACKS
-        .iter()
-        .find(|(id, _)| *id == pkg_id)
-        .map(|(_, src)| *src)
-        .ok_or_else(|| {
-            let mut available: Vec<&str> = EMBEDDED_PACKS
-                .iter()
-                .filter_map(|(id, _)| id.strip_prefix("@zenith/theme."))
-                .collect();
-            available.sort_unstable();
-            NewErr {
-                message: format!(
-                    "unknown theme '{}' (available: {})",
-                    name,
-                    available.join(", ")
-                ),
-                exit_code: 2,
-            }
-        })?;
-
-    // Defensive: the source is embedded (bundled at build time), so a parse
-    // failure here indicates an internal packaging bug, not bad user input.
-    KdlAdapter.parse(source.as_bytes()).map_err(|e| NewErr {
-        message: format!(
-            "internal: embedded theme '{}' failed to parse: {}",
-            name, e.message
-        ),
-        exit_code: 2,
-    })
 }
 
 /// Escape characters that require backslash encoding inside a double-quoted KDL string.

@@ -543,6 +543,49 @@ pub fn run() -> ExitCode {
                     }
                 }
             }
+
+            cli::ThemeSub::Apply(a) => {
+                let doc_src = match read_file(&a.doc) {
+                    Ok(s) => s,
+                    Err(msg) => {
+                        eprintln!("{}", msg);
+                        return ExitCode::from(2);
+                    }
+                };
+
+                let outcome = match commands::theme::apply_run(a.doc.parent(), &a.pack, &doc_src) {
+                    Ok(o) => o,
+                    Err(e) => {
+                        eprintln!("{}", e.message);
+                        return ExitCode::from(e.exit_code);
+                    }
+                };
+
+                // Print output.
+                if a.json {
+                    println!("{}", outcome.json_str);
+                } else {
+                    println!("{}", outcome.human);
+                }
+
+                // Apply: persist source_after if requested and not rejected.
+                if a.apply && outcome.exit_code != 1 {
+                    let recorded = history::record_edit(
+                        outcome.result.source_after.as_bytes(),
+                        &a.doc,
+                        "theme.apply",
+                    );
+                    if let Some(w) = &recorded.warning {
+                        eprintln!("warning: {w}");
+                    }
+                    if let Err(e) = std::fs::write(&a.doc, &recorded.bytes) {
+                        eprintln!("error writing '{}': {}", a.doc.display(), e);
+                        return ExitCode::from(2);
+                    }
+                }
+
+                ExitCode::from(outcome.exit_code)
+            }
         },
 
         Command::Plugin(args) => {

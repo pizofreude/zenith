@@ -284,7 +284,21 @@ pub enum ThemeSub {
     /// Surfaces are tinted toward the primary; each role gets an APCA-correct `.content` pairing for
     /// WCAG 3 contrast. Captures radius, border, spacing, type, and optional depth/noise — not just
     /// colour. The output validates clean and can be merged into a document or used as a starting palette.
-    New(ThemeNewArgs),
+    New(Box<ThemeNewArgs>),
+
+    /// Re-skin a document's token values from a theme pack (dry-run by default).
+    ///
+    /// Re-skins an existing document's token values from a theme pack — a bare
+    /// embedded theme name (e.g. `sunset`) or a full pack id (e.g.
+    /// `@zenith/theme.cobalt`, or a project pack of the same shape) — via the
+    /// same typed transaction pipeline as `tx`. A token shared by id and type
+    /// with the theme gets its value replaced; a theme token absent from the
+    /// document is created; a same-id token of a different type, or a theme
+    /// value that can't be expressed as a scalar (a structured
+    /// gradient/shadow/filter/mask, or a `(token)` alias), is left untouched
+    /// and reported instead of guessed at. Tokens that exist only in the
+    /// document are never touched.
+    Apply(ThemeApplyArgs),
 }
 
 /// Arguments for `zenith theme new`.
@@ -363,6 +377,30 @@ pub struct ThemeNewArgs {
     /// Write to this path instead of stdout.
     #[arg(long, value_name = "FILE")]
     pub out: Option<PathBuf>,
+}
+
+/// Arguments for `zenith theme apply`.
+#[derive(Debug, Args)]
+#[command(after_help = "EXAMPLE:\n  \
+zenith theme apply cobalt poster.zen\n  \
+zenith theme apply cobalt poster.zen --apply\n\n\
+`<pack>` is a bare embedded theme name (e.g. `cobalt`) or a full pack id \
+(e.g. `@zenith/theme.cobalt`); a project pack of the same id, under \
+`libraries/`, shadows the embedded preset.")]
+pub struct ThemeApplyArgs {
+    /// Theme pack to apply: a bare name (e.g. `cobalt`) or a full pack id.
+    pub pack: String,
+
+    /// Path to the `.zen` document to re-skin.
+    pub doc: PathBuf,
+
+    /// Apply the result back to disk (dry-run by default).
+    #[arg(long)]
+    pub apply: bool,
+
+    /// Emit machine-readable JSON instead of a human-readable summary.
+    #[arg(long)]
+    pub json: bool,
 }
 
 /// Arguments for `zenith variant`.

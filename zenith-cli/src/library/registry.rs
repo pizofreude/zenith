@@ -9,7 +9,7 @@
 
 use std::path::{Path, PathBuf};
 
-use zenith_core::{KdlAdapter, KdlSource, TokenType};
+use zenith_core::{Document, KdlAdapter, KdlSource, TokenType};
 
 /// Embedded preset packs, as `(pack_id, pack_source)` pairs.
 ///
@@ -328,4 +328,67 @@ fn source_rank(source: &PackSource) -> u8 {
         PackSource::Project(_) => 0,
         PackSource::Preset => 1,
     }
+}
+
+/// Resolve a theme reference — a bare theme name (`sunset`) or a full pack id
+/// (`@zenith/theme.sunset`) — to its parsed [`Document`], for splicing its
+/// token block into another document (`zenith new --theme`, `zenith theme
+/// apply`).
+///
+/// A bare name (no leading `@`) is expanded to `@zenith/theme.<name>` before
+/// matching. Resolution goes through [`resolve_packs`], so a project pack
+/// (`<project_dir>/libraries/*.zen`) shadows an embedded preset of the same
+/// id, exactly like every other pack lookup.
+///
+/// # Errors
+///
+/// Returns a plain error message (no CLI-specific error type — callers map it
+/// into their own error struct) when no pack matches. A bare-name miss lists
+/// the available embedded theme names (sorted, `@zenith/theme.` prefix
+/// stripped) so the message stays actionable.
+pub fn resolve_theme_pack(
+    project_dir: Option<&Path>,
+    name_or_id: &str,
+) -> Result<Document, String> {
+    let target_id = if name_or_id.starts_with('@') {
+        name_or_id.to_owned()
+    } else {
+        format!("@zenith/theme.{name_or_id}")
+    };
+
+    let packs = resolve_packs(project_dir);
+    let pack = packs.iter().find(|p| p.id == target_id);
+
+    let source: String = match pack {
+        Some(p) => match &p.source {
+            PackSource::Preset => EMBEDDED_PACKS
+                .iter()
+                .find(|(id, _)| *id == target_id)
+                .map(|(_, src)| (*src).to_owned())
+                .ok_or_else(|| {
+                    format!(
+                        "internal: embedded pack '{}' is missing its source",
+                        target_id
+                    )
+                })?,
+            PackSource::Project(path) => std::fs::read_to_string(path)
+                .map_err(|e| format!("cannot read pack '{}': {}", path.display(), e))?,
+        },
+        None => {
+            let mut available: Vec<&str> = EMBEDDED_PACKS
+                .iter()
+                .filter_map(|(id, _)| id.strip_prefix("@zenith/theme."))
+                .collect();
+            available.sort_unstable();
+            return Err(format!(
+                "unknown theme '{}' (available: {})",
+                name_or_id,
+                available.join(", ")
+            ));
+        }
+    };
+
+    KdlAdapter
+        .parse(source.as_bytes())
+        .map_err(|e| format!("pack '{}' failed to parse: {}", target_id, e.message))
 }

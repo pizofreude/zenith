@@ -37,7 +37,7 @@ mod tests;
 
 pub use registry::{
     EMBEDDED_PACKS, ItemKind, LibraryPack, PackError, PackItem, PackSource, load_embedded_packs,
-    load_project_packs, parse_pack, resolve_packs,
+    load_project_packs, parse_pack, resolve_packs, resolve_theme_pack,
 };
 
 pub use add::{AddError, AddOutcome, collect_all_ids, load_pack_document, parse_spec};

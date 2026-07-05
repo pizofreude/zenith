@@ -92,11 +92,7 @@ fn opt(label: &str, s: Option<&str>) -> Result<Option<Rgb>, ThemeErr> {
 
 /// Format a px scalar without a trailing `.0` (so `16.0` → `16`, `1.5` → `1.5`).
 fn px(v: f64) -> String {
-    if v.fract() == 0.0 {
-        format!("{}", v as i64)
-    } else {
-        format!("{v}")
-    }
+    super::support::format_scalar(v)
 }
 
 /// Synthesize the theme and return canonical `.zen` source.
