@@ -2,6 +2,9 @@
 // scheme: light | depth: 1 | noise: 1 (1 = apply a noise/grain filter)
 zenith version=1 {
   project id="@zenith/theme.prism" name="Theme: prism"
+  libraries {
+    library id="@zenith/theme.prism" version="1.0.0"
+  }
   tokens format="zenith-token-v1" {
     token id="color.base.100" type="color" value="#f8f8f8"
     token id="color.base.200" type="color" value="#f5f5f5"

@@ -2,6 +2,9 @@
 // scheme: dark | depth: 0 | noise: 1 (1 = apply a noise/grain filter)
 zenith version=1 {
   project id="@zenith/theme.harbor" name="Theme: harbor"
+  libraries {
+    library id="@zenith/theme.harbor" version="1.0.0"
+  }
   tokens format="zenith-token-v1" {
     token id="color.base.100" type="color" value="#010515"
     token id="color.base.200" type="color" value="#0d1529"

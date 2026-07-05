@@ -2,6 +2,9 @@
 // scheme: light | depth: 0 | noise: 1 (1 = apply a noise/grain filter)
 zenith version=1 {
   project id="@zenith/theme.cobalt" name="Theme: cobalt"
+  libraries {
+    library id="@zenith/theme.cobalt" version="1.0.0"
+  }
   tokens format="zenith-token-v1" {
     token id="color.base.100" type="color" value="#f7f9fa"
     token id="color.base.200" type="color" value="#eef2f6"

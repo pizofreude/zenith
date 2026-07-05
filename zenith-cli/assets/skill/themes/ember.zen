@@ -2,6 +2,9 @@
 // scheme: dark | depth: 1 | noise: 1 (1 = apply a noise/grain filter)
 zenith version=1 {
   project id="@zenith/theme.ember" name="Theme: ember"
+  libraries {
+    library id="@zenith/theme.ember" version="1.0.0"
+  }
   tokens format="zenith-token-v1" {
     token id="color.base.100" type="color" value="#0b0908"
     token id="color.base.200" type="color" value="#1b1816"

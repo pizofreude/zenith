@@ -35,6 +35,46 @@ pub const EMBEDDED_PACKS: &[(&str, &str)] = &[
         "@zenith/brand-kit",
         include_str!("../../assets/libraries/zenith-brand-kit.zen"),
     ),
+    (
+        "@zenith/theme.cobalt",
+        include_str!("../../assets/skill/themes/cobalt.zen"),
+    ),
+    (
+        "@zenith/theme.ember",
+        include_str!("../../assets/skill/themes/ember.zen"),
+    ),
+    (
+        "@zenith/theme.harbor",
+        include_str!("../../assets/skill/themes/harbor.zen"),
+    ),
+    (
+        "@zenith/theme.lagoon",
+        include_str!("../../assets/skill/themes/lagoon.zen"),
+    ),
+    (
+        "@zenith/theme.pine",
+        include_str!("../../assets/skill/themes/pine.zen"),
+    ),
+    (
+        "@zenith/theme.poppy",
+        include_str!("../../assets/skill/themes/poppy.zen"),
+    ),
+    (
+        "@zenith/theme.prism",
+        include_str!("../../assets/skill/themes/prism.zen"),
+    ),
+    (
+        "@zenith/theme.sorbet",
+        include_str!("../../assets/skill/themes/sorbet.zen"),
+    ),
+    (
+        "@zenith/theme.sunset",
+        include_str!("../../assets/skill/themes/sunset.zen"),
+    ),
+    (
+        "@zenith/theme.volt",
+        include_str!("../../assets/skill/themes/volt.zen"),
+    ),
 ];
 
 /// Where a [`LibraryPack`] was loaded from.

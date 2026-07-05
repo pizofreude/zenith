@@ -152,6 +152,42 @@ mod tests {
     }
 
     #[test]
+    fn human_and_json_list_zero_item_theme_pack_header_only() {
+        let packs = resolve_packs(None);
+
+        let human = list(&packs, false);
+        let header_line = human
+            .lines()
+            .find(|line| line.contains("@zenith/theme.cobalt"))
+            .unwrap_or_else(|| panic!("theme.cobalt header line present; got: {}", human));
+        assert!(header_line.contains("[preset]"), "got: {}", header_line);
+        let next_line = human
+            .lines()
+            .skip_while(|line| !line.contains("@zenith/theme.cobalt"))
+            .nth(1)
+            .unwrap_or("");
+        assert!(
+            !next_line.trim_start().starts_with('#'),
+            "zero-item theme pack must have no item lines; next line: {}",
+            next_line
+        );
+
+        let json = list(&packs, true);
+        let value: serde_json::Value = serde_json::from_str(&json).expect("valid JSON");
+        let packs_json = value["packs"].as_array().expect("packs array");
+        let theme = packs_json
+            .iter()
+            .find(|p| p["id"] == "@zenith/theme.cobalt")
+            .expect("theme.cobalt pack present in JSON");
+        let items = theme["items"].as_array().expect("items array");
+        assert!(
+            items.is_empty(),
+            "theme.cobalt must export no items; got: {:?}",
+            items
+        );
+    }
+
+    #[test]
     fn version_falls_back_to_dash() {
         let pack = LibraryPack {
             id: "@x/y".to_owned(),
