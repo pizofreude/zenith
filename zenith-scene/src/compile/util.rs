@@ -27,24 +27,10 @@ pub(super) fn rotation_degrees(rotate: Option<&Dimension>) -> Option<f64> {
 /// nodes compile to a plain (layer-free) command stream, byte-identical to
 /// before blend-mode existed. Only non-normal recognized blends open a layer.
 pub(super) fn blend_mode_ir(s: Option<&str>) -> Option<BlendMode> {
-    match s {
-        Some("multiply") => Some(BlendMode::Multiply),
-        Some("screen") => Some(BlendMode::Screen),
-        Some("overlay") => Some(BlendMode::Overlay),
-        Some("darken") => Some(BlendMode::Darken),
-        Some("lighten") => Some(BlendMode::Lighten),
-        Some("color-dodge") => Some(BlendMode::ColorDodge),
-        Some("color-burn") => Some(BlendMode::ColorBurn),
-        Some("hard-light") => Some(BlendMode::HardLight),
-        Some("soft-light") => Some(BlendMode::SoftLight),
-        Some("difference") => Some(BlendMode::Difference),
-        Some("exclusion") => Some(BlendMode::Exclusion),
-        Some("hue") => Some(BlendMode::Hue),
-        Some("saturation") => Some(BlendMode::Saturation),
-        Some("color") => Some(BlendMode::Color),
-        Some("luminosity") => Some(BlendMode::Luminosity),
+    match s.and_then(BlendMode::from_kebab) {
         // "normal", None, and unrecognized values: no layer.
-        _ => None,
+        Some(BlendMode::Normal) | None => None,
+        Some(mode) => Some(mode),
     }
 }
 

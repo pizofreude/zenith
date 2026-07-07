@@ -34,6 +34,66 @@ pub enum BlendMode {
     Luminosity,
 }
 
+impl BlendMode {
+    /// Every variant, in declaration order — the single source of truth for
+    /// enumerating valid `blend-mode` values (schema help, diagnostics).
+    pub const ALL: [BlendMode; 16] = [
+        BlendMode::Normal,
+        BlendMode::Multiply,
+        BlendMode::Screen,
+        BlendMode::Overlay,
+        BlendMode::Darken,
+        BlendMode::Lighten,
+        BlendMode::ColorDodge,
+        BlendMode::ColorBurn,
+        BlendMode::HardLight,
+        BlendMode::SoftLight,
+        BlendMode::Difference,
+        BlendMode::Exclusion,
+        BlendMode::Hue,
+        BlendMode::Saturation,
+        BlendMode::Color,
+        BlendMode::Luminosity,
+    ];
+
+    /// The kebab-case KDL attribute spelling for this variant (e.g.
+    /// `"color-dodge"`), matching the `serde(rename_all = "kebab-case")` form.
+    pub fn as_kebab(&self) -> &'static str {
+        match self {
+            BlendMode::Normal => "normal",
+            BlendMode::Multiply => "multiply",
+            BlendMode::Screen => "screen",
+            BlendMode::Overlay => "overlay",
+            BlendMode::Darken => "darken",
+            BlendMode::Lighten => "lighten",
+            BlendMode::ColorDodge => "color-dodge",
+            BlendMode::ColorBurn => "color-burn",
+            BlendMode::HardLight => "hard-light",
+            BlendMode::SoftLight => "soft-light",
+            BlendMode::Difference => "difference",
+            BlendMode::Exclusion => "exclusion",
+            BlendMode::Hue => "hue",
+            BlendMode::Saturation => "saturation",
+            BlendMode::Color => "color",
+            BlendMode::Luminosity => "luminosity",
+        }
+    }
+
+    /// Parse a kebab-case `blend-mode` attribute value; `None` if unrecognized.
+    pub fn from_kebab(s: &str) -> Option<BlendMode> {
+        Self::ALL.into_iter().find(|mode| mode.as_kebab() == s)
+    }
+
+    /// `"a|b|c"` list of every valid value, for schema/help output.
+    pub fn joined_kebab(sep: &str) -> String {
+        Self::ALL
+            .iter()
+            .map(BlendMode::as_kebab)
+            .collect::<Vec<_>>()
+            .join(sep)
+    }
+}
+
 /// An sRGB 8-bit color with pre-multiplied-independent alpha.
 ///
 /// `r`, `g`, `b`, `a` are all in `0..=255` (linear 8-bit sRGB per channel,

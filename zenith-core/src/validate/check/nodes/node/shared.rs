@@ -27,25 +27,7 @@ pub(in crate::validate::check) fn resolve_axis(dim: &Dimension, basis: f64) -> O
 /// Whether `s` is one of the recognized `blend-mode` values. Unknown values
 /// warn at validation time.
 pub(super) fn is_valid_blend_mode(s: &str) -> bool {
-    matches!(
-        s,
-        "normal"
-            | "multiply"
-            | "screen"
-            | "overlay"
-            | "darken"
-            | "lighten"
-            | "color-dodge"
-            | "color-burn"
-            | "hard-light"
-            | "soft-light"
-            | "difference"
-            | "exclusion"
-            | "hue"
-            | "saturation"
-            | "color"
-            | "luminosity"
-    )
+    crate::color::BlendMode::from_kebab(s).is_some()
 }
 
 /// Compute the authored bounding box `(x, y, w, h)` of a node in pixels.
@@ -1059,7 +1041,10 @@ pub(super) fn check_visual_props(
     {
         diagnostics.push(Diagnostic::warning(
             "node.unknown_property",
-            format!("{kind} '{id}': blend-mode '{bm}' is not a recognized value"),
+            format!(
+                "{kind} '{id}': blend-mode '{bm}' is not a recognized value; valid values are: {}",
+                crate::color::BlendMode::joined_kebab(", ")
+            ),
             source_span,
             Some(id.to_owned()),
         ));

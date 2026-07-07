@@ -38,8 +38,9 @@ pub(in crate::validate::check) fn check_text(
         diagnostics.push(Diagnostic::warning(
             "node.unknown_property",
             format!(
-                "text '{}': blend-mode '{bm}' is not a recognized value",
-                t.id
+                "text '{}': blend-mode '{bm}' is not a recognized value; valid values are: {}",
+                t.id,
+                crate::color::BlendMode::joined_kebab(", ")
             ),
             t.source_span,
             Some(t.id.clone()),
@@ -324,8 +325,9 @@ pub(in crate::validate::check) fn check_image(
         diagnostics.push(Diagnostic::warning(
             "node.unknown_property",
             format!(
-                "image '{}': blend-mode '{bm}' is not a recognized value",
-                img.id
+                "image '{}': blend-mode '{bm}' is not a recognized value; valid values are: {}",
+                img.id,
+                crate::color::BlendMode::joined_kebab(", ")
             ),
             img.source_span,
             Some(img.id.clone()),

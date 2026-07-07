@@ -315,8 +315,9 @@ pub(in crate::validate::check) fn check_ellipse(
         diagnostics.push(Diagnostic::warning(
             "node.unknown_property",
             format!(
-                "ellipse '{}': blend-mode '{bm}' is not a recognized value",
-                e.id
+                "ellipse '{}': blend-mode '{bm}' is not a recognized value; valid values are: {}",
+                e.id,
+                crate::color::BlendMode::joined_kebab(", ")
             ),
             e.source_span,
             Some(e.id.clone()),

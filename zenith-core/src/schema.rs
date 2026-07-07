@@ -622,7 +622,9 @@ fn attribute_type_generic(name: &str, fallback: &'static str) -> &'static str {
         "anchor-edge" => "enum: above|below|before|after",
         "align" => "enum: left|center|right|justify",
         "overflow" => "enum: clip|visible|scroll",
-        "blend-mode" => "string (enum)",
+        "blend-mode" => {
+            "enum: normal|multiply|screen|overlay|darken|lighten|color-dodge|color-burn|hard-light|soft-light|difference|exclusion|hue|saturation|color|luminosity"
+        }
         "stroke-alignment" => "enum: inside|center|outside",
         "stroke-linecap" => "enum: butt|round|square",
         "fill-rule" => "enum: nonzero|evenodd",
