@@ -26,7 +26,10 @@ use geometry::{
     GeometryDelta, apply_align_nodes, apply_align_to_edge, apply_distribute_nodes,
     apply_set_geometry,
 };
-use path::{apply_set_path_anchors, apply_simplify_path_anchors, apply_transform_path_anchors};
+use path::{
+    apply_insert_path_anchor, apply_set_path_anchors, apply_simplify_path_anchors,
+    apply_transform_path_anchors,
+};
 use pattern::apply_detach_pattern;
 use recipe::{RecipeScalars, apply_create_recipe, apply_delete_recipe, apply_update_recipe};
 use structure::{
@@ -224,6 +227,13 @@ fn apply_op(
             anchors,
         } => {
             apply_set_path_anchors(node_id, anchors, doc, diagnostics, affected);
+        }
+        Op::InsertPathAnchor {
+            node: node_id,
+            segment_index,
+            t,
+        } => {
+            apply_insert_path_anchor(node_id, *segment_index, *t, doc, diagnostics, affected);
         }
         Op::SimplifyPathAnchors {
             node: node_id,
@@ -465,6 +475,7 @@ fn op_lock_targets(op: &Op) -> Vec<&str> {
         | Op::SetGeometry { node, .. }
         | Op::SetPoints { node, .. }
         | Op::SetPathAnchors { node, .. }
+        | Op::InsertPathAnchor { node, .. }
         | Op::SimplifyPathAnchors { node, .. }
         | Op::TransformPathAnchors { node, .. }
         | Op::SetOpacity { node, .. }

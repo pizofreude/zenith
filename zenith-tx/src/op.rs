@@ -388,6 +388,29 @@ pub enum Op {
         /// Replacement anchor list. Each coordinate is in document pixels.
         anchors: Vec<OpPathAnchor>,
     },
+    /// Insert an anchor into a `path` node by splitting an existing segment.
+    ///
+    /// The path's `closed` flag and all non-anchor properties are preserved. Anchor
+    /// coordinates and complete in/out handle pairs must already be stored as px
+    /// values; missing required coordinates, non-px coordinates, or incomplete
+    /// handle pairs reject the op. Closed paths are supported, including the
+    /// closing segment from the last anchor back to the first anchor.
+    ///
+    /// Supported nodes: `path`.
+    /// Unsupported: all other variants — yields `tx.unsupported_property`.
+    ///
+    /// JSON example:
+    /// ```json
+    /// {"op":"insert_path_anchor","node":"path.logo","segment_index":0,"t":0.5}
+    /// ```
+    InsertPathAnchor {
+        /// The stable node `id` to target.
+        node: String,
+        /// Zero-based segment index to split.
+        segment_index: usize,
+        /// Normalized position along the segment. Must be finite and in the range 0..=1.
+        t: f64,
+    },
     /// Simplify an open `path` node's anchors using a pixel tolerance.
     ///
     /// This operation accepts path anchors with required `x`/`y` pixel

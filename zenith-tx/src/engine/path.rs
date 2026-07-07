@@ -1,5 +1,5 @@
-//! Path op application: `set_path_anchors`, `simplify_path_anchors`, and
-//! `transform_path_anchors`.
+//! Path op application: `set_path_anchors`, `insert_path_anchor`,
+//! `simplify_path_anchors`, and `transform_path_anchors`.
 
 use zenith_core::{Diagnostic, Dimension, Document, Node, PathAnchor as CorePathAnchor, Unit};
 use zenith_geometry::{
@@ -148,6 +148,80 @@ pub(super) fn apply_simplify_path_anchors(
                     diagnostics.push(Diagnostic::error(
                         "tx.unsupported_property",
                         format!("simplify_path_anchors is not supported on a {} node", kind),
+                        None,
+                        Some(node_id.to_owned()),
+                    ));
+                }
+            }
+        }
+    }
+}
+
+pub(super) fn apply_insert_path_anchor(
+    node_id: &str,
+    segment_index: usize,
+    t: f64,
+    doc: &mut Document,
+    diagnostics: &mut Vec<Diagnostic>,
+    affected: &mut Vec<String>,
+) {
+    match find_node_any_mut(doc, node_id) {
+        None => diagnostics.push(unknown_node(node_id)),
+        Some(node) => {
+            let kind = node_kind_str(node);
+            match node {
+                Node::Path(path) => {
+                    let geometry = match resolved_path_geometry(
+                        node_id,
+                        &path.anchors,
+                        path.closed == Some(true),
+                    ) {
+                        Ok(geometry) => geometry,
+                        Err(diagnostic) => {
+                            diagnostics.push(diagnostic);
+                            return;
+                        }
+                    };
+                    let (split, _) = match geometry.split_segment(segment_index, t) {
+                        Ok(split) => split,
+                        Err(error) => {
+                            diagnostics.push(insert_geometry_diagnostic(node_id, error));
+                            return;
+                        }
+                    };
+
+                    path.anchors = split
+                        .anchors()
+                        .iter()
+                        .map(|anchor| geometry_anchor_to_core(*anchor))
+                        .collect();
+                    record_affected(node_id, affected);
+                }
+                Node::Rect(_)
+                | Node::Ellipse(_)
+                | Node::Line(_)
+                | Node::Text(_)
+                | Node::Code(_)
+                | Node::Frame(_)
+                | Node::Group(_)
+                | Node::Image(_)
+                | Node::Polygon(_)
+                | Node::Polyline(_)
+                | Node::Instance(_)
+                | Node::Field(_)
+                | Node::Footnote(_)
+                | Node::Toc(_)
+                | Node::Table(_)
+                | Node::Shape(_)
+                | Node::Connector(_)
+                | Node::Pattern(_)
+                | Node::Chart(_)
+                | Node::Light(_)
+                | Node::Mesh(_)
+                | Node::Unknown(_) => {
+                    diagnostics.push(Diagnostic::error(
+                        "tx.unsupported_property",
+                        format!("insert_path_anchor is not supported on a {} node", kind),
                         None,
                         Some(node_id.to_owned()),
                     ));
@@ -435,6 +509,30 @@ fn transform_geometry_diagnostic(node_id: &str, error: GeometryError) -> Diagnos
         | GeometryError::NonPositiveTolerance
         | GeometryError::NonPositiveCount
         | GeometryError::CountOutOfRange => "transform_path_anchors geometry is invalid",
+    };
+
+    Diagnostic::error(
+        "tx.invalid_geometry",
+        message,
+        None,
+        Some(node_id.to_owned()),
+    )
+}
+
+fn insert_geometry_diagnostic(node_id: &str, error: GeometryError) -> Diagnostic {
+    let message = match error {
+        GeometryError::NonFiniteParameter => "insert_path_anchor t must be finite",
+        GeometryError::ParameterOutOfRange => "insert_path_anchor t must be between 0 and 1",
+        GeometryError::CountOutOfRange => {
+            "insert_path_anchor segment_index is outside the path segment range"
+        }
+        GeometryError::NonFinitePoint => "insert_path_anchor path coordinates must be finite",
+        GeometryError::NonFiniteTolerance
+        | GeometryError::NonPositiveTolerance
+        | GeometryError::NonPositiveCount
+        | GeometryError::DegenerateLine
+        | GeometryError::NonFiniteTransform
+        | GeometryError::SingularTransform => "insert_path_anchor geometry is invalid",
     };
 
     Diagnostic::error(

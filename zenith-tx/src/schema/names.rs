@@ -20,6 +20,7 @@ pub fn op_names() -> &'static [&'static str] {
         "duplicate_page",
         "find_replace_text",
         "group",
+        "insert_path_anchor",
         "move_backward",
         "move_forward",
         "move_to_back",

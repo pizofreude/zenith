@@ -44,6 +44,7 @@ fn op_tag(op: &Op) -> &'static str {
         Op::SetGeometry { .. } => "set_geometry",
         Op::SetPoints { .. } => "set_points",
         Op::SetPathAnchors { .. } => "set_path_anchors",
+        Op::InsertPathAnchor { .. } => "insert_path_anchor",
         Op::SimplifyPathAnchors { .. } => "simplify_path_anchors",
         Op::TransformPathAnchors { .. } => "transform_path_anchors",
         Op::AddNode { .. } => "add_node",
@@ -95,6 +96,7 @@ fn all_exhaustive_tags() -> BTreeSet<&'static str> {
         "set_geometry",
         "set_points",
         "set_path_anchors",
+        "insert_path_anchor",
         "simplify_path_anchors",
         "transform_path_anchors",
         "add_node",
@@ -217,6 +219,11 @@ fn op_tag_strings_match_exhaustive_set() {
         Op::SetPathAnchors {
             node: String::new(),
             anchors: vec![],
+        },
+        Op::InsertPathAnchor {
+            node: String::new(),
+            segment_index: 0,
+            t: 0.5,
         },
         Op::SimplifyPathAnchors {
             node: String::new(),
@@ -533,6 +540,14 @@ fn op_fields_names_match_serde_keys() {
                     out_x: Some(10.0),
                     out_y: Some(0.0),
                 }],
+            },
+        ),
+        (
+            "insert_path_anchor",
+            Op::InsertPathAnchor {
+                node: "n".into(),
+                segment_index: 0,
+                t: 0.5,
             },
         ),
         (
