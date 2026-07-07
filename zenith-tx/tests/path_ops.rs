@@ -58,6 +58,8 @@ mod handle_movement;
 mod projection_insertion;
 #[path = "path_ops/snap.rs"]
 mod snap;
+#[path = "path_ops/symmetry.rs"]
+mod symmetry;
 
 #[test]
 fn insert_path_anchor_open_line_split_inserts_midpoint() {

@@ -22,6 +22,7 @@ pub fn op_names() -> &'static [&'static str] {
         "group",
         "insert_path_anchor",
         "insert_path_anchor_at_point",
+        "make_path_symmetric",
         "move_backward",
         "move_forward",
         "move_path_anchor",

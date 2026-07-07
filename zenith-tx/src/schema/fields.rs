@@ -353,6 +353,41 @@ pub fn op_fields(name: &str) -> Option<&'static [OpFieldSchema]> {
             ];
             Some(F)
         }
+        "make_path_symmetric" => {
+            static F: &[OpFieldSchema] = &[
+                OpFieldSchema {
+                    name: "node",
+                    ty: "node id",
+                    required: true,
+                },
+                OpFieldSchema {
+                    name: "id_prefix",
+                    ty: "string",
+                    required: true,
+                },
+                OpFieldSchema {
+                    name: "count",
+                    ty: "usize 2..=72",
+                    required: true,
+                },
+                OpFieldSchema {
+                    name: "cx",
+                    ty: "px",
+                    required: true,
+                },
+                OpFieldSchema {
+                    name: "cy",
+                    ty: "px",
+                    required: true,
+                },
+                OpFieldSchema {
+                    name: "start_angle_degrees",
+                    ty: "f64 degrees",
+                    required: false,
+                },
+            ];
+            Some(F)
+        }
         "add_node" => {
             static F: &[OpFieldSchema] = &[
                 OpFieldSchema {

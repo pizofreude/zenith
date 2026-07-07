@@ -52,6 +52,7 @@ fn op_tag(op: &Op) -> &'static str {
         Op::SimplifyPathAnchors { .. } => "simplify_path_anchors",
         Op::TransformPathAnchors { .. } => "transform_path_anchors",
         Op::SnapPathAnchors { .. } => "snap_path_anchors",
+        Op::MakePathSymmetric { .. } => "make_path_symmetric",
         Op::AddNode { .. } => "add_node",
         Op::RemoveNode { .. } => "remove_node",
         Op::SetOpacity { .. } => "set_opacity",
@@ -104,6 +105,7 @@ fn all_exhaustive_tags() -> BTreeSet<&'static str> {
         "set_path_anchors",
         "insert_path_anchor",
         "insert_path_anchor_at_point",
+        "make_path_symmetric",
         "move_path_anchor",
         "move_path_handle",
         "simplify_path_anchors",
@@ -271,6 +273,14 @@ fn op_tag_strings_match_exhaustive_set() {
             node: String::new(),
             target: String::new(),
             tolerance: 1.0,
+        },
+        Op::MakePathSymmetric {
+            node: String::new(),
+            id_prefix: "copy.".into(),
+            count: 4,
+            cx: 0.0,
+            cy: 0.0,
+            start_angle_degrees: 0.0,
         },
         Op::AddNode {
             parent: String::new(),
@@ -650,6 +660,17 @@ fn op_fields_names_match_serde_keys() {
                 node: "n".into(),
                 target: "target".into(),
                 tolerance: 4.0,
+            },
+        ),
+        (
+            "make_path_symmetric",
+            Op::MakePathSymmetric {
+                node: "n".into(),
+                id_prefix: "n.sym.".into(),
+                count: 4,
+                cx: 10.0,
+                cy: 20.0,
+                start_angle_degrees: 0.0,
             },
         ),
         (

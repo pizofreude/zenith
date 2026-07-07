@@ -16,6 +16,7 @@ mod geometry;
 mod path;
 mod path_handle;
 mod path_snap;
+mod path_symmetry;
 mod pattern;
 mod recipe;
 pub(crate) mod structure;
@@ -35,6 +36,7 @@ use path::{
 };
 use path_handle::{MovePathHandleArgs, apply_move_path_handle};
 use path_snap::apply_snap_path_anchors;
+use path_symmetry::{MakePathSymmetricArgs, apply_make_path_symmetric};
 use pattern::apply_detach_pattern;
 use recipe::{RecipeScalars, apply_create_recipe, apply_delete_recipe, apply_update_recipe};
 use structure::{
@@ -317,6 +319,28 @@ fn apply_op(
         } => {
             apply_snap_path_anchors(node_id, target, *tolerance, doc, diagnostics, affected);
         }
+        Op::MakePathSymmetric {
+            node: node_id,
+            id_prefix,
+            count,
+            cx,
+            cy,
+            start_angle_degrees,
+        } => {
+            apply_make_path_symmetric(
+                MakePathSymmetricArgs {
+                    node_id,
+                    id_prefix,
+                    count: *count,
+                    cx: *cx,
+                    cy: *cy,
+                    start_angle_degrees: *start_angle_degrees,
+                },
+                doc,
+                diagnostics,
+                affected,
+            );
+        }
         Op::AddNode {
             parent,
             position,
@@ -578,6 +602,7 @@ fn op_lock_targets(op: &Op) -> Vec<&str> {
         | Op::SetVisible { .. }
         | Op::AddNode { .. }
         | Op::DuplicateNode { .. }
+        | Op::MakePathSymmetric { .. }
         | Op::DuplicatePage { .. }
         | Op::Group { .. }
         | Op::Ungroup { .. }

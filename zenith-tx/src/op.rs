@@ -594,6 +594,37 @@ pub enum Op {
         /// Maximum accepted nearest-boundary distance in pixels.
         tolerance: f64,
     },
+    /// Materialize radial symmetry copies of one `path` as editable sibling path nodes.
+    ///
+    /// The source path remains unchanged and represents symmetry index 0. The
+    /// op generates indexes `1..count-1` using deterministic radial transforms
+    /// around `cx`,`cy`, inserts each transformed copy immediately after the
+    /// source path in index order, and assigns copy ids as `id_prefix + index`.
+    /// Anchor coordinates and complete in/out handle pairs must already be
+    /// stored as px values.
+    ///
+    /// Supported source nodes: `path`.
+    /// Unsupported source variants yield `tx.unsupported_property`.
+    ///
+    /// JSON example:
+    /// ```json
+    /// {"op":"make_path_symmetric","node":"path.seed","id_prefix":"path.seed.sym.","count":4,"cx":100,"cy":100}
+    /// ```
+    MakePathSymmetric {
+        /// Stable source path `id`.
+        node: String,
+        /// Prefix used to form generated ids; copy ids are `id_prefix + index`.
+        id_prefix: String,
+        /// Total radial positions including the unchanged source path.
+        count: usize,
+        /// Symmetry center X coordinate in pixels.
+        cx: f64,
+        /// Symmetry center Y coordinate in pixels.
+        cy: f64,
+        /// Optional starting angle in degrees for generated transform index 0.
+        #[serde(default)]
+        start_angle_degrees: f64,
+    },
     /// Construct a new node from a `.zen` source fragment and insert it into a
     /// container (a page, group, or frame) at a chosen position.
     ///

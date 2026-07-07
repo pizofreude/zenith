@@ -47,6 +47,9 @@ pub fn op_example(name: &str) -> Option<&'static str> {
         "snap_path_anchors" => Some(
             r#"{"op":"snap_path_anchors","node":"path.logo","target":"path.guide","tolerance":4}"#,
         ),
+        "make_path_symmetric" => Some(
+            r#"{"op":"make_path_symmetric","node":"path.seed","id_prefix":"path.seed.sym.","count":4,"cx":100,"cy":100}"#,
+        ),
         "add_node" => Some(
             r#"{"op":"add_node","parent":"page.main","source":"rect id=\"box\" x=(px)10 y=(px)10 w=(px)100 h=(px)80 fill=(token)\"color.accent\""}"#,
         ),
