@@ -36,6 +36,7 @@ pub use error::GeometryError;
 pub use fit::{
     PolylineCubicFit, PolylineEndpointTangentDirections, chord_length_parameters,
     estimate_endpoint_tangent_directions, fit_cubic_bezier_to_points, fit_cubic_beziers_to_points,
+    fit_cubic_path_anchors_to_points,
 };
 pub use guide::{ConstructionGuide, modular_guides, polar_guides, ratio_guides};
 pub use intersection::{

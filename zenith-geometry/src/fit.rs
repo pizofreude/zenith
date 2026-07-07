@@ -1,4 +1,4 @@
-use crate::{CubicBezier, GeometryError, Point2, validation::validate_tolerance};
+use crate::{CubicBezier, GeometryError, PathAnchor, Point2, validation::validate_tolerance};
 
 const MIN_HANDLE_SCALE: f64 = 1.0e-6;
 const MAX_CUBIC_FIT_SEGMENTS: usize = 4096;
@@ -119,6 +119,36 @@ pub fn fit_cubic_beziers_to_points(
     let mut curves = Vec::new();
     fit_cubic_bezier_range(&compacted_points, max_error_squared, &mut curves)?;
     Ok(Some(curves))
+}
+
+pub fn fit_cubic_path_anchors_to_points(
+    points: &[Point2],
+    max_error: f64,
+) -> Result<Option<Vec<PathAnchor>>, GeometryError> {
+    let Some(curves) = fit_cubic_beziers_to_points(points, max_error)? else {
+        return Ok(None);
+    };
+    cubic_curves_to_path_anchors(&curves).map(Some)
+}
+
+fn cubic_curves_to_path_anchors(curves: &[CubicBezier]) -> Result<Vec<PathAnchor>, GeometryError> {
+    let mut anchors = Vec::with_capacity(curves.len().saturating_add(1));
+    let Some(first) = curves.first().copied() else {
+        return Ok(anchors);
+    };
+
+    anchors.push(PathAnchor::new(first.p0, None, Some(first.p1))?);
+
+    for (index, curve) in curves.iter().copied().enumerate() {
+        let next = curves.get(index + 1).copied();
+        anchors.push(PathAnchor::new(
+            curve.p3,
+            Some(curve.p2),
+            next.map(|next_curve| next_curve.p1),
+        )?);
+    }
+
+    Ok(anchors)
 }
 
 fn compact_consecutive_points(points: &[Point2]) -> Result<Vec<Point2>, GeometryError> {
@@ -714,5 +744,36 @@ mod tests {
         assert_eq!(curves.len(), 1);
         assert_point_close(curves[0].p0, point(0.0, 0.0));
         assert_point_close(curves[0].p3, point(3.0, 0.0));
+    }
+
+    #[test]
+    fn cubic_path_anchor_fit_converts_curves_to_open_path_anchors() {
+        let anchors = fit_cubic_path_anchors_to_points(
+            &[
+                point(0.0, 0.0),
+                point(1.0, 3.0),
+                point(2.0, -3.0),
+                point(3.0, 0.0),
+            ],
+            0.01,
+        )
+        .expect("valid fit")
+        .expect("enough points");
+
+        assert_eq!(
+            anchors.first().map(|anchor| anchor.point),
+            Some(point(0.0, 0.0))
+        );
+        assert_eq!(
+            anchors.last().map(|anchor| anchor.point),
+            Some(point(3.0, 0.0))
+        );
+        assert!(
+            anchors
+                .first()
+                .and_then(|anchor| anchor.out_handle)
+                .is_some()
+        );
+        assert!(anchors.last().and_then(|anchor| anchor.in_handle).is_some());
     }
 }
