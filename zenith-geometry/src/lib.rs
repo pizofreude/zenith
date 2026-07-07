@@ -4,6 +4,7 @@ pub mod bezier;
 pub mod boolean;
 pub mod boolean_piece;
 pub mod bounds;
+pub mod collision;
 pub mod contour;
 pub mod error;
 pub mod fit;
@@ -27,6 +28,7 @@ pub use boolean::{
 };
 pub use boolean_piece::{ContourBooleanPiece, materialize_contour_boolean_pieces};
 pub use bounds::RectBounds;
+pub use collision::{PathGeometryIntersections, collect_path_geometry_intersections};
 pub use contour::{
     ClosedPolyline, ClosedPolylineIntersectionEvent, ClosedPolylineRelation, ClosedPolylineWinding,
     PointLocation, classify_closed_polyline_relation, collect_closed_polyline_intersection_events,
