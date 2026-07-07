@@ -1,4 +1,7 @@
-use crate::{GeometryError, Point2, RectBounds, validation::validate_tolerance};
+use crate::{
+    GeometryError, Point2, RectBounds,
+    validation::{validate_parameter, validate_tolerance},
+};
 
 const MAX_FLATTEN_DEPTH: usize = 18;
 const EXTREMA_DEDUP_EPSILON: f64 = 1.0e-12;
@@ -106,6 +109,27 @@ impl CubicBezier {
         }
 
         Ok(points)
+    }
+
+    pub fn split(self, t: f64) -> Result<(Self, Self), GeometryError> {
+        validate_parameter(t)?;
+        Self::validate_points(self.p0, self.p1, self.p2, self.p3)?;
+
+        if t == 0.5 {
+            return Ok(self.split_midpoint());
+        }
+
+        let p01 = self.p0.lerp(self.p1, t);
+        let p12 = self.p1.lerp(self.p2, t);
+        let p23 = self.p2.lerp(self.p3, t);
+        let p012 = p01.lerp(p12, t);
+        let p123 = p12.lerp(p23, t);
+        let p0123 = p012.lerp(p123, t);
+
+        Ok((
+            Self::new_unchecked(self.p0, p01, p012, p0123),
+            Self::new_unchecked(p0123, p123, p23, self.p3),
+        ))
     }
 
     pub fn length(self, tolerance: f64) -> Result<f64, GeometryError> {
@@ -330,6 +354,65 @@ mod tests {
     }
 
     #[test]
+    fn split_at_start_produces_degenerate_left_and_original_right() {
+        let curve = sample_curve();
+        let point = curve.p0;
+
+        assert_eq!(
+            curve.split(0.0),
+            Ok((
+                CubicBezier::new_unchecked(point, point, point, point),
+                curve
+            ))
+        );
+    }
+
+    #[test]
+    fn split_at_end_produces_original_left_and_degenerate_right() {
+        let curve = sample_curve();
+        let point = curve.p3;
+
+        assert_eq!(
+            curve.split(1.0),
+            Ok((
+                curve,
+                CubicBezier::new_unchecked(point, point, point, point)
+            ))
+        );
+    }
+
+    #[test]
+    fn split_at_midpoint_matches_private_midpoint_structure() {
+        let curve = sample_curve();
+        let split = curve.split(0.5);
+
+        assert_eq!(split, Ok(curve.split_midpoint()));
+    }
+
+    #[test]
+    fn split_preserves_shared_point_continuity() {
+        let curve = sample_curve();
+        let (left, right) = curve.split(0.25).expect("valid split");
+
+        assert_eq!(left.p0, curve.p0);
+        assert_eq!(right.p3, curve.p3);
+        assert_eq!(left.p3, right.p0);
+        assert_eq!(left.p3, curve.evaluate(0.25));
+    }
+
+    #[test]
+    fn split_segments_evaluate_like_original_curve_ranges() {
+        let curve = sample_curve();
+        let t = 0.25;
+        let (left, right) = curve.split(t).expect("valid split");
+
+        for u in [0.0, 0.25, 0.5, 0.75, 1.0] {
+            assert_eq!(left.evaluate(u), curve.evaluate(t * u));
+            assert_eq!(right.evaluate(u), curve.evaluate(t + (1.0 - t) * u));
+        }
+    }
+
+    #[test]
     fn rejects_invalid_inputs() {
         let invalid_point = Point2::new_unchecked(f64::NAN, 0.0);
         assert_eq!(
@@ -349,6 +432,11 @@ mod tests {
             invalid_curve.flatten(0.5),
             Err(GeometryError::NonFinitePoint)
         );
+        assert_eq!(invalid_curve.split(0.5), Err(GeometryError::NonFinitePoint));
+        assert_eq!(
+            invalid_curve.split(f64::NAN),
+            Err(GeometryError::NonFiniteParameter)
+        );
         assert_eq!(
             invalid_curve.length(0.5),
             Err(GeometryError::NonFinitePoint)
@@ -365,5 +453,11 @@ mod tests {
             Err(GeometryError::NonFiniteTolerance)
         );
         assert_eq!(curve.length(0.0), Err(GeometryError::NonPositiveTolerance));
+        assert_eq!(
+            curve.split(f64::NAN),
+            Err(GeometryError::NonFiniteParameter)
+        );
+        assert_eq!(curve.split(-0.1), Err(GeometryError::ParameterOutOfRange));
+        assert_eq!(curve.split(1.1), Err(GeometryError::ParameterOutOfRange));
     }
 }
