@@ -33,6 +33,19 @@ pub struct ContourBooleanSplits {
     pub second: Vec<ContourSegmentSplit>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct ContourSegmentSpan {
+    pub segment_index: usize,
+    pub start_t: f64,
+    pub end_t: f64,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct ContourBooleanSpans {
+    pub first: Vec<ContourSegmentSpan>,
+    pub second: Vec<ContourSegmentSpan>,
+}
+
 pub fn boolean_closed_polylines(
     first: &ClosedPolyline,
     second: &ClosedPolyline,
@@ -49,6 +62,17 @@ pub fn boolean_closed_polylines(
             Ok(Some(second_contains_first_result(first, second, operation)))
         }
     }
+}
+
+pub fn collect_contour_boolean_spans(
+    first: &ClosedPolyline,
+    second: &ClosedPolyline,
+) -> Result<ContourBooleanSpans, GeometryError> {
+    let splits = collect_contour_boolean_splits(first, second)?;
+    Ok(ContourBooleanSpans {
+        first: spans_for_contour(first, &splits.first),
+        second: spans_for_contour(second, &splits.second),
+    })
 }
 
 pub fn collect_contour_boolean_splits(
@@ -88,6 +112,41 @@ pub fn collect_contour_boolean_splits(
         first: first_splits,
         second: second_splits,
     })
+}
+
+fn spans_for_contour(
+    contour: &ClosedPolyline,
+    splits: &[ContourSegmentSplit],
+) -> Vec<ContourSegmentSpan> {
+    let mut spans = Vec::new();
+    for segment_index in 0..contour.segment_count() {
+        let mut parameters = vec![0.0, 1.0];
+        for split in splits {
+            if split.segment_index == segment_index {
+                push_parameter(&mut parameters, split.t);
+            }
+        }
+        parameters.sort_by(|a, b| a.total_cmp(b));
+        for pair in parameters.windows(2) {
+            let [start_t, end_t] = pair else {
+                continue;
+            };
+            if start_t < end_t {
+                spans.push(ContourSegmentSpan {
+                    segment_index,
+                    start_t: *start_t,
+                    end_t: *end_t,
+                });
+            }
+        }
+    }
+    spans
+}
+
+fn push_parameter(parameters: &mut Vec<f64>, t: f64) {
+    if !parameters.contains(&t) {
+        parameters.push(t);
+    }
 }
 
 fn push_point_splits(
@@ -405,6 +464,140 @@ mod tests {
                     ContourSegmentSplit {
                         segment_index: 2,
                         t: 1.0,
+                    },
+                ],
+            })
+        );
+    }
+
+    #[test]
+    fn span_collection_subdivides_segments_at_split_parameters() {
+        let first = square(0.0, 0.0, 10.0);
+        let second = square(5.0, 5.0, 10.0);
+
+        let spans = collect_contour_boolean_spans(&first, &second).expect("spans");
+        assert_eq!(
+            spans.first,
+            vec![
+                ContourSegmentSpan {
+                    segment_index: 0,
+                    start_t: 0.0,
+                    end_t: 1.0,
+                },
+                ContourSegmentSpan {
+                    segment_index: 1,
+                    start_t: 0.0,
+                    end_t: 0.5,
+                },
+                ContourSegmentSpan {
+                    segment_index: 1,
+                    start_t: 0.5,
+                    end_t: 1.0,
+                },
+                ContourSegmentSpan {
+                    segment_index: 2,
+                    start_t: 0.0,
+                    end_t: 0.5,
+                },
+                ContourSegmentSpan {
+                    segment_index: 2,
+                    start_t: 0.5,
+                    end_t: 1.0,
+                },
+                ContourSegmentSpan {
+                    segment_index: 3,
+                    start_t: 0.0,
+                    end_t: 1.0,
+                },
+            ]
+        );
+        assert_eq!(
+            spans.second,
+            vec![
+                ContourSegmentSpan {
+                    segment_index: 0,
+                    start_t: 0.0,
+                    end_t: 0.5,
+                },
+                ContourSegmentSpan {
+                    segment_index: 0,
+                    start_t: 0.5,
+                    end_t: 1.0,
+                },
+                ContourSegmentSpan {
+                    segment_index: 1,
+                    start_t: 0.0,
+                    end_t: 1.0,
+                },
+                ContourSegmentSpan {
+                    segment_index: 2,
+                    start_t: 0.0,
+                    end_t: 1.0,
+                },
+                ContourSegmentSpan {
+                    segment_index: 3,
+                    start_t: 0.0,
+                    end_t: 0.5,
+                },
+                ContourSegmentSpan {
+                    segment_index: 3,
+                    start_t: 0.5,
+                    end_t: 1.0,
+                },
+            ]
+        );
+    }
+
+    #[test]
+    fn span_collection_returns_whole_segments_without_intersections() {
+        let first = square(0.0, 0.0, 2.0);
+        let second = square(10.0, 0.0, 2.0);
+
+        assert_eq!(
+            collect_contour_boolean_spans(&first, &second),
+            Ok(ContourBooleanSpans {
+                first: vec![
+                    ContourSegmentSpan {
+                        segment_index: 0,
+                        start_t: 0.0,
+                        end_t: 1.0,
+                    },
+                    ContourSegmentSpan {
+                        segment_index: 1,
+                        start_t: 0.0,
+                        end_t: 1.0,
+                    },
+                    ContourSegmentSpan {
+                        segment_index: 2,
+                        start_t: 0.0,
+                        end_t: 1.0,
+                    },
+                    ContourSegmentSpan {
+                        segment_index: 3,
+                        start_t: 0.0,
+                        end_t: 1.0,
+                    },
+                ],
+                second: vec![
+                    ContourSegmentSpan {
+                        segment_index: 0,
+                        start_t: 0.0,
+                        end_t: 1.0,
+                    },
+                    ContourSegmentSpan {
+                        segment_index: 1,
+                        start_t: 0.0,
+                        end_t: 1.0,
+                    },
+                    ContourSegmentSpan {
+                        segment_index: 2,
+                        start_t: 0.0,
+                        end_t: 1.0,
+                    },
+                    ContourSegmentSpan {
+                        segment_index: 3,
+                        start_t: 0.0,
+                        end_t: 1.0,
                     },
                 ],
             })
