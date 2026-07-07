@@ -413,6 +413,31 @@ pub enum Op {
         #[serde(default)]
         kind: Option<String>,
     },
+    /// Move one `path` anchor and its complete handles by a pixel delta.
+    ///
+    /// This is an authoring edit: only the targeted anchor's required `x`/`y`
+    /// coordinates and any complete `in_*`/`out_*` handle pairs are translated.
+    /// Adjacent anchors, the path's `closed` flag, and all non-anchor properties
+    /// are preserved. The target anchor coordinates and complete handle pairs
+    /// must already be stored as px values.
+    ///
+    /// Supported nodes: `path`.
+    /// Unsupported: all other variants — yields `tx.unsupported_property`.
+    ///
+    /// JSON example:
+    /// ```json
+    /// {"op":"move_path_anchor","node":"path.logo","anchor_index":1,"dx":10,"dy":-4}
+    /// ```
+    MovePathAnchor {
+        /// The stable node `id` to target.
+        node: String,
+        /// Zero-based anchor index to move.
+        anchor_index: usize,
+        /// X-axis translation in document pixels. Must be finite.
+        dx: f64,
+        /// Y-axis translation in document pixels. Must be finite.
+        dy: f64,
+    },
     /// Insert an anchor into a `path` node by splitting an existing segment.
     ///
     /// The path's `closed` flag and all non-anchor properties are preserved. Anchor

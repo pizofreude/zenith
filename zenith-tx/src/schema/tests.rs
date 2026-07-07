@@ -46,6 +46,7 @@ fn op_tag(op: &Op) -> &'static str {
         Op::SetPathAnchors { .. } => "set_path_anchors",
         Op::SetPathAnchorKind { .. } => "set_path_anchor_kind",
         Op::InsertPathAnchor { .. } => "insert_path_anchor",
+        Op::MovePathAnchor { .. } => "move_path_anchor",
         Op::SimplifyPathAnchors { .. } => "simplify_path_anchors",
         Op::TransformPathAnchors { .. } => "transform_path_anchors",
         Op::AddNode { .. } => "add_node",
@@ -99,6 +100,7 @@ fn all_exhaustive_tags() -> BTreeSet<&'static str> {
         "set_path_anchor_kind",
         "set_path_anchors",
         "insert_path_anchor",
+        "move_path_anchor",
         "simplify_path_anchors",
         "transform_path_anchors",
         "add_node",
@@ -231,6 +233,12 @@ fn op_tag_strings_match_exhaustive_set() {
             node: String::new(),
             segment_index: 0,
             t: 0.5,
+        },
+        Op::MovePathAnchor {
+            node: String::new(),
+            anchor_index: 0,
+            dx: 0.0,
+            dy: 0.0,
         },
         Op::SimplifyPathAnchors {
             node: String::new(),
@@ -564,6 +572,15 @@ fn op_fields_names_match_serde_keys() {
                 node: "n".into(),
                 segment_index: 0,
                 t: 0.5,
+            },
+        ),
+        (
+            "move_path_anchor",
+            Op::MovePathAnchor {
+                node: "n".into(),
+                anchor_index: 0,
+                dx: 10.0,
+                dy: -4.0,
             },
         ),
         (

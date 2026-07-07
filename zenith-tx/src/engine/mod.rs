@@ -27,8 +27,8 @@ use geometry::{
     apply_set_geometry,
 };
 use path::{
-    apply_insert_path_anchor, apply_set_path_anchor_kind, apply_set_path_anchors,
-    apply_simplify_path_anchors, apply_transform_path_anchors,
+    apply_insert_path_anchor, apply_move_path_anchor, apply_set_path_anchor_kind,
+    apply_set_path_anchors, apply_simplify_path_anchors, apply_transform_path_anchors,
 };
 use pattern::apply_detach_pattern;
 use recipe::{RecipeScalars, apply_create_recipe, apply_delete_recipe, apply_update_recipe};
@@ -248,6 +248,14 @@ fn apply_op(
             t,
         } => {
             apply_insert_path_anchor(node_id, *segment_index, *t, doc, diagnostics, affected);
+        }
+        Op::MovePathAnchor {
+            node: node_id,
+            anchor_index,
+            dx,
+            dy,
+        } => {
+            apply_move_path_anchor(node_id, *anchor_index, *dx, *dy, doc, diagnostics, affected);
         }
         Op::SimplifyPathAnchors {
             node: node_id,
@@ -491,6 +499,7 @@ fn op_lock_targets(op: &Op) -> Vec<&str> {
         | Op::SetPathAnchors { node, .. }
         | Op::SetPathAnchorKind { node, .. }
         | Op::InsertPathAnchor { node, .. }
+        | Op::MovePathAnchor { node, .. }
         | Op::SimplifyPathAnchors { node, .. }
         | Op::TransformPathAnchors { node, .. }
         | Op::SetOpacity { node, .. }
