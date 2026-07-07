@@ -231,7 +231,12 @@ fn resolved_anchors(
             Err(GeometryError::NonFiniteParameter)
             | Err(GeometryError::ParameterOutOfRange)
             | Err(GeometryError::NonFiniteTolerance)
-            | Err(GeometryError::NonPositiveTolerance) => {
+            | Err(GeometryError::NonPositiveTolerance)
+            | Err(GeometryError::NonPositiveCount)
+            | Err(GeometryError::CountOutOfRange)
+            | Err(GeometryError::DegenerateLine)
+            | Err(GeometryError::NonFiniteTransform)
+            | Err(GeometryError::SingularTransform) => {
                 return Err(Diagnostic::error(
                     "tx.invalid_geometry",
                     "path anchor coordinates are invalid",
@@ -339,14 +344,18 @@ fn geometry_diagnostic(node_id: &str, error: GeometryError) -> Diagnostic {
             None,
             Some(node_id.to_owned()),
         ),
-        GeometryError::NonFiniteParameter | GeometryError::ParameterOutOfRange => {
-            Diagnostic::error(
-                "tx.invalid_geometry",
-                "path geometry is invalid",
-                None,
-                Some(node_id.to_owned()),
-            )
-        }
+        GeometryError::NonFiniteParameter
+        | GeometryError::ParameterOutOfRange
+        | GeometryError::NonPositiveCount
+        | GeometryError::CountOutOfRange
+        | GeometryError::DegenerateLine
+        | GeometryError::NonFiniteTransform
+        | GeometryError::SingularTransform => Diagnostic::error(
+            "tx.invalid_geometry",
+            "path geometry is invalid",
+            None,
+            Some(node_id.to_owned()),
+        ),
     }
 }
 
