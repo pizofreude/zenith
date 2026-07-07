@@ -83,6 +83,14 @@ pub fn boolean_closed_polylines(
     }
 }
 
+pub fn contours_from_boolean_result(result: ClosedPolylineBooleanResult) -> Vec<ClosedPolyline> {
+    match result {
+        ClosedPolylineBooleanResult::Empty => Vec::new(),
+        ClosedPolylineBooleanResult::One(contour) => vec![contour],
+        ClosedPolylineBooleanResult::Two { first, second } => vec![first, second],
+    }
+}
+
 pub fn select_contour_boolean_spans(
     first: &ClosedPolyline,
     second: &ClosedPolyline,
@@ -464,6 +472,28 @@ mod tests {
                 first: outer,
                 second: inner,
             }))
+        );
+    }
+
+    #[test]
+    fn boolean_result_converts_to_contour_vec() {
+        let first = square(0.0, 0.0, 4.0);
+        let second = square(10.0, 0.0, 4.0);
+
+        assert_eq!(
+            contours_from_boolean_result(ClosedPolylineBooleanResult::Empty),
+            Vec::<ClosedPolyline>::new()
+        );
+        assert_eq!(
+            contours_from_boolean_result(ClosedPolylineBooleanResult::One(first.clone())),
+            vec![first.clone()]
+        );
+        assert_eq!(
+            contours_from_boolean_result(ClosedPolylineBooleanResult::Two {
+                first: first.clone(),
+                second: second.clone(),
+            }),
+            vec![first, second]
         );
     }
 

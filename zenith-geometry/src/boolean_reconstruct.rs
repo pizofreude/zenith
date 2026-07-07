@@ -1,10 +1,10 @@
 use std::collections::BTreeMap;
 
 use crate::{
-    ClassifiedContourSpan, ClosedPolyline, ClosedPolylineBooleanOp, ClosedPolylineBooleanResult,
+    ClassifiedContourSpan, ClosedPolyline, ClosedPolylineBooleanOp,
     ClosedPolylineIntersectionEvent, ClosedPolylineWinding, GeometryError, Point2,
     boolean_closed_polylines, collect_closed_polyline_intersection_events,
-    select_contour_boolean_spans,
+    contours_from_boolean_result, select_contour_boolean_spans,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -44,7 +44,7 @@ pub fn reconstruct_contour_boolean_result(
     tolerance: f64,
 ) -> Result<Vec<ClosedPolyline>, GeometryError> {
     if let Some(result) = boolean_closed_polylines(first, second, operation, tolerance)? {
-        return contours_from_result(result);
+        return canonicalize_contours(contours_from_boolean_result(result));
     }
 
     match operation {
@@ -56,18 +56,6 @@ pub fn reconstruct_contour_boolean_result(
             let mut contours = reconstruct_subtract(first, second, tolerance)?;
             contours.extend(reconstruct_subtract(second, first, tolerance)?);
             canonicalize_contours(contours)
-        }
-    }
-}
-
-fn contours_from_result(
-    result: ClosedPolylineBooleanResult,
-) -> Result<Vec<ClosedPolyline>, GeometryError> {
-    match result {
-        ClosedPolylineBooleanResult::Empty => Ok(Vec::new()),
-        ClosedPolylineBooleanResult::One(contour) => canonicalize_contours(vec![contour]),
-        ClosedPolylineBooleanResult::Two { first, second } => {
-            canonicalize_contours(vec![first, second])
         }
     }
 }

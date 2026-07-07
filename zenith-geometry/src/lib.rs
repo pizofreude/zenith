@@ -25,7 +25,7 @@ pub use boolean::{
     ClosedPolylineBooleanResult, ContourBooleanSpans, ContourBooleanSplits, ContourSegmentSpan,
     ContourSegmentSplit, SelectedContourBooleanSpans, boolean_closed_polylines,
     classify_contour_boolean_spans, collect_contour_boolean_spans, collect_contour_boolean_splits,
-    select_contour_boolean_spans,
+    contours_from_boolean_result, select_contour_boolean_spans,
 };
 pub use boolean_piece::{ContourBooleanPiece, materialize_contour_boolean_pieces};
 pub use boolean_reconstruct::reconstruct_contour_boolean_result;
