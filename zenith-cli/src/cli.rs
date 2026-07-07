@@ -7,18 +7,21 @@
 //! so that all existing `crate::cli::*` paths continue to resolve unchanged.
 //!
 //! Submodules:
+//! - `asset` — `AssetArgs`, `AssetSub`, `AssetImportArgs`.
 //! - `library` — `LibraryArgs`, `LibrarySub`, and library item arg types.
 //! - `plugin` — `PluginArgs`, `PluginSub`, `ScopeArg`, `AgentFlags`, and install/uninstall args.
 //! - `render` — `RenderArgs`.
 //! - `schema` — `SchemaArgs`, `SchemaSub`.
 //! - `workspace` — `WorkspaceArgs`, `WorkspaceSub`, scratch, candidate, and promote arg types.
 
+mod asset;
 mod library;
 mod plugin;
 mod render;
 mod schema;
 mod workspace;
 
+pub use asset::{AssetArgs, AssetImportArgs, AssetSub};
 pub use library::{LibraryAddArgs, LibraryArgs, LibraryListArgs, LibraryShowArgs, LibrarySub};
 pub use plugin::{
     AgentFlags, PluginArgs, PluginInstallArgs, PluginSub, PluginUninstallArgs, ScopeArg,
@@ -121,6 +124,9 @@ pub enum Command {
     /// data-bound render (first object/row, via `(data)"field.path"` references) use
     /// `zenith render --data` instead.
     Merge(MergeArgs),
+
+    /// Import local files as frozen document assets.
+    Asset(AssetArgs),
 
     /// Discover and materialize reusable design assets (tokens, components, actions).
     ///

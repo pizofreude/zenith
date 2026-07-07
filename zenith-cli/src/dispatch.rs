@@ -1,3 +1,4 @@
+use std::path::Path;
 use std::process::ExitCode;
 
 use clap::Parser;
@@ -234,6 +235,10 @@ pub fn run() -> ExitCode {
                 }
             }
         }
+
+        Command::Asset(args) => match args.command {
+            cli::AssetSub::Import(a) => dispatch_asset_import(a),
+        },
 
         Command::Library(args) => library::dispatch_library(args),
 
@@ -656,4 +661,107 @@ pub fn run() -> ExitCode {
 
         Command::Workspace(args) => workspace::dispatch_workspace(args),
     }
+}
+
+fn dispatch_asset_import(a: cli::AssetImportArgs) -> ExitCode {
+    let doc_src = match read_file(&a.into) {
+        Ok(s) => s,
+        Err(msg) => {
+            eprintln!("{}", msg);
+            return ExitCode::from(2);
+        }
+    };
+    let input_bytes = match std::fs::read(&a.input) {
+        Ok(bytes) => bytes,
+        Err(e) => {
+            eprintln!("error reading '{}': {}", a.input.display(), e);
+            return ExitCode::from(2);
+        }
+    };
+    let source_label = a.input.display().to_string();
+    let outcome = match commands::asset::import_run(
+        &doc_src,
+        &input_bytes,
+        commands::asset::AssetImportInput {
+            id: &a.id,
+            src: &a.src,
+            kind: &a.kind,
+            source_label: &source_label,
+        },
+    ) {
+        Ok(o) => o,
+        Err(e) => {
+            eprintln!("{}", e.message);
+            return ExitCode::from(e.exit_code);
+        }
+    };
+
+    if a.apply && outcome.exit_code != 1 {
+        if let Err(code) = apply_asset_import(&a, &outcome) {
+            return code;
+        }
+    }
+
+    if a.json {
+        println!("{}", outcome.json_str);
+    } else {
+        println!("{}", outcome.human);
+    }
+    ExitCode::from(outcome.exit_code)
+}
+
+fn apply_asset_import(
+    a: &cli::AssetImportArgs,
+    outcome: &commands::asset::AssetImportOutcome,
+) -> Result<(), ExitCode> {
+    let doc_parent = a
+        .into
+        .parent()
+        .filter(|p| !p.as_os_str().is_empty())
+        .unwrap_or_else(|| Path::new("."));
+    let asset_path = doc_parent.join(&a.src);
+    match std::fs::read(&asset_path) {
+        Ok(existing) => {
+            if existing.as_slice() != outcome.produced.bytes.as_ref() {
+                eprintln!(
+                    "error[asset.exists]: destination '{}' already exists with different bytes",
+                    asset_path.display()
+                );
+                return Err(ExitCode::from(2));
+            }
+        }
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+        Err(e) => {
+            eprintln!("error reading '{}': {}", asset_path.display(), e);
+            return Err(ExitCode::from(2));
+        }
+    }
+    if let Some(parent) = asset_path.parent()
+        && !parent.as_os_str().is_empty()
+        && let Err(e) = std::fs::create_dir_all(parent)
+    {
+        eprintln!(
+            "error creating asset directory '{}': {}",
+            parent.display(),
+            e
+        );
+        return Err(ExitCode::from(2));
+    }
+    if let Err(e) = std::fs::write(&asset_path, outcome.produced.bytes.as_ref()) {
+        eprintln!("error writing '{}': {}", asset_path.display(), e);
+        return Err(ExitCode::from(2));
+    }
+    let recorded = history::record_edit(
+        outcome.result.source_after.as_bytes(),
+        &a.into,
+        "asset.import",
+    );
+    if let Some(w) = &recorded.warning {
+        eprintln!("warning: {w}");
+    }
+    if let Err(e) = std::fs::write(&a.into, &recorded.bytes) {
+        eprintln!("error writing '{}': {}", a.into.display(), e);
+        return Err(ExitCode::from(2));
+    }
+    Ok(())
 }

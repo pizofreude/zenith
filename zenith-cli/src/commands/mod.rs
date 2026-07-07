@@ -4,7 +4,9 @@
 //! in-memory source bytes/strings — never touching the filesystem.  File I/O
 //! (reading the document, writing formatted source or rendered output) is the
 //! responsibility of the dispatcher in `lib.rs`.
+//! - `asset` — asset import transaction prep + result rendering.
 
+pub mod asset;
 pub mod fmt;
 pub mod fonts;
 pub mod inspect;

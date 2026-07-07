@@ -1504,6 +1504,7 @@ dependencies = [
  "tiny_http",
  "zenith-core",
  "zenith-layout",
+ "zenith-producers",
  "zenith-render",
  "zenith-scene",
  "zenith-session",
