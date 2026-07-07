@@ -8,6 +8,7 @@ pub mod edge_map;
 pub mod grid_conformance;
 pub mod histogram;
 pub mod optical_balance;
+pub mod path_collision;
 mod path_geometry;
 pub mod path_tangent_quality;
 pub mod report;
@@ -23,6 +24,9 @@ pub use edge_map::{EdgeReport, edge_map};
 pub use grid_conformance::{GridConformanceInput, GridConformanceReport, grid_conformance};
 pub use histogram::{Histogram, histogram};
 pub use optical_balance::{OpticalBalanceInput, OpticalBalanceReport, optical_balance};
+pub use path_collision::{
+    PathCollisionInput, PathCollisionNearestPoints, PathCollisionReport, path_collision,
+};
 pub use path_tangent_quality::{
     PathTangentQualityInput, PathTangentQualityReport, path_tangent_quality,
 };
