@@ -1,7 +1,7 @@
 //! Backend-neutral glyph outline extraction for editable text-to-path conversion.
 
 use rustybuzz::ttf_parser;
-use zenith_core::FontProvider;
+use zenith_core::{Dimension, FontProvider, PathAnchor, Unit};
 use zenith_geometry::Point2;
 
 use crate::{LayoutError, ZenithGlyphRun};
@@ -40,6 +40,12 @@ pub struct OutlinedGlyph {
     pub outline: GlyphOutline,
 }
 
+#[derive(Debug, Clone, PartialEq)]
+pub struct GlyphOutlineContour {
+    pub anchors: Vec<PathAnchor>,
+    pub closed: bool,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum GlyphOutlineSegment {
     MoveTo(Point2),
@@ -64,10 +70,7 @@ pub fn glyph_run_outline(
     request: GlyphRunOutlineRequest<'_>,
     provider: &dyn FontProvider,
 ) -> Result<Option<GlyphRunOutline>, LayoutError> {
-    request
-        .origin
-        .validate()
-        .map_err(|_| LayoutError::new("glyph run outline requires finite origin coordinates"))?;
+    validate_outline_geometry(request.run.font_size, request.origin)?;
     let font_data = provider.by_id(&request.run.font_id).ok_or_else(|| {
         LayoutError::new(format!(
             "no font resolved for glyph run id '{}'",
@@ -102,6 +105,49 @@ pub fn glyph_run_outline(
     } else {
         Ok(Some(GlyphRunOutline { glyphs }))
     }
+}
+
+pub fn glyph_outline_contours(
+    outline: &GlyphOutline,
+) -> Result<Vec<GlyphOutlineContour>, LayoutError> {
+    let mut contours = Vec::new();
+    let mut current: Option<ContourBuilder> = None;
+
+    for segment in &outline.segments {
+        match *segment {
+            GlyphOutlineSegment::MoveTo(point) => {
+                finish_contour(&mut contours, current.take(), false);
+                current = Some(ContourBuilder::new(point));
+            }
+            GlyphOutlineSegment::LineTo(point) => {
+                let Some(builder) = current.as_mut() else {
+                    return Err(LayoutError::new(
+                        "glyph outline contour line segment requires a current contour",
+                    ));
+                };
+                builder.line_to(point);
+            }
+            GlyphOutlineSegment::CubicTo { ctrl1, ctrl2, to } => {
+                let Some(builder) = current.as_mut() else {
+                    return Err(LayoutError::new(
+                        "glyph outline contour cubic segment requires a current contour",
+                    ));
+                };
+                builder.cubic_to(ctrl1, ctrl2, to);
+            }
+            GlyphOutlineSegment::Close => {
+                let Some(builder) = current.take() else {
+                    return Err(LayoutError::new(
+                        "glyph outline contour close segment requires a current contour",
+                    ));
+                };
+                finish_contour(&mut contours, Some(builder), true);
+            }
+        }
+    }
+
+    finish_contour(&mut contours, current, false);
+    Ok(contours)
 }
 
 fn glyph_outline_with_face(
@@ -154,6 +200,66 @@ fn validate_outline_geometry(font_size: f32, origin: Point2) -> Result<(), Layou
         .validate()
         .map_err(|_| LayoutError::new("glyph outline requires finite origin coordinates"))?;
     Ok(())
+}
+
+struct ContourBuilder {
+    anchors: Vec<PathAnchor>,
+}
+
+impl ContourBuilder {
+    fn new(point: Point2) -> Self {
+        Self {
+            anchors: vec![path_anchor(point, None, None)],
+        }
+    }
+
+    fn line_to(&mut self, point: Point2) {
+        self.anchors.push(path_anchor(point, None, None));
+    }
+
+    fn cubic_to(&mut self, ctrl1: Point2, ctrl2: Point2, to: Point2) {
+        if let Some(anchor) = self.anchors.last_mut() {
+            anchor.out_x = Some(px(ctrl1.x));
+            anchor.out_y = Some(px(ctrl1.y));
+        }
+        self.anchors.push(path_anchor(to, Some(ctrl2), None));
+    }
+}
+
+fn finish_contour(
+    contours: &mut Vec<GlyphOutlineContour>,
+    builder: Option<ContourBuilder>,
+    closed: bool,
+) {
+    let Some(builder) = builder else {
+        return;
+    };
+    if builder.anchors.is_empty() {
+        return;
+    }
+    contours.push(GlyphOutlineContour {
+        anchors: builder.anchors,
+        closed,
+    });
+}
+
+fn path_anchor(point: Point2, in_handle: Option<Point2>, out_handle: Option<Point2>) -> PathAnchor {
+    PathAnchor {
+        x: Some(px(point.x)),
+        y: Some(px(point.y)),
+        kind: None,
+        in_x: in_handle.map(|point| px(point.x)),
+        in_y: in_handle.map(|point| px(point.y)),
+        out_x: out_handle.map(|point| px(point.x)),
+        out_y: out_handle.map(|point| px(point.y)),
+    }
+}
+
+fn px(value: f64) -> Dimension {
+    Dimension {
+        value,
+        unit: Unit::Px,
+    }
 }
 
 struct GlyphOutlinePen {
@@ -417,6 +523,99 @@ mod tests {
         );
 
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn glyph_outline_contours_preserve_cubic_handles() -> Result<(), LayoutError> {
+        let outline = GlyphOutline {
+            segments: vec![
+                GlyphOutlineSegment::MoveTo(Point2::new_unchecked(0.0, 0.0)),
+                GlyphOutlineSegment::CubicTo {
+                    ctrl1: Point2::new_unchecked(10.0, 0.0),
+                    ctrl2: Point2::new_unchecked(20.0, 30.0),
+                    to: Point2::new_unchecked(40.0, 50.0),
+                },
+                GlyphOutlineSegment::LineTo(Point2::new_unchecked(60.0, 70.0)),
+                GlyphOutlineSegment::Close,
+            ],
+        };
+
+        let contours = glyph_outline_contours(&outline)?;
+
+        assert_eq!(contours.len(), 1);
+        assert!(contours[0].closed);
+        assert_eq!(contours[0].anchors.len(), 3);
+        assert_eq!(contours[0].anchors[0].out_x, Some(px(10.0)));
+        assert_eq!(contours[0].anchors[0].out_y, Some(px(0.0)));
+        assert_eq!(contours[0].anchors[1].in_x, Some(px(20.0)));
+        assert_eq!(contours[0].anchors[1].in_y, Some(px(30.0)));
+        assert_eq!(contours[0].anchors[1].x, Some(px(40.0)));
+        assert_eq!(contours[0].anchors[1].y, Some(px(50.0)));
+        assert_eq!(contours[0].anchors[2].x, Some(px(60.0)));
+        assert_eq!(contours[0].anchors[2].y, Some(px(70.0)));
+        assert!(
+            contours[0]
+                .anchors
+                .iter()
+                .all(|anchor| anchor.kind.is_none())
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn glyph_outline_contours_preserve_multiple_subpaths() -> Result<(), LayoutError> {
+        let outline = GlyphOutline {
+            segments: vec![
+                GlyphOutlineSegment::MoveTo(Point2::new_unchecked(0.0, 0.0)),
+                GlyphOutlineSegment::LineTo(Point2::new_unchecked(1.0, 0.0)),
+                GlyphOutlineSegment::Close,
+                GlyphOutlineSegment::MoveTo(Point2::new_unchecked(10.0, 10.0)),
+                GlyphOutlineSegment::LineTo(Point2::new_unchecked(11.0, 10.0)),
+                GlyphOutlineSegment::Close,
+            ],
+        };
+
+        let contours = glyph_outline_contours(&outline)?;
+
+        assert_eq!(contours.len(), 2);
+        assert!(contours.iter().all(|contour| contour.closed));
+        assert_eq!(contours[0].anchors[0].x, Some(px(0.0)));
+        assert_eq!(contours[1].anchors[0].x, Some(px(10.0)));
+        Ok(())
+    }
+
+    #[test]
+    fn glyph_outline_contours_reject_segments_without_move() {
+        let outline = GlyphOutline {
+            segments: vec![GlyphOutlineSegment::LineTo(Point2::new_unchecked(1.0, 0.0))],
+        };
+
+        assert!(glyph_outline_contours(&outline).is_err());
+    }
+
+    #[test]
+    fn real_glyph_outline_converts_to_closed_contours() -> Result<(), LayoutError> {
+        let font = default_noto_sans_font()?;
+        let outline = glyph_outline(GlyphOutlineRequest {
+            font_bytes: &font.bytes,
+            face_index: font.index,
+            glyph_id: glyph_id_for("O"),
+            font_size: 32.0,
+            origin: Point2::new_unchecked(0.0, 40.0),
+        })?
+        .ok_or_else(|| LayoutError::new("latin glyph should have an outline"))?;
+
+        let contours = glyph_outline_contours(&outline)?;
+
+        assert!(!contours.is_empty());
+        assert!(contours.iter().all(|contour| contour.closed));
+        assert!(contours.iter().all(|contour| {
+            contour
+                .anchors
+                .iter()
+                .all(|anchor| anchor.x.is_some() && anchor.y.is_some())
+        }));
+        Ok(())
     }
 
     #[test]
