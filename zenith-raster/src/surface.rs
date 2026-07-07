@@ -6,7 +6,9 @@ pub enum RasterError {
     EmptySurface,
     SurfaceTooLarge,
     PixelBufferLengthMismatch,
+    DimensionMismatch,
     OutOfBounds,
+    InvalidOpacity,
     NonFiniteChannel,
     ChannelOutOfRange,
     NotPremultiplied,
@@ -142,12 +144,9 @@ impl Surface {
 
     pub fn set(&mut self, x: u32, y: u32, pixel: LinearRgba) -> Result<(), RasterError> {
         let index = self.index_of(x, y).ok_or(RasterError::OutOfBounds)?;
-        if let Some(slot) = self.pixels.get_mut(index) {
-            *slot = pixel;
-            Ok(())
-        } else {
-            Err(RasterError::OutOfBounds)
-        }
+        let slot = self.pixels.get_mut(index).ok_or(RasterError::OutOfBounds)?;
+        *slot = pixel;
+        Ok(())
     }
 
     fn index_of(&self, x: u32, y: u32) -> Option<usize> {
