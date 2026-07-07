@@ -49,6 +49,7 @@ pub fn op_names() -> &'static [&'static str] {
         "set_text_overflow",
         "set_visible",
         "simplify_path_anchors",
+        "snap_path_anchors",
         "transform_path_anchors",
         "ungroup",
         "update_recipe",

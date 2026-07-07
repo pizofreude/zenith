@@ -15,6 +15,7 @@ mod flags;
 mod geometry;
 mod path;
 mod path_handle;
+mod path_snap;
 mod pattern;
 mod recipe;
 pub(crate) mod structure;
@@ -33,6 +34,7 @@ use path::{
     apply_transform_path_anchors,
 };
 use path_handle::{MovePathHandleArgs, apply_move_path_handle};
+use path_snap::apply_snap_path_anchors;
 use pattern::apply_detach_pattern;
 use recipe::{RecipeScalars, apply_create_recipe, apply_delete_recipe, apply_update_recipe};
 use structure::{
@@ -308,6 +310,13 @@ fn apply_op(
         } => {
             apply_transform_path_anchors(node_id, transform, doc, diagnostics, affected);
         }
+        Op::SnapPathAnchors {
+            node: node_id,
+            target,
+            tolerance,
+        } => {
+            apply_snap_path_anchors(node_id, target, *tolerance, doc, diagnostics, affected);
+        }
         Op::AddNode {
             parent,
             position,
@@ -543,6 +552,7 @@ fn op_lock_targets(op: &Op) -> Vec<&str> {
         | Op::MovePathHandle { node, .. }
         | Op::SimplifyPathAnchors { node, .. }
         | Op::TransformPathAnchors { node, .. }
+        | Op::SnapPathAnchors { node, .. }
         | Op::SetOpacity { node, .. }
         | Op::ReplaceText { node, .. }
         | Op::RemoveNode { node }

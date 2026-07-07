@@ -625,7 +625,7 @@ fn simplified_points_to_core_anchors(points: &[Point2]) -> Vec<CorePathAnchor> {
         .collect()
 }
 
-fn resolved_path_geometry(
+pub(super) fn resolved_path_geometry(
     node_id: &str,
     anchors: &[CorePathAnchor],
     closed: bool,
@@ -743,7 +743,10 @@ fn existing_anchor_kind_at(
         .and_then(|anchor| anchor.kind.clone())
 }
 
-fn geometry_anchor_to_core(anchor: PathAnchor, kind: Option<AnchorKind>) -> CorePathAnchor {
+pub(super) fn geometry_anchor_to_core(
+    anchor: PathAnchor,
+    kind: Option<AnchorKind>,
+) -> CorePathAnchor {
     CorePathAnchor {
         x: Some(px(anchor.point.x)),
         y: Some(px(anchor.point.y)),

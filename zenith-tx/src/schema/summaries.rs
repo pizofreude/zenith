@@ -37,6 +37,9 @@ pub fn op_summary(name: &str) -> Option<&'static str> {
         "transform_path_anchors" => {
             Some("Apply an affine transform to a path node's anchor and handle points.")
         }
+        "snap_path_anchors" => {
+            Some("Translate a path so its nearest boundary point lands on another path.")
+        }
         "add_node" => Some("Parse a .zen source fragment and insert it into a container."),
         "remove_node" => Some("Remove a node and its subtree from the document."),
         "set_opacity" => Some("Set the opacity of a node (0.0 = fully transparent, 1.0 = opaque)."),

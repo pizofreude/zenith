@@ -51,6 +51,7 @@ fn op_tag(op: &Op) -> &'static str {
         Op::MovePathHandle { .. } => "move_path_handle",
         Op::SimplifyPathAnchors { .. } => "simplify_path_anchors",
         Op::TransformPathAnchors { .. } => "transform_path_anchors",
+        Op::SnapPathAnchors { .. } => "snap_path_anchors",
         Op::AddNode { .. } => "add_node",
         Op::RemoveNode { .. } => "remove_node",
         Op::SetOpacity { .. } => "set_opacity",
@@ -106,6 +107,7 @@ fn all_exhaustive_tags() -> BTreeSet<&'static str> {
         "move_path_anchor",
         "move_path_handle",
         "simplify_path_anchors",
+        "snap_path_anchors",
         "transform_path_anchors",
         "add_node",
         "remove_node",
@@ -264,6 +266,11 @@ fn op_tag_strings_match_exhaustive_set() {
         Op::TransformPathAnchors {
             node: String::new(),
             transform: OpPathTransform::Translate { dx: 0.0, dy: 0.0 },
+        },
+        Op::SnapPathAnchors {
+            node: String::new(),
+            target: String::new(),
+            tolerance: 1.0,
         },
         Op::AddNode {
             parent: String::new(),
@@ -635,6 +642,14 @@ fn op_fields_names_match_serde_keys() {
                     cx: 10.0,
                     cy: 20.0,
                 },
+            },
+        ),
+        (
+            "snap_path_anchors",
+            Op::SnapPathAnchors {
+                node: "n".into(),
+                target: "target".into(),
+                tolerance: 4.0,
             },
         ),
         (

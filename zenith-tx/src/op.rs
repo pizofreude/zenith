@@ -571,6 +571,29 @@ pub enum Op {
         /// Transform mode and scalar parameters.
         transform: OpPathTransform,
     },
+    /// Translate one `path` node so its nearest boundary point lands on another path.
+    ///
+    /// The source and target paths are flattened at `tolerance` pixels and the
+    /// nearest source/target boundary points are computed deterministically. If
+    /// their distance is greater than `tolerance`, the op rejects without
+    /// changing the source. Anchor coordinates and complete in/out handle pairs
+    /// must already be stored as px values.
+    ///
+    /// Supported nodes: `path`.
+    /// Unsupported source/target variants yield `tx.unsupported_property`.
+    ///
+    /// JSON example:
+    /// ```json
+    /// {"op":"snap_path_anchors","node":"path.logo","target":"path.guide","tolerance":4}
+    /// ```
+    SnapPathAnchors {
+        /// The stable source path `id` to translate.
+        node: String,
+        /// The stable target path `id` to snap onto.
+        target: String,
+        /// Maximum accepted nearest-boundary distance in pixels.
+        tolerance: f64,
+    },
     /// Construct a new node from a `.zen` source fragment and insert it into a
     /// container (a page, group, or frame) at a chosen position.
     ///
