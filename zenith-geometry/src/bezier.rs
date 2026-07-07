@@ -1,6 +1,7 @@
 use crate::{GeometryError, Point2, RectBounds};
 
 const MAX_FLATTEN_DEPTH: usize = 18;
+const EXTREMA_DEDUP_EPSILON: f64 = 1.0e-12;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct CubicBezier {
@@ -64,6 +65,25 @@ impl CubicBezier {
         Ok(bounds)
     }
 
+    pub fn extrema(self) -> Result<Vec<f64>, GeometryError> {
+        Self::validate_points(self.p0, self.p1, self.p2, self.p3)?;
+
+        let mut extrema = Vec::new();
+        push_axis_extrema(&mut extrema, self.p0.x, self.p1.x, self.p2.x, self.p3.x);
+        push_axis_extrema(&mut extrema, self.p0.y, self.p1.y, self.p2.y, self.p3.y);
+        extrema.sort_by(f64::total_cmp);
+
+        let mut deduped = Vec::with_capacity(extrema.len());
+        for t in extrema {
+            match deduped.last() {
+                Some(previous) if t - *previous <= EXTREMA_DEDUP_EPSILON => {}
+                Some(_) | None => deduped.push(t),
+            }
+        }
+
+        Ok(deduped)
+    }
+
     pub fn flatten(self, tolerance: f64) -> Result<Vec<Point2>, GeometryError> {
         validate_tolerance(tolerance)?;
         Self::validate_points(self.p0, self.p1, self.p2, self.p3)?;
@@ -86,6 +106,19 @@ impl CubicBezier {
         }
 
         Ok(points)
+    }
+
+    pub fn length(self, tolerance: f64) -> Result<f64, GeometryError> {
+        let points = self.flatten(tolerance)?;
+        Ok(points
+            .windows(2)
+            .filter_map(|segment| {
+                let [start, end] = segment else {
+                    return None;
+                };
+                Some(start.distance_squared(*end).sqrt())
+            })
+            .sum())
     }
 
     #[must_use]
@@ -139,6 +172,14 @@ fn axis_extrema(p0: f64, p1: f64, p2: f64, p3: f64) -> [f64; 2] {
     let c = p1 - p0;
 
     solve_quadratic(a, b, c)
+}
+
+fn push_axis_extrema(extrema: &mut Vec<f64>, p0: f64, p1: f64, p2: f64, p3: f64) {
+    for t in axis_extrema(p0, p1, p2, p3) {
+        if is_unit_interval(t) {
+            extrema.push(t);
+        }
+    }
 }
 
 fn solve_quadratic(a: f64, b: f64, c: f64) -> [f64; 2] {
@@ -208,6 +249,30 @@ mod tests {
     }
 
     #[test]
+    fn extrema_returns_sorted_deduplicated_interior_roots() {
+        let curve = CubicBezier::new_unchecked(
+            Point2::new_unchecked(0.0, 0.0),
+            Point2::new_unchecked(1.0, 3.0),
+            Point2::new_unchecked(0.0, -2.0),
+            Point2::new_unchecked(1.0, 1.0),
+        );
+
+        assert_eq!(curve.extrema(), Ok(vec![0.25, 0.5, 0.75]));
+    }
+
+    #[test]
+    fn extrema_excludes_endpoint_roots() {
+        let curve = CubicBezier::new_unchecked(
+            Point2::new_unchecked(0.0, 0.0),
+            Point2::new_unchecked(0.0, 10.0),
+            Point2::new_unchecked(10.0, 10.0),
+            Point2::new_unchecked(10.0, 0.0),
+        );
+
+        assert_eq!(curve.extrema(), Ok(vec![0.5]));
+    }
+
+    #[test]
     fn flatten_preserves_endpoints() {
         let curve = sample_curve();
         let points = curve.flatten(0.5).expect("valid flattening");
@@ -232,6 +297,46 @@ mod tests {
 
         assert_eq!(curve.flatten(0.1), Ok(vec![point, point]));
         assert_eq!(curve.bounds(), Ok(RectBounds::from_point(point)));
+        assert_eq!(curve.extrema(), Ok(Vec::new()));
+    }
+
+    #[test]
+    fn length_of_straight_line_matches_chord() {
+        let curve = CubicBezier::new_unchecked(
+            Point2::new_unchecked(0.0, 0.0),
+            Point2::new_unchecked(1.0, 0.0),
+            Point2::new_unchecked(2.0, 0.0),
+            Point2::new_unchecked(3.0, 0.0),
+        );
+
+        assert_eq!(curve.length(0.1), Ok(3.0));
+    }
+
+    #[test]
+    fn curved_length_is_longer_than_chord() {
+        let curve = sample_curve();
+        let chord = curve.p0.distance_squared(curve.p3).sqrt();
+        let length = curve.length(0.25).expect("valid length");
+
+        assert!(length > chord);
+    }
+
+    #[test]
+    fn length_matches_flattened_polyline_length() {
+        let curve = sample_curve();
+        let tolerance = 0.25;
+        let points = curve.flatten(tolerance).expect("valid flattening");
+        let flattened_length = points
+            .windows(2)
+            .filter_map(|segment| {
+                let [start, end] = segment else {
+                    return None;
+                };
+                Some(start.distance_squared(*end).sqrt())
+            })
+            .sum::<f64>();
+
+        assert_eq!(curve.length(tolerance), Ok(flattened_length));
     }
 
     #[test]
@@ -249,8 +354,13 @@ mod tests {
             Point2::new_unchecked(2.0, 0.0),
         );
         assert_eq!(invalid_curve.bounds(), Err(GeometryError::NonFinitePoint));
+        assert_eq!(invalid_curve.extrema(), Err(GeometryError::NonFinitePoint));
         assert_eq!(
             invalid_curve.flatten(0.5),
+            Err(GeometryError::NonFinitePoint)
+        );
+        assert_eq!(
+            invalid_curve.length(0.5),
             Err(GeometryError::NonFinitePoint)
         );
 
@@ -260,5 +370,10 @@ mod tests {
             Err(GeometryError::NonFiniteTolerance)
         );
         assert_eq!(curve.flatten(0.0), Err(GeometryError::NonPositiveTolerance));
+        assert_eq!(
+            curve.length(f64::NAN),
+            Err(GeometryError::NonFiniteTolerance)
+        );
+        assert_eq!(curve.length(0.0), Err(GeometryError::NonPositiveTolerance));
     }
 }
