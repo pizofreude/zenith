@@ -9,6 +9,7 @@
 //! `schema` key appears first in the serialized JSON.
 
 use serde::Serialize;
+use zenith_geometry::{CubicBezier, Point2, RectBounds};
 
 pub use zenith_core::{BlendMode, Color, GradientPaint, GradientStop};
 
@@ -111,21 +112,15 @@ pub fn path_segments_finite(segments: &[PathSegment]) -> bool {
 
 /// Axis-aligned bounding box `(x, y, w, h)` of a structured path segment list.
 pub fn path_segments_bbox(segments: &[PathSegment]) -> Option<(f64, f64, f64, f64)> {
-    let mut min_x = f64::INFINITY;
-    let mut min_y = f64::INFINITY;
-    let mut max_x = f64::NEG_INFINITY;
-    let mut max_y = f64::NEG_INFINITY;
-    let mut saw = false;
-    let mut include = |x: f64, y: f64| {
-        saw = true;
-        min_x = min_x.min(x);
-        max_x = max_x.max(x);
-        min_y = min_y.min(y);
-        max_y = max_y.max(y);
-    };
+    let mut bounds: Option<RectBounds> = None;
+    let mut current: Option<Point2> = None;
     for segment in segments {
         match segment {
-            PathSegment::MoveTo { x, y } | PathSegment::LineTo { x, y } => include(*x, *y),
+            PathSegment::MoveTo { x, y } | PathSegment::LineTo { x, y } => {
+                let point = Point2::new(*x, *y).ok()?;
+                bounds = Some(include_point(bounds, point));
+                current = Some(point);
+            }
             PathSegment::CubicTo {
                 x1,
                 y1,
@@ -134,18 +129,33 @@ pub fn path_segments_bbox(segments: &[PathSegment]) -> Option<(f64, f64, f64, f6
                 x,
                 y,
             } => {
-                include(*x1, *y1);
-                include(*x2, *y2);
-                include(*x, *y);
+                let p1 = Point2::new(*x1, *y1).ok()?;
+                let p2 = Point2::new(*x2, *y2).ok()?;
+                let end = Point2::new(*x, *y).ok()?;
+                bounds = Some(match current {
+                    Some(start) => {
+                        let curve = CubicBezier::new(start, p1, p2, end).ok()?;
+                        include_bounds(bounds, curve.bounds().ok()?)
+                    }
+                    None => include_point(bounds, p1)
+                        .include_point(p2)
+                        .include_point(end),
+                });
+                current = Some(end);
             }
             PathSegment::Close => {}
         }
     }
-    if saw {
-        Some((min_x, min_y, max_x - min_x, max_y - min_y))
-    } else {
-        None
-    }
+    let bounds = bounds?;
+    Some((bounds.min_x, bounds.min_y, bounds.width(), bounds.height()))
+}
+
+fn include_point(bounds: Option<RectBounds>, point: Point2) -> RectBounds {
+    bounds.map_or_else(|| RectBounds::from_point(point), |b| b.include_point(point))
+}
+
+fn include_bounds(bounds: Option<RectBounds>, next: RectBounds) -> RectBounds {
+    bounds.map_or(next, |b| b.include_bounds(next))
 }
 
 // ── Paint ───────────────────────────────────────────────────────────────────
@@ -837,6 +847,33 @@ mod tests {
             json.contains(r#""op":"FillRect""#),
             "op tag must be FillRect; got: {json}"
         );
+    }
+
+    #[test]
+    fn path_segments_bbox_uses_cubic_extrema() {
+        let segments = [
+            PathSegment::MoveTo { x: 0.0, y: 0.0 },
+            PathSegment::CubicTo {
+                x1: 0.0,
+                y1: 10.0,
+                x2: 10.0,
+                y2: 10.0,
+                x: 10.0,
+                y: 0.0,
+            },
+        ];
+
+        assert_eq!(path_segments_bbox(&segments), Some((0.0, 0.0, 10.0, 7.5)));
+    }
+
+    #[test]
+    fn path_segments_bbox_rejects_non_finite_coordinates() {
+        let segments = [PathSegment::MoveTo {
+            x: f64::NAN,
+            y: 0.0,
+        }];
+
+        assert_eq!(path_segments_bbox(&segments), None);
     }
 
     #[test]
