@@ -1,6 +1,6 @@
 use crate::{
     AffineTransform, CubicBezier, GeometryError, Point2, project_onto_cubic_bezier,
-    validation::validate_tolerance,
+    validation::{validate_parameter, validate_tolerance},
 };
 
 const ZERO_LENGTH_EPSILON: f64 = 0.0;
@@ -94,6 +94,51 @@ impl PathGeometry {
         }
 
         Ok(segments)
+    }
+
+    pub fn split_segment(
+        &self,
+        segment_index: usize,
+        segment_t: f64,
+    ) -> Result<(Self, usize), GeometryError> {
+        validate_parameter(segment_t)?;
+
+        if segment_index >= self.topology().segment_count {
+            return Err(GeometryError::CountOutOfRange);
+        }
+
+        let Some((start, end)) = segment_pair(&self.anchors, self.closed, segment_index) else {
+            return Err(GeometryError::CountOutOfRange);
+        };
+        let segment = segment_between(start, end)?;
+        let mut anchors = self.anchors.clone();
+        let inserted_anchor_index =
+            segment_insertion_index(&self.anchors, self.closed, segment_index)
+                .ok_or(GeometryError::CountOutOfRange)?;
+
+        match segment {
+            PathSegment::Line { start, end } => {
+                let inserted = PathAnchor::new(start.lerp(end, segment_t), None, None)?;
+                insert_anchor(&mut anchors, inserted_anchor_index, inserted)?;
+            }
+            PathSegment::Cubic { curve } => {
+                let (left, right) = curve.split(segment_t)?;
+                update_out_handle(&mut anchors, segment_index, left.p1)?;
+                let end_index = segment_end_index(&self.anchors, self.closed, segment_index)
+                    .ok_or(GeometryError::CountOutOfRange)?;
+                update_in_handle(&mut anchors, end_index, right.p2)?;
+                let inserted = PathAnchor::new(left.p3, Some(left.p2), Some(right.p1))?;
+                insert_anchor(&mut anchors, inserted_anchor_index, inserted)?;
+            }
+        }
+
+        Ok((
+            Self {
+                anchors,
+                closed: self.closed,
+            },
+            inserted_anchor_index,
+        ))
     }
 
     pub fn transform(&self, transform: AffineTransform) -> Result<Self, GeometryError> {
@@ -292,15 +337,29 @@ fn segment_pair(
     index: usize,
 ) -> Option<(PathAnchor, PathAnchor)> {
     let start = anchors.get(index).copied()?;
-    let end_index = if index + 1 < anchors.len() {
-        index + 1
-    } else if closed {
-        0
-    } else {
-        return None;
-    };
+    let end_index = segment_end_index(anchors, closed, index)?;
     let end = anchors.get(end_index).copied()?;
     Some((start, end))
+}
+
+fn segment_end_index(anchors: &[PathAnchor], closed: bool, index: usize) -> Option<usize> {
+    let next_index = index.checked_add(1)?;
+    if next_index < anchors.len() {
+        Some(next_index)
+    } else if closed {
+        Some(0)
+    } else {
+        None
+    }
+}
+
+fn segment_insertion_index(anchors: &[PathAnchor], closed: bool, index: usize) -> Option<usize> {
+    let end_index = segment_end_index(anchors, closed, index)?;
+    if closed && end_index == 0 {
+        Some(anchors.len())
+    } else {
+        Some(end_index)
+    }
 }
 
 fn segment_between(start: PathAnchor, end: PathAnchor) -> Result<PathSegment, GeometryError> {
@@ -323,6 +382,42 @@ fn segment_between(start: PathAnchor, end: PathAnchor) -> Result<PathSegment, Ge
             })
         }
     }
+}
+
+fn update_out_handle(
+    anchors: &mut [PathAnchor],
+    index: usize,
+    out_handle: Point2,
+) -> Result<(), GeometryError> {
+    let anchor = anchors
+        .get_mut(index)
+        .ok_or(GeometryError::CountOutOfRange)?;
+    anchor.out_handle = Some(out_handle);
+    anchor.validate()
+}
+
+fn update_in_handle(
+    anchors: &mut [PathAnchor],
+    index: usize,
+    in_handle: Point2,
+) -> Result<(), GeometryError> {
+    let anchor = anchors
+        .get_mut(index)
+        .ok_or(GeometryError::CountOutOfRange)?;
+    anchor.in_handle = Some(in_handle);
+    anchor.validate()
+}
+
+fn insert_anchor(
+    anchors: &mut Vec<PathAnchor>,
+    index: usize,
+    anchor: PathAnchor,
+) -> Result<(), GeometryError> {
+    if index > anchors.len() {
+        return Err(GeometryError::CountOutOfRange);
+    }
+    anchors.insert(index, anchor);
+    Ok(())
 }
 
 #[cfg(test)]
@@ -433,6 +528,171 @@ mod tests {
                     end: point(0.0, 0.0),
                 },
             ]
+        );
+    }
+
+    #[test]
+    fn split_open_line_segment_inserts_handle_free_anchor() {
+        let path = PathGeometry::new(vec![anchor(0.0, 0.0), anchor(10.0, 0.0)], false)
+            .expect("valid path");
+        let original = path.clone();
+
+        let (split, inserted_index) = path.split_segment(0, 0.5).expect("split path");
+
+        assert_eq!(inserted_index, 1);
+        assert_eq!(
+            split.topology(),
+            PathTopology {
+                anchor_count: 3,
+                segment_count: 2,
+                open_subpath_count: 1,
+                closed_subpath_count: 0,
+            }
+        );
+        assert_eq!(
+            split.anchors(),
+            &[anchor(0.0, 0.0), anchor(5.0, 0.0), anchor(10.0, 0.0)]
+        );
+        assert_eq!(
+            split.segments().expect("segments"),
+            vec![
+                PathSegment::Line {
+                    start: point(0.0, 0.0),
+                    end: point(5.0, 0.0),
+                },
+                PathSegment::Line {
+                    start: point(5.0, 0.0),
+                    end: point(10.0, 0.0),
+                },
+            ]
+        );
+        assert_eq!(path, original);
+    }
+
+    #[test]
+    fn split_cubic_segment_preserves_exact_split_handles() {
+        let curve = CubicBezier::new_unchecked(
+            point(0.0, 0.0),
+            point(0.0, 12.0),
+            point(10.0, 12.0),
+            point(10.0, 0.0),
+        );
+        let start = PathAnchor::new(curve.p0, Some(point(-2.0, 0.0)), Some(curve.p1))
+            .expect("valid anchor");
+        let end = PathAnchor::new(curve.p3, Some(curve.p2), Some(point(12.0, 0.0)))
+            .expect("valid anchor");
+        let path = PathGeometry::new(vec![start, end], false).expect("valid path");
+        let original = path.clone();
+        let (left, right) = curve.split(0.25).expect("split curve");
+
+        let (split, inserted_index) = path.split_segment(0, 0.25).expect("split path");
+
+        assert_eq!(inserted_index, 1);
+        assert_eq!(
+            split.anchors(),
+            &[
+                PathAnchor {
+                    point: curve.p0,
+                    in_handle: Some(point(-2.0, 0.0)),
+                    out_handle: Some(left.p1),
+                },
+                PathAnchor {
+                    point: left.p3,
+                    in_handle: Some(left.p2),
+                    out_handle: Some(right.p1),
+                },
+                PathAnchor {
+                    point: curve.p3,
+                    in_handle: Some(right.p2),
+                    out_handle: Some(point(12.0, 0.0)),
+                },
+            ]
+        );
+        assert_eq!(
+            split.segments().expect("segments"),
+            vec![
+                PathSegment::Cubic { curve: left },
+                PathSegment::Cubic { curve: right },
+            ]
+        );
+        assert_eq!(path, original);
+    }
+
+    #[test]
+    fn split_closed_closing_edge_appends_anchor_and_keeps_path_closed() {
+        let path = PathGeometry::new(
+            vec![anchor(0.0, 0.0), anchor(10.0, 0.0), anchor(10.0, 10.0)],
+            true,
+        )
+        .expect("valid path");
+        let original = path.clone();
+
+        let (split, inserted_index) = path.split_segment(2, 0.5).expect("split path");
+
+        assert_eq!(inserted_index, 3);
+        assert!(split.closed());
+        assert_eq!(
+            split.topology(),
+            PathTopology {
+                anchor_count: 4,
+                segment_count: 4,
+                open_subpath_count: 0,
+                closed_subpath_count: 1,
+            }
+        );
+        assert_eq!(
+            split.anchors(),
+            &[
+                anchor(0.0, 0.0),
+                anchor(10.0, 0.0),
+                anchor(10.0, 10.0),
+                anchor(5.0, 5.0),
+            ]
+        );
+        assert_eq!(
+            split.segments().expect("segments"),
+            vec![
+                PathSegment::Line {
+                    start: point(0.0, 0.0),
+                    end: point(10.0, 0.0),
+                },
+                PathSegment::Line {
+                    start: point(10.0, 0.0),
+                    end: point(10.0, 10.0),
+                },
+                PathSegment::Line {
+                    start: point(10.0, 10.0),
+                    end: point(5.0, 5.0),
+                },
+                PathSegment::Line {
+                    start: point(5.0, 5.0),
+                    end: point(0.0, 0.0),
+                },
+            ]
+        );
+        assert_eq!(path, original);
+    }
+
+    #[test]
+    fn split_segment_rejects_invalid_index_and_parameters() {
+        let path = PathGeometry::new(vec![anchor(0.0, 0.0), anchor(10.0, 0.0)], false)
+            .expect("valid path");
+
+        assert_eq!(
+            path.split_segment(1, 0.5),
+            Err(GeometryError::CountOutOfRange)
+        );
+        assert_eq!(
+            path.split_segment(0, f64::NAN),
+            Err(GeometryError::NonFiniteParameter)
+        );
+        assert_eq!(
+            path.split_segment(0, -0.1),
+            Err(GeometryError::ParameterOutOfRange)
+        );
+        assert_eq!(
+            path.split_segment(0, 1.1),
+            Err(GeometryError::ParameterOutOfRange)
         );
     }
 
