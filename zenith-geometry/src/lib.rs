@@ -33,7 +33,10 @@ pub use contour::{
     collect_raw_closed_polyline_intersections,
 };
 pub use error::GeometryError;
-pub use fit::chord_length_parameters;
+pub use fit::{
+    PolylineEndpointTangentDirections, chord_length_parameters,
+    estimate_endpoint_tangent_directions,
+};
 pub use guide::{ConstructionGuide, modular_guides, polar_guides, ratio_guides};
 pub use intersection::{
     IntersectionPoint, LineIntersection, PolylineIntersection, SegmentIntersection,
