@@ -258,6 +258,41 @@ fn to_png_overflow_fit_exceeded_has_error_diagnostic() {
     );
 }
 
+#[test]
+fn to_png_clip_overflow_guides_geometry_before_shrinking_type() {
+    const OVERFLOW_CLIP_DOC: &str = r##"zenith version=1 {
+  project id="proj.clipguide" name="Clip Guide"
+  tokens format="zenith-token-v1" {}
+  styles {}
+  document id="doc.clipguide" title="Clip Guide" {
+    page id="page.clipguide" w=(px)400 h=(px)400 {
+      text id="text.clipguide" x=(px)10 y=(px)10 w=(px)120 h=(px)20 {
+        span "Large deck title that needs more box height"
+      }
+    }
+  }
+}
+"##;
+    let artifact = to_png(OVERFLOW_CLIP_DOC, 1).expect("render must succeed");
+    let overflow = artifact
+        .diagnostics
+        .iter()
+        .find(|d| d.code == "text.overflow")
+        .expect("clipped text must emit a text.overflow diagnostic");
+    assert!(
+        overflow.message.contains("increasing the box height"),
+        "overflow diagnostic must guide agents to adjust geometry first; got: {}",
+        overflow.message
+    );
+    assert!(
+        overflow
+            .message
+            .contains("Shrink type only when intended or geometry is constrained"),
+        "overflow diagnostic must name the shrinking constraint; got: {}",
+        overflow.message
+    );
+}
+
 /// A document referencing an asset whose file does not exist under the
 /// project directory. Used to exercise the `asset.missing` hard diagnostic.
 const MISSING_ASSET_DOC: &str = r##"zenith version=1 {

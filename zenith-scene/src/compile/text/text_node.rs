@@ -1084,7 +1084,9 @@ pub(in crate::compile) fn compile_text_sized(
                 "text.overflow",
                 format!(
                     "text '{}': content is clipped at the box edge \
-                     (overflow=\"clip\"): at {:.0}px font-size it needs ~{:.0}px height in a {:.0}px-tall box",
+                     (overflow=\"clip\"): at {:.0}px font-size it needs ~{:.0}px height in a {:.0}px-tall box; \
+                     preserve declared type scale first by increasing the box height, moving nearby nodes, \
+                     splitting content, or reflowing layout. Shrink type only when intended or geometry is constrained.",
                     text.id, font_size as f64, content_height, box_h
                 ),
                 text.source_span,

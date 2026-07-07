@@ -716,7 +716,7 @@ pub const DIAGNOSTIC_CODES: &[DiagnosticCodeInfo] = &[
     info(
         "text.overflow",
         Severity::Warning,
-        "Text content overflows its containing frame.",
+        "Text content overflows its containing frame; preserve type scale first and shrink only when intended or constrained.",
     ),
     info(
         "text.src_missing",
