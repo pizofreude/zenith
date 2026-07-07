@@ -3,14 +3,17 @@
 use zenith_core::BlendMode;
 
 use crate::blend_pixel;
+use crate::mask::Mask;
 use crate::surface::{LinearRgba, RasterError, Surface};
 
 /// A borrowed raster layer.
 #[derive(Debug, Clone, Copy)]
 pub struct Layer<'a> {
     pub visible: bool,
+    pub clipping: bool,
     pub opacity: f32,
     pub blend_mode: BlendMode,
+    pub mask: Option<Mask<'a>>,
     pub source: LayerSource<'a>,
 }
 
@@ -19,8 +22,10 @@ impl<'a> Layer<'a> {
     pub const fn surface(surface: &'a Surface) -> Self {
         Self {
             visible: true,
+            clipping: false,
             opacity: 1.0,
             blend_mode: BlendMode::Normal,
+            mask: None,
             source: LayerSource::Surface(surface),
         }
     }
@@ -29,8 +34,10 @@ impl<'a> Layer<'a> {
     pub const fn group(layers: &'a [Layer<'a>]) -> Self {
         Self {
             visible: true,
+            clipping: false,
             opacity: 1.0,
             blend_mode: BlendMode::Normal,
+            mask: None,
             source: LayerSource::Group(layers),
         }
     }
@@ -44,6 +51,18 @@ impl<'a> Layer<'a> {
     /// Return this layer with a new boundary blend mode.
     pub const fn with_blend_mode(mut self, blend_mode: BlendMode) -> Self {
         self.blend_mode = blend_mode;
+        self
+    }
+
+    /// Return this layer with a boundary mask.
+    pub const fn with_mask(mut self, mask: Mask<'a>) -> Self {
+        self.mask = Some(mask);
+        self
+    }
+
+    /// Return this layer clipped to the previous boundary alpha.
+    pub const fn clipped(mut self) -> Self {
+        self.clipping = true;
         self
     }
 
@@ -75,6 +94,8 @@ pub fn compose_onto(base: &Surface, layers: &[Layer<'_>]) -> Result<Surface, Ras
 }
 
 fn compose_layers_into(target: &mut Surface, layers: &[Layer<'_>]) -> Result<(), RasterError> {
+    let mut previous_boundary = None;
+
     for layer in layers {
         if !layer.visible {
             continue;
@@ -86,16 +107,10 @@ fn compose_layers_into(target: &mut Surface, layers: &[Layer<'_>]) -> Result<(),
             continue;
         }
 
-        match layer.source {
-            LayerSource::Surface(surface) => {
-                validate_dimensions(target, surface)?;
-                composite_surface(target, surface, layer.opacity, layer.blend_mode)?;
-            }
-            LayerSource::Group(layers) => {
-                let group = compose(target.width(), target.height(), layers)?;
-                composite_surface(target, &group, layer.opacity, layer.blend_mode)?;
-            }
-        }
+        let mut boundary = boundary_surface(target, layer.source)?;
+        apply_boundary_coverage(&mut boundary, layer, previous_boundary.as_ref())?;
+        composite_surface(target, &boundary, layer.blend_mode)?;
+        previous_boundary = Some(boundary);
     }
 
     Ok(())
@@ -117,10 +132,65 @@ fn validate_dimensions(target: &Surface, source: &Surface) -> Result<(), RasterE
     }
 }
 
+fn boundary_surface(target: &Surface, source: LayerSource<'_>) -> Result<Surface, RasterError> {
+    match source {
+        LayerSource::Surface(surface) => {
+            validate_dimensions(target, surface)?;
+            Ok(surface.clone())
+        }
+        LayerSource::Group(layers) => compose(target.width(), target.height(), layers),
+    }
+}
+
+fn apply_boundary_coverage(
+    boundary: &mut Surface,
+    layer: &Layer<'_>,
+    previous_boundary: Option<&Surface>,
+) -> Result<(), RasterError> {
+    let mask = layer.mask;
+    let mask_surface = mask.as_ref().map(|mask| mask.surface());
+
+    if let Some(mask_surface) = mask_surface {
+        validate_dimensions(boundary, mask_surface)?;
+    }
+    if let Some(previous_boundary) = previous_boundary {
+        validate_dimensions(boundary, previous_boundary)?;
+    }
+
+    for y in 0..boundary.height() {
+        for x in 0..boundary.width() {
+            let mut coverage = layer.opacity;
+
+            if let Some(mask) = mask {
+                let mask_pixel = mask_surface
+                    .and_then(|surface| surface.get(x, y))
+                    .ok_or(RasterError::OutOfBounds)?;
+                coverage *= mask.coverage(mask_pixel);
+            }
+
+            if layer.clipping {
+                let clip_coverage = if let Some(previous_boundary) = previous_boundary {
+                    previous_boundary
+                        .get(x, y)
+                        .ok_or(RasterError::OutOfBounds)?
+                        .a()
+                } else {
+                    0.0
+                };
+                coverage *= clip_coverage;
+            }
+
+            let pixel = boundary.get(x, y).ok_or(RasterError::OutOfBounds)?;
+            boundary.set(x, y, scale_pixel(pixel, coverage)?)?;
+        }
+    }
+
+    Ok(())
+}
+
 fn composite_surface(
     target: &mut Surface,
     source: &Surface,
-    opacity: f32,
     blend_mode: BlendMode,
 ) -> Result<(), RasterError> {
     let width = target.width();
@@ -130,7 +200,6 @@ fn composite_surface(
         for x in 0..width {
             let backdrop = target.get(x, y).ok_or(RasterError::OutOfBounds)?;
             let source_pixel = source.get(x, y).ok_or(RasterError::OutOfBounds)?;
-            let source_pixel = scale_pixel(source_pixel, opacity)?;
             let blended = blend_pixel(blend_mode, backdrop, source_pixel)?;
             target.set(x, y, blended)?;
         }
@@ -168,6 +237,17 @@ mod tests {
                 "actual {actual} expected {expected}"
             );
         }
+    }
+
+    #[test]
+    fn unmasked_unclipped_layer_matches_source_over() {
+        let source_pixel = pixel(0.8, 0.1, 0.3, 0.25);
+        let source = one_pixel_surface(source_pixel);
+        let layers = [Layer::surface(&source)];
+
+        let composed = compose(1, 1, &layers).unwrap();
+
+        assert_eq!(composed.get(0, 0), Some(source_pixel));
     }
 
     #[test]
@@ -213,6 +293,76 @@ mod tests {
     }
 
     #[test]
+    fn alpha_mask_scales_boundary_coverage() {
+        let source_pixel = pixel(1.0, 0.0, 0.0, 0.8);
+        let source = one_pixel_surface(source_pixel);
+        let mask_pixel = pixel(0.0, 0.0, 0.0, 0.25);
+        let mask = one_pixel_surface(mask_pixel);
+        let layers = [Layer::surface(&source).with_mask(Mask::alpha(&mask))];
+
+        let composed = compose(1, 1, &layers).unwrap();
+
+        assert_channels_close(composed.get(0, 0).unwrap(), [0.2, 0.0, 0.0, 0.2]);
+        assert_eq!(source.get(0, 0), Some(source_pixel));
+        assert_eq!(mask.get(0, 0), Some(mask_pixel));
+    }
+
+    #[test]
+    fn luminance_mask_uses_premultiplied_linear_channels() {
+        let source = one_pixel_surface(pixel(1.0, 0.0, 0.0, 1.0));
+        let mask = one_pixel_surface(pixel(1.0, 0.5, 0.0, 0.5));
+        let layers = [Layer::surface(&source).with_mask(Mask::luminance(&mask))];
+
+        let composed = compose(1, 1, &layers).unwrap();
+
+        assert_channels_close(composed.get(0, 0).unwrap(), [0.2975, 0.0, 0.0, 0.2975]);
+    }
+
+    #[test]
+    fn inverted_mask_uses_complement_coverage() {
+        let source = one_pixel_surface(pixel(0.0, 1.0, 0.0, 1.0));
+        let mask = one_pixel_surface(pixel(0.0, 0.0, 0.0, 0.25));
+        let layers = [Layer::surface(&source).with_mask(Mask::alpha(&mask).inverted())];
+
+        let composed = compose(1, 1, &layers).unwrap();
+
+        assert_channels_close(composed.get(0, 0).unwrap(), [0.0, 0.75, 0.0, 0.75]);
+    }
+
+    #[test]
+    fn clipped_layer_uses_previous_boundary_alpha() {
+        let blue = one_pixel_surface(pixel(0.0, 0.0, 1.0, 0.4));
+        let red = one_pixel_surface(pixel(1.0, 0.0, 0.0, 1.0));
+        let layers = [Layer::surface(&blue), Layer::surface(&red).clipped()];
+
+        let composed = compose(1, 1, &layers).unwrap();
+
+        assert_channels_close(composed.get(0, 0).unwrap(), [0.4, 0.0, 0.24, 0.64]);
+    }
+
+    #[test]
+    fn clipped_layer_without_previous_boundary_is_no_op() {
+        let source = one_pixel_surface(pixel(1.0, 0.0, 0.0, 1.0));
+        let layers = [Layer::surface(&source).clipped()];
+
+        let composed = compose(1, 1, &layers).unwrap();
+
+        assert_eq!(composed.get(0, 0), Some(LinearRgba::TRANSPARENT));
+    }
+
+    #[test]
+    fn group_output_is_available_as_clipping_boundary() {
+        let green = one_pixel_surface(pixel(0.0, 1.0, 0.0, 0.5));
+        let red = one_pixel_surface(pixel(1.0, 0.0, 0.0, 1.0));
+        let group_layers = [Layer::surface(&green)];
+        let layers = [Layer::group(&group_layers), Layer::surface(&red).clipped()];
+
+        let composed = compose(1, 1, &layers).unwrap();
+
+        assert_channels_close(composed.get(0, 0).unwrap(), [0.5, 0.25, 0.0, 0.75]);
+    }
+
+    #[test]
     fn non_normal_blend_modes_route_through_pixel_blending() {
         let base = one_pixel_surface(pixel(0.5, 0.5, 0.5, 1.0));
         let source = one_pixel_surface(pixel(0.4, 0.8, 0.2, 1.0));
@@ -227,6 +377,15 @@ mod tests {
     fn source_dimension_mismatch_is_reported() {
         let source = Surface::new(2, 1).unwrap();
         let layers = [Layer::surface(&source)];
+
+        assert_eq!(compose(1, 1, &layers), Err(RasterError::DimensionMismatch));
+    }
+
+    #[test]
+    fn mask_dimension_mismatch_is_reported() {
+        let source = one_pixel_surface(pixel(1.0, 0.0, 0.0, 1.0));
+        let mask = Surface::new(2, 1).unwrap();
+        let layers = [Layer::surface(&source).with_mask(Mask::alpha(&mask))];
 
         assert_eq!(compose(1, 1, &layers), Err(RasterError::DimensionMismatch));
     }
