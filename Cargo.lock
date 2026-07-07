@@ -1419,6 +1419,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "zenith-geometry"
+version = "0.0.8"
+
+[[package]]
 name = "zenith-layout"
 version = "0.0.8"
 dependencies = [

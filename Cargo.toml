@@ -5,6 +5,7 @@ members = [
     "zenith-layout",
     "zenith-raster",
     "zenith-perception",
+    "zenith-geometry",
     "zenith-scene",
     "zenith-render",
     "zenith-tx",
@@ -35,6 +36,7 @@ zenith-core = { version = "0", path = "zenith-core" }
 zenith-layout = { version = "0", path = "zenith-layout" }
 zenith-raster = { version = "0", path = "zenith-raster" }
 zenith-perception = { version = "0", path = "zenith-perception" }
+zenith-geometry = { version = "0", path = "zenith-geometry" }
 zenith-scene = { version = "0", path = "zenith-scene" }
 zenith-render = { version = "0", path = "zenith-render" }
 zenith-tx = { version = "0", path = "zenith-tx" }
