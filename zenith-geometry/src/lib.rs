@@ -16,7 +16,10 @@ pub mod transform;
 mod validation;
 
 pub use bezier::{CubicBezier, CubicBezierProjection, project_onto_cubic_bezier};
-pub use boolean::{ClosedPolylineBooleanOp, ClosedPolylineBooleanResult, boolean_closed_polylines};
+pub use boolean::{
+    ClosedPolylineBooleanOp, ClosedPolylineBooleanResult, ContourBooleanSplits,
+    ContourSegmentSplit, boolean_closed_polylines, collect_contour_boolean_splits,
+};
 pub use bounds::RectBounds;
 pub use contour::{
     ClosedPolyline, ClosedPolylineIntersectionEvent, ClosedPolylineRelation, ClosedPolylineWinding,
