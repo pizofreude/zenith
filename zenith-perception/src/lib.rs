@@ -5,6 +5,7 @@ pub mod density_map;
 pub mod diagnostic;
 pub mod edge_map;
 pub mod histogram;
+mod path_geometry;
 pub mod path_tangent_quality;
 pub mod report;
 pub mod scalar;

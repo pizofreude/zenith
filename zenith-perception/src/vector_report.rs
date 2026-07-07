@@ -1,9 +1,11 @@
 use crate::{
     AnchorEconomyInput, AnchorEconomyReport, PathTangentQualityInput, PathTangentQualityReport,
-    PerceptionDiagnostic, anchor_economy, path_tangent_quality,
+    PerceptionDiagnostic, PerceptionSeverity, anchor_economy,
+    path_geometry::{complete_handle_count, geometry_path},
+    path_tangent_quality,
 };
 use zenith_core::PathAnchor;
-use zenith_geometry::{PathGeometry, PathTopology};
+use zenith_geometry::{PathGeometry, PathTopology, RectBounds};
 
 /// Input for path-level vector perception.
 ///
@@ -23,6 +25,7 @@ pub struct VectorPathPerceptionReport {
     pub anchor_count: usize,
     pub segment_count: usize,
     pub closed: bool,
+    pub bounds: Option<RectBounds>,
     pub anchor_economy: AnchorEconomyReport,
     pub tangent_quality: PathTangentQualityReport,
     pub diagnostics: Vec<PerceptionDiagnostic>,
@@ -41,14 +44,19 @@ pub fn analyze_vector_path(input: VectorPathPerceptionInput<'_>) -> VectorPathPe
         anchors: input.anchors,
         closed: input.closed,
     });
+    let (bounds, bounds_diagnostic) = path_bounds(input);
 
     let mut diagnostics = anchor_economy.diagnostics.clone();
     diagnostics.extend(tangent_quality.diagnostics.iter().cloned());
+    if let Some(diagnostic) = bounds_diagnostic {
+        diagnostics.push(diagnostic);
+    }
 
     VectorPathPerceptionReport {
         anchor_count,
         segment_count: topology.segment_count,
         closed: input.closed,
+        bounds,
         anchor_economy,
         tangent_quality,
         diagnostics,
@@ -69,9 +77,24 @@ fn anchor_economy_input(
     }
 }
 
-fn complete_handle_count(anchor: &PathAnchor) -> usize {
-    usize::from(anchor.in_x.is_some() && anchor.in_y.is_some())
-        + usize::from(anchor.out_x.is_some() && anchor.out_y.is_some())
+fn path_bounds(
+    input: VectorPathPerceptionInput<'_>,
+) -> (Option<RectBounds>, Option<PerceptionDiagnostic>) {
+    match geometry_path(input.anchors, input.closed) {
+        Ok(geometry) => match geometry.bounds() {
+            Ok(bounds) => (bounds, None),
+            Err(_) => (None, Some(invalid_geometry_diagnostic())),
+        },
+        Err(()) => (None, Some(invalid_geometry_diagnostic())),
+    }
+}
+
+fn invalid_geometry_diagnostic() -> PerceptionDiagnostic {
+    PerceptionDiagnostic::new(
+        "vector_path.invalid_geometry",
+        PerceptionSeverity::Info,
+        "path bounds require complete finite px anchor and handle coordinates",
+    )
 }
 
 #[cfg(test)]
@@ -111,6 +134,45 @@ mod tests {
         assert_eq!(report.anchor_economy.closed_subpath_count, 0);
         assert_eq!(report.anchor_economy.minimum_anchor_count, 3);
         assert!(report.anchor_economy.diagnostics.is_empty());
+    }
+
+    #[test]
+    fn vector_path_report_carries_exact_bounds() {
+        let anchors = [
+            PathAnchor {
+                x: Some(px(0.0)),
+                y: Some(px(0.0)),
+                kind: None,
+                in_x: None,
+                in_y: None,
+                out_x: Some(px(0.0)),
+                out_y: Some(px(10.0)),
+            },
+            PathAnchor {
+                x: Some(px(10.0)),
+                y: Some(px(0.0)),
+                kind: None,
+                in_x: Some(px(10.0)),
+                in_y: Some(px(10.0)),
+                out_x: None,
+                out_y: None,
+            },
+        ];
+
+        let report = analyze_vector_path(VectorPathPerceptionInput {
+            anchors: &anchors,
+            closed: false,
+        });
+
+        assert_eq!(
+            report.bounds,
+            Some(RectBounds {
+                min_x: 0.0,
+                min_y: 0.0,
+                max_x: 10.0,
+                max_y: 7.5,
+            })
+        );
     }
 
     #[test]
@@ -204,6 +266,34 @@ mod tests {
                 PerceptionSeverity::Info,
                 "mean tangent alignment is low across evaluated path joins",
             )]
+        );
+    }
+
+    #[test]
+    fn vector_path_report_diagnoses_invalid_bounds_geometry() {
+        let anchors = [PathAnchor {
+            x: Some(px(0.0)),
+            y: Some(px(0.0)),
+            kind: None,
+            in_x: None,
+            in_y: None,
+            out_x: Some(px(1.0)),
+            out_y: None,
+        }];
+
+        let report = analyze_vector_path(VectorPathPerceptionInput {
+            anchors: &anchors,
+            closed: false,
+        });
+
+        assert_eq!(report.bounds, None);
+        assert!(
+            report
+                .diagnostics
+                .iter()
+                .any(|diagnostic| diagnostic.code == "vector_path.invalid_geometry"),
+            "expected invalid bounds geometry diagnostic; got {:?}",
+            report.diagnostics
         );
     }
 

@@ -1,6 +1,8 @@
-use crate::{PerceptionDiagnostic, PerceptionSeverity};
-use zenith_core::{Dimension, PathAnchor, Unit};
-use zenith_geometry::{PathAnchor as GeometryPathAnchor, Point2};
+use crate::{
+    PerceptionDiagnostic, PerceptionSeverity,
+    path_geometry::{complete_handle_count, geometry_anchor},
+};
+use zenith_core::PathAnchor;
 
 const SMOOTH_ALIGNMENT_THRESHOLD: f64 = 0.95;
 const SHARP_ALIGNMENT_THRESHOLD: f64 = 0.35;
@@ -55,9 +57,7 @@ pub fn path_tangent_quality(input: PathTangentQualityInput<'_>) -> PathTangentQu
     let mut tangent_alignment_total = 0.0;
 
     for anchor in evaluable_anchors(input.anchors, input.closed) {
-        let Some(join) =
-            evaluable_geometry_anchor(anchor).and_then(GeometryPathAnchor::join_vectors)
-        else {
+        let Some(join) = geometry_anchor(anchor).and_then(|anchor| anchor.join_vectors()) else {
             continue;
         };
 
@@ -113,19 +113,6 @@ pub fn path_tangent_quality(input: PathTangentQualityInput<'_>) -> PathTangentQu
     }
 }
 
-fn complete_handle_count(anchor: &PathAnchor) -> usize {
-    usize::from(anchor.in_x.is_some() && anchor.in_y.is_some())
-        + usize::from(anchor.out_x.is_some() && anchor.out_y.is_some())
-}
-
-fn evaluable_geometry_anchor(anchor: &PathAnchor) -> Option<GeometryPathAnchor> {
-    let anchor_point = point_from_px_pair(anchor.x.as_ref(), anchor.y.as_ref())?;
-    let in_handle = point_from_px_pair(anchor.in_x.as_ref(), anchor.in_y.as_ref())?;
-    let out_handle = point_from_px_pair(anchor.out_x.as_ref(), anchor.out_y.as_ref())?;
-
-    GeometryPathAnchor::new(anchor_point, Some(in_handle), Some(out_handle)).ok()
-}
-
 fn evaluable_anchors(anchors: &[PathAnchor], closed: bool) -> &[PathAnchor] {
     if closed {
         anchors
@@ -134,19 +121,6 @@ fn evaluable_anchors(anchors: &[PathAnchor], closed: bool) -> &[PathAnchor] {
     } else {
         &[]
     }
-}
-
-fn px_value(dimension: Option<&Dimension>) -> Option<f64> {
-    let dimension = dimension?;
-    match dimension.unit {
-        Unit::Px if dimension.value.is_finite() => Some(dimension.value),
-        Unit::Px => None,
-        Unit::Pt | Unit::Pct | Unit::Deg | Unit::Unknown(_) => None,
-    }
-}
-
-fn point_from_px_pair(x: Option<&Dimension>, y: Option<&Dimension>) -> Option<Point2> {
-    Point2::new(px_value(x)?, px_value(y)?).ok()
 }
 
 fn mean(total: f64, count: usize) -> f32 {
@@ -218,6 +192,7 @@ fn diagnostics(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use zenith_core::{Dimension, Unit};
 
     #[test]
     fn empty_input_returns_zeroes_without_diagnostics() {
