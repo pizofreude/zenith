@@ -1,5 +1,53 @@
 use crate::{GeometryError, Point2, validation::validate_tolerance};
 
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct PolylineProjection {
+    pub point: Point2,
+    pub segment_index: usize,
+    pub segment_t: f64,
+    pub distance_squared: f64,
+}
+
+pub fn project_onto_polyline(
+    point: Point2,
+    polyline: &[Point2],
+) -> Result<Option<PolylineProjection>, GeometryError> {
+    point.validate()?;
+    validate_points(polyline)?;
+
+    if polyline.len() < 2 {
+        return Ok(None);
+    }
+
+    let mut nearest: Option<PolylineProjection> = None;
+    for (segment_index, segment) in polyline.windows(2).enumerate() {
+        let Some(segment_start) = segment.first().copied() else {
+            continue;
+        };
+        let Some(segment_end) = segment.get(1).copied() else {
+            continue;
+        };
+        let projection = point.project_onto_segment(segment_start, segment_end);
+        let candidate = PolylineProjection {
+            point: projection.point,
+            segment_index,
+            segment_t: projection.t,
+            distance_squared: projection.distance_squared,
+        };
+
+        match nearest {
+            Some(current) if candidate.distance_squared >= current.distance_squared => {
+                nearest = Some(current);
+            }
+            Some(_) | None => {
+                nearest = Some(candidate);
+            }
+        }
+    }
+
+    Ok(nearest)
+}
+
 pub fn simplify_polyline(points: &[Point2], tolerance: f64) -> Result<Vec<Point2>, GeometryError> {
     validate_tolerance(tolerance)?;
     validate_points(points)?;
@@ -80,6 +128,109 @@ mod tests {
 
     fn point(x: f64, y: f64) -> Point2 {
         Point2::new_unchecked(x, y)
+    }
+
+    #[test]
+    fn projection_returns_none_for_empty_polyline() {
+        assert_eq!(project_onto_polyline(point(1.0, 2.0), &[]), Ok(None));
+    }
+
+    #[test]
+    fn projection_returns_none_for_one_point_polyline() {
+        assert_eq!(
+            project_onto_polyline(point(3.0, 4.0), &[point(0.0, 0.0)]),
+            Ok(None)
+        );
+    }
+
+    #[test]
+    fn projection_finds_interior_point_on_multi_segment_polyline() {
+        let polyline = [
+            point(0.0, 0.0),
+            point(2.0, 0.0),
+            point(2.0, 5.0),
+            point(6.0, 5.0),
+        ];
+
+        assert_eq!(
+            project_onto_polyline(point(4.0, 2.0), &polyline),
+            Ok(Some(PolylineProjection {
+                point: point(2.0, 2.0),
+                segment_index: 1,
+                segment_t: 0.4,
+                distance_squared: 4.0,
+            }))
+        );
+    }
+
+    #[test]
+    fn projection_keeps_earliest_segment_on_tie() {
+        let polyline = [point(0.0, 0.0), point(2.0, 0.0), point(2.0, 2.0)];
+
+        assert_eq!(
+            project_onto_polyline(point(1.0, 1.0), &polyline),
+            Ok(Some(PolylineProjection {
+                point: point(1.0, 0.0),
+                segment_index: 0,
+                segment_t: 0.5,
+                distance_squared: 1.0,
+            }))
+        );
+    }
+
+    #[test]
+    fn projection_handles_repeated_points_as_degenerate_segments() {
+        let polyline = [point(0.0, 0.0), point(0.0, 0.0), point(4.0, 0.0)];
+
+        assert_eq!(
+            project_onto_polyline(point(0.0, 2.0), &polyline),
+            Ok(Some(PolylineProjection {
+                point: point(0.0, 0.0),
+                segment_index: 0,
+                segment_t: 0.0,
+                distance_squared: 4.0,
+            }))
+        );
+    }
+
+    #[test]
+    fn projection_rejects_invalid_query_point() {
+        let polyline = [point(0.0, 0.0), point(1.0, 0.0)];
+
+        assert_eq!(
+            project_onto_polyline(point(f64::NAN, 0.0), &polyline),
+            Err(GeometryError::NonFinitePoint)
+        );
+    }
+
+    #[test]
+    fn projection_rejects_invalid_polyline_point() {
+        let polyline = [point(0.0, 0.0), point(f64::INFINITY, 0.0)];
+
+        assert_eq!(
+            project_onto_polyline(point(0.0, 0.0), &polyline),
+            Err(GeometryError::NonFinitePoint)
+        );
+    }
+
+    #[test]
+    fn projection_chooses_nearest_segment_over_farther_segment() {
+        let polyline = [
+            point(0.0, 0.0),
+            point(1.0, 0.0),
+            point(10.0, 0.0),
+            point(10.0, 5.0),
+        ];
+
+        assert_eq!(
+            project_onto_polyline(point(10.0, 3.0), &polyline),
+            Ok(Some(PolylineProjection {
+                point: point(10.0, 3.0),
+                segment_index: 2,
+                segment_t: 0.6,
+                distance_squared: 0.0,
+            }))
+        );
     }
 
     #[test]
