@@ -10,6 +10,7 @@ members = [
     "zenith-cli",
     "zenith-session",
     "zenith-zpx",
+    "zenith-producers",
 ]
 
 [workspace.package]
@@ -37,6 +38,7 @@ zenith-render = { version = "0", path = "zenith-render" }
 zenith-tx = { version = "0", path = "zenith-tx" }
 zenith-session = { version = "0", path = "zenith-session" }
 zenith-zpx = { version = "0", path = "zenith-zpx" }
+zenith-producers = { version = "0", path = "zenith-producers" }
 
 [workspace.lints.rust]
 unsafe_code = "forbid"

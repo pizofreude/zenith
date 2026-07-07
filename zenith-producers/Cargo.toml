@@ -1,0 +1,21 @@
+[package]
+name = "zenith-producers"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+keywords.workspace = true
+categories.workspace = true
+publish.workspace = true
+readme.workspace = true
+description = "Zenith deterministic write-side asset producers."
+
+[dependencies]
+zenith-core = { workspace = true }
+zenith-session = { workspace = true }
+zenith-zpx = { workspace = true }
+
+[lints]
+workspace = true

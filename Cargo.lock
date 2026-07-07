@@ -1427,6 +1427,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "zenith-producers"
+version = "0.0.8"
+dependencies = [
+ "zenith-core",
+ "zenith-session",
+ "zenith-zpx",
+]
+
+[[package]]
 name = "zenith-raster"
 version = "0.0.8"
 dependencies = [
