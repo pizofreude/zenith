@@ -367,12 +367,13 @@ pub enum Op {
         /// Replacement anchor list. Each coordinate is in document pixels.
         anchors: Vec<OpPathAnchor>,
     },
-    /// Simplify a straight-segment `path` node's anchors using a pixel tolerance.
+    /// Simplify an open `path` node's anchors using a pixel tolerance.
     ///
-    /// This operation is intentionally conservative: it only accepts path
-    /// anchors with required `x`/`y` pixel coordinates and no in/out Bezier
-    /// handles. Paths with handles are rejected with `tx.unsupported_path_handles`
-    /// rather than approximating curves.
+    /// This operation accepts path anchors with required `x`/`y` pixel
+    /// coordinates. Open Bezier segments are flattened to straight anchors
+    /// before simplification, so any in/out handles are removed from the
+    /// resulting path. Closed paths are rejected with
+    /// `tx.unsupported_closed_path`.
     ///
     /// Post-validation rejects automatically if simplification leaves too few
     /// anchors for the path.

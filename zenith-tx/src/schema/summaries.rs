@@ -23,7 +23,7 @@ pub fn op_summary(name: &str) -> Option<&'static str> {
         "set_points" => Some("Replace the full vertex list of a polygon or polyline node."),
         "set_path_anchors" => Some("Replace the full anchor list of a path node."),
         "simplify_path_anchors" => {
-            Some("Simplify a straight-segment path node's anchors using a pixel tolerance.")
+            Some("Simplify an open path node's anchors using a pixel tolerance.")
         }
         "add_node" => Some("Parse a .zen source fragment and insert it into a container."),
         "remove_node" => Some("Remove a node and its subtree from the document."),

@@ -75,8 +75,12 @@ fn simplify_path_anchors_preserves_far_bend() {
     );
 }
 
+fn formatted_anchor_count(source: &str) -> usize {
+    source.matches("\n        anchor ").count()
+}
+
 #[test]
-fn simplify_path_anchors_rejects_paths_with_handles() {
+fn simplify_path_anchors_accepts_open_cubic_paths() {
     let doc = parse(
         r##"zenith version=1 {
   project id="proj" name="Test"
@@ -85,8 +89,8 @@ fn simplify_path_anchors_rejects_paths_with_handles() {
   document id="doc1" title="T" {
     page id="pg1" w=(px)400 h=(px)300 {
       path id="path1" {
-        anchor x=(px)0 y=(px)0 out-x=(px)20 out-y=(px)0
-        anchor x=(px)100 y=(px)0
+        anchor x=(px)0 y=(px)0 out-x=(px)0 out-y=(px)100
+        anchor x=(px)100 y=(px)0 in-x=(px)100 in-y=(px)100
       }
     }
   }
@@ -101,16 +105,66 @@ fn simplify_path_anchors_rejects_paths_with_handles() {
     };
     let result = run_transaction(&doc, &tx).expect("run_transaction should not error");
 
-    assert_eq!(result.status, TxStatus::Rejected);
+    assert_eq!(result.status, TxStatus::Accepted);
+    assert_eq!(result.affected_node_ids, vec!["path1".to_owned()]);
+    assert!(result.source_after.contains("anchor x=(px)0 y=(px)0"));
+    assert!(result.source_after.contains("anchor x=(px)100 y=(px)0"));
     assert!(
-        result
-            .diagnostics
-            .iter()
-            .any(|d| d.code == "tx.unsupported_path_handles"),
-        "expected tx.unsupported_path_handles; got: {:?}",
-        result.diagnostics
+        formatted_anchor_count(&result.source_after) > 2,
+        "curve should be flattened into intermediate anchors; got:\n{}",
+        result.source_after
     );
-    assert_eq!(result.source_after, result.source_before);
+    assert!(
+        !result.source_after.contains("in-x=") && !result.source_after.contains("out-x="),
+        "simplified path should be written as handle-free anchors; got:\n{}",
+        result.source_after
+    );
+}
+
+#[test]
+fn simplify_path_anchors_accepts_mixed_line_cubic_line_paths() {
+    let doc = parse(
+        r##"zenith version=1 {
+  project id="proj" name="Test"
+  tokens format="zenith-token-v1" { }
+  styles { }
+  document id="doc1" title="T" {
+    page id="pg1" w=(px)400 h=(px)300 {
+      path id="path1" {
+        anchor x=(px)0 y=(px)0
+        anchor x=(px)50 y=(px)0 out-x=(px)50 out-y=(px)80
+        anchor x=(px)150 y=(px)0 in-x=(px)150 in-y=(px)80
+        anchor x=(px)200 y=(px)0
+      }
+    }
+  }
+}"##,
+    );
+    let tx = Transaction {
+        ops: vec![Op::SimplifyPathAnchors {
+            node: "path1".to_owned(),
+            tolerance: 0.5,
+        }],
+        permissions: Permissions::default(),
+    };
+    let result = run_transaction(&doc, &tx).expect("run_transaction should not error");
+
+    assert_eq!(result.status, TxStatus::Accepted);
+    assert_eq!(result.affected_node_ids, vec!["path1".to_owned()]);
+    assert!(result.source_after.contains("anchor x=(px)0 y=(px)0"));
+    assert!(result.source_after.contains("anchor x=(px)50 y=(px)0"));
+    assert!(result.source_after.contains("anchor x=(px)150 y=(px)0"));
+    assert!(result.source_after.contains("anchor x=(px)200 y=(px)0"));
+    assert!(
+        formatted_anchor_count(&result.source_after) > 4,
+        "mixed path should keep line endpoints and flatten the curve; got:\n{}",
+        result.source_after
+    );
+    assert!(
+        !result.source_after.contains("in-x=") && !result.source_after.contains("out-x="),
+        "simplified path should be written as handle-free anchors; got:\n{}",
+        result.source_after
+    );
 }
 
 #[test]
