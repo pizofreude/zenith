@@ -12,7 +12,9 @@ mod validation;
 pub use bezier::{CubicBezier, CubicBezierProjection, project_onto_cubic_bezier};
 pub use bounds::RectBounds;
 pub use error::GeometryError;
-pub use path::{PathAnchor, PathGeometry, PathJoinVectors, PathSegment, PathTopology};
+pub use path::{
+    PathAnchor, PathGeometry, PathJoinVectors, PathProjection, PathSegment, PathTopology,
+};
 pub use point::{Point2, SegmentProjection};
 pub use polyline::{PolylineProjection, project_onto_polyline, simplify_polyline};
 pub use transform::AffineTransform;

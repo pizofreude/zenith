@@ -1,4 +1,7 @@
-use crate::{AffineTransform, CubicBezier, GeometryError, Point2, validation::validate_tolerance};
+use crate::{
+    AffineTransform, CubicBezier, GeometryError, Point2, project_onto_cubic_bezier,
+    validation::validate_tolerance,
+};
 
 const ZERO_LENGTH_EPSILON: f64 = 0.0;
 
@@ -19,6 +22,14 @@ pub struct PathAnchor {
 pub enum PathSegment {
     Line { start: Point2, end: Point2 },
     Cubic { curve: CubicBezier },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct PathProjection {
+    pub point: Point2,
+    pub segment_index: usize,
+    pub segment_t: f64,
+    pub distance_squared: f64,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -114,6 +125,50 @@ impl PathGeometry {
         }
 
         Ok(points)
+    }
+
+    pub fn project(
+        &self,
+        point: Point2,
+        tolerance: f64,
+    ) -> Result<Option<PathProjection>, GeometryError> {
+        validate_tolerance(tolerance)?;
+        point.validate()?;
+
+        let mut nearest: Option<PathProjection> = None;
+        for (segment_index, segment) in self.segments()?.into_iter().enumerate() {
+            let candidate = match segment {
+                PathSegment::Line { start, end } => {
+                    let projection = point.project_onto_segment(start, end);
+                    PathProjection {
+                        point: projection.point,
+                        segment_index,
+                        segment_t: projection.t,
+                        distance_squared: projection.distance_squared,
+                    }
+                }
+                PathSegment::Cubic { curve } => {
+                    let projection = project_onto_cubic_bezier(point, curve, tolerance)?;
+                    PathProjection {
+                        point: projection.point,
+                        segment_index,
+                        segment_t: projection.t,
+                        distance_squared: projection.distance_squared,
+                    }
+                }
+            };
+
+            match nearest {
+                Some(current) if candidate.distance_squared >= current.distance_squared => {
+                    nearest = Some(current);
+                }
+                Some(_) | None => {
+                    nearest = Some(candidate);
+                }
+            }
+        }
+
+        Ok(nearest)
     }
 }
 
@@ -430,6 +485,138 @@ mod tests {
             };
             assert_ne!(*start, *end);
         }
+    }
+
+    #[test]
+    fn project_returns_none_for_empty_and_one_anchor_paths() {
+        let empty = PathGeometry::new(Vec::new(), false).expect("valid path");
+        assert_eq!(empty.project(point(1.0, 2.0), 0.1), Ok(None));
+
+        let one_anchor = PathGeometry::new(vec![anchor(0.0, 0.0)], false).expect("valid path");
+        assert_eq!(one_anchor.project(point(1.0, 2.0), 0.1), Ok(None));
+    }
+
+    #[test]
+    fn project_finds_nearest_segment_in_mixed_open_path() {
+        let cubic_start =
+            PathAnchor::new(point(10.0, 0.0), None, Some(point(10.0, 0.0))).expect("valid anchor");
+        let cubic_end =
+            PathAnchor::new(point(20.0, 0.0), Some(point(20.0, 0.0)), None).expect("valid anchor");
+        let path =
+            PathGeometry::new(vec![anchor(0.0, 0.0), cubic_start, cubic_end], false).expect("path");
+
+        assert_eq!(
+            path.project(point(15.0, 2.0), 0.1),
+            Ok(Some(PathProjection {
+                point: point(15.0, 0.0),
+                segment_index: 1,
+                segment_t: 0.5,
+                distance_squared: 4.0,
+            }))
+        );
+    }
+
+    #[test]
+    fn project_considers_closed_path_closing_segment() {
+        let path = PathGeometry::new(
+            vec![anchor(0.0, 0.0), anchor(10.0, 0.0), anchor(10.0, 10.0)],
+            true,
+        )
+        .expect("valid path");
+
+        assert_eq!(
+            path.project(point(2.0, 7.0), 0.1),
+            Ok(Some(PathProjection {
+                point: point(4.5, 4.5),
+                segment_index: 2,
+                segment_t: 0.55,
+                distance_squared: 12.5,
+            }))
+        );
+    }
+
+    #[test]
+    fn project_keeps_earliest_segment_on_tie() {
+        let path = PathGeometry::new(
+            vec![anchor(0.0, 0.0), anchor(2.0, 0.0), anchor(2.0, 2.0)],
+            false,
+        )
+        .expect("valid path");
+
+        assert_eq!(
+            path.project(point(1.0, 1.0), 0.1),
+            Ok(Some(PathProjection {
+                point: point(1.0, 0.0),
+                segment_index: 0,
+                segment_t: 0.5,
+                distance_squared: 1.0,
+            }))
+        );
+    }
+
+    #[test]
+    fn project_handles_repeated_anchor_zero_length_line() {
+        let path = PathGeometry::new(
+            vec![anchor(0.0, 0.0), anchor(0.0, 0.0), anchor(4.0, 0.0)],
+            false,
+        )
+        .expect("valid path");
+
+        assert_eq!(
+            path.project(point(0.0, 2.0), 0.1),
+            Ok(Some(PathProjection {
+                point: point(0.0, 0.0),
+                segment_index: 0,
+                segment_t: 0.0,
+                distance_squared: 4.0,
+            }))
+        );
+    }
+
+    #[test]
+    fn project_rejects_invalid_query_point_and_tolerance() {
+        let path =
+            PathGeometry::new(vec![anchor(0.0, 0.0), anchor(1.0, 0.0)], false).expect("valid path");
+
+        assert_eq!(
+            path.project(point(f64::NAN, 0.0), 0.1),
+            Err(GeometryError::NonFinitePoint)
+        );
+        assert_eq!(
+            path.project(point(0.0, 0.0), f64::NAN),
+            Err(GeometryError::NonFiniteTolerance)
+        );
+        assert_eq!(
+            path.project(point(0.0, 0.0), 0.0),
+            Err(GeometryError::NonPositiveTolerance)
+        );
+    }
+
+    #[test]
+    fn project_cubic_segment_matches_cubic_projection() {
+        let curve = CubicBezier::new_unchecked(
+            point(0.0, 0.0),
+            point(0.0, 10.0),
+            point(10.0, 10.0),
+            point(10.0, 0.0),
+        );
+        let start = PathAnchor::new(curve.p0, None, Some(curve.p1)).expect("valid anchor");
+        let end = PathAnchor::new(curve.p3, Some(curve.p2), None).expect("valid anchor");
+        let path = PathGeometry::new(vec![start, end], false).expect("valid path");
+        let query = point(6.0, 8.0);
+        let tolerance = 0.05;
+        let cubic_projection =
+            project_onto_cubic_bezier(query, curve, tolerance).expect("valid projection");
+
+        assert_eq!(
+            path.project(query, tolerance),
+            Ok(Some(PathProjection {
+                point: cubic_projection.point,
+                segment_index: 0,
+                segment_t: cubic_projection.t,
+                distance_squared: cubic_projection.distance_squared,
+            }))
+        );
     }
 
     #[test]
