@@ -727,12 +727,12 @@ fn simplify_path_anchors_accepts_open_cubic_paths() {
     assert!(result.source_after.contains("anchor x=(px)100 y=(px)0"));
     assert!(
         formatted_anchor_count(&result.source_after) > 2,
-        "curve should be flattened into intermediate anchors; got:\n{}",
+        "curve fitting should retain editable approximation anchors; got:\n{}",
         result.source_after
     );
     assert!(
-        !result.source_after.contains("in-x=") && !result.source_after.contains("out-x="),
-        "simplified path should be written as handle-free anchors; got:\n{}",
+        result.source_after.contains("in-x=") && result.source_after.contains("out-x="),
+        "handled simplification should fit editable cubic handles; got:\n{}",
         result.source_after
     );
 }
@@ -773,12 +773,12 @@ fn simplify_path_anchors_accepts_mixed_line_cubic_line_paths() {
     assert!(result.source_after.contains("anchor x=(px)200 y=(px)0"));
     assert!(
         formatted_anchor_count(&result.source_after) > 4,
-        "mixed path should keep line endpoints and flatten the curve; got:\n{}",
+        "mixed path should keep endpoints and retain editable approximation anchors; got:\n{}",
         result.source_after
     );
     assert!(
-        !result.source_after.contains("in-x=") && !result.source_after.contains("out-x="),
-        "simplified path should be written as handle-free anchors; got:\n{}",
+        result.source_after.contains("in-x=") && result.source_after.contains("out-x="),
+        "handled simplification should fit editable cubic handles; got:\n{}",
         result.source_after
     );
 }

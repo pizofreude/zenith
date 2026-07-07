@@ -6,8 +6,8 @@ use zenith_core::{
     AnchorKind, Diagnostic, Dimension, Document, Node, PathAnchor as CorePathAnchor, Unit,
 };
 use zenith_geometry::{
-    AffineTransform, GeometryError, PathAnchor, PathGeometry, PathSegment, Point2,
-    simplify_polyline,
+    AffineTransform, CubicBezier, GeometryError, PathAnchor, PathGeometry, PathSegment, Point2,
+    fit_cubic_beziers_to_points, simplify_polyline,
 };
 
 use crate::op::{OpPathAnchor, OpPathTransform};
@@ -163,18 +163,18 @@ pub(super) fn apply_simplify_path_anchors(
 
                     match simplify_polyline(&points, tolerance_budget) {
                         Ok(simplified) => {
-                            path.anchors = simplified
-                                .iter()
-                                .map(|point| CorePathAnchor {
-                                    x: Some(px(point.x)),
-                                    y: Some(px(point.y)),
-                                    kind: None,
-                                    in_x: None,
-                                    in_y: None,
-                                    out_x: None,
-                                    out_y: None,
-                                })
-                                .collect();
+                            path.anchors = if path_has_handles(&path.anchors) {
+                                match fit_cubic_beziers_to_points(&simplified, tolerance_budget) {
+                                    Ok(Some(curves)) => cubic_curves_to_core_anchors(&curves),
+                                    Ok(None) => simplified_points_to_core_anchors(&simplified),
+                                    Err(error) => {
+                                        diagnostics.push(geometry_diagnostic(node_id, error));
+                                        return;
+                                    }
+                                }
+                            } else {
+                                simplified_points_to_core_anchors(&simplified)
+                            };
                             record_affected(node_id, affected);
                         }
                         Err(error) => diagnostics.push(geometry_diagnostic(node_id, error)),
@@ -593,6 +593,62 @@ fn flattened_path_points(
     }
 
     Ok(points)
+}
+
+fn path_has_handles(anchors: &[CorePathAnchor]) -> bool {
+    anchors.iter().any(|anchor| {
+        anchor.in_x.is_some()
+            || anchor.in_y.is_some()
+            || anchor.out_x.is_some()
+            || anchor.out_y.is_some()
+    })
+}
+
+fn simplified_points_to_core_anchors(points: &[Point2]) -> Vec<CorePathAnchor> {
+    points
+        .iter()
+        .map(|point| CorePathAnchor {
+            x: Some(px(point.x)),
+            y: Some(px(point.y)),
+            kind: None,
+            in_x: None,
+            in_y: None,
+            out_x: None,
+            out_y: None,
+        })
+        .collect()
+}
+
+fn cubic_curves_to_core_anchors(curves: &[CubicBezier]) -> Vec<CorePathAnchor> {
+    let mut anchors = Vec::with_capacity(curves.len().saturating_add(1));
+    let Some(first) = curves.first().copied() else {
+        return anchors;
+    };
+
+    anchors.push(CorePathAnchor {
+        x: Some(px(first.p0.x)),
+        y: Some(px(first.p0.y)),
+        kind: None,
+        in_x: None,
+        in_y: None,
+        out_x: Some(px(first.p1.x)),
+        out_y: Some(px(first.p1.y)),
+    });
+
+    for (index, curve) in curves.iter().copied().enumerate() {
+        let next = curves.get(index + 1).copied();
+        anchors.push(CorePathAnchor {
+            x: Some(px(curve.p3.x)),
+            y: Some(px(curve.p3.y)),
+            kind: None,
+            in_x: Some(px(curve.p2.x)),
+            in_y: Some(px(curve.p2.y)),
+            out_x: next.map(|next_curve| px(next_curve.p1.x)),
+            out_y: next.map(|next_curve| px(next_curve.p1.y)),
+        });
+    }
+
+    anchors
 }
 
 fn resolved_path_geometry(
