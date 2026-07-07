@@ -7,6 +7,10 @@ use zenith_core::{
     Diagnostic, Dimension, LineNode, PathAnchor, PathNode, Point, PolygonNode, PolylineNode,
     ResolvedToken, Span, Style, dim_to_px,
 };
+use zenith_geometry::{
+    GeometryError, PathAnchor as GeometryPathAnchor, PathGeometry,
+    PathSegment as GeometryPathSegment, Point2,
+};
 
 use crate::ir::{Paint, PathSegment, SceneCommand, StrokeAlign};
 
@@ -230,25 +234,11 @@ fn resolve_path_anchor_point(
     Some((px + ctx.dx, py + ctx.dy))
 }
 
-struct PathBuildCtx<'a, 'b> {
-    node_id: &'a str,
-    source_span: Option<Span>,
-    render: RenderCtx,
-    diagnostics: &'b mut Vec<Diagnostic>,
-}
-
 struct PathHandleInput<'a> {
     x: &'a Option<Dimension>,
     y: &'a Option<Dimension>,
-    fallback: (f64, f64),
+    fallback: Point2,
     label: &'static str,
-}
-
-struct PathEdgeInput<'a> {
-    prev_anchor: &'a PathAnchor,
-    prev_point: (f64, f64),
-    next_anchor: &'a PathAnchor,
-    next_point: (f64, f64),
 }
 
 struct ResolvedPathSegments {
@@ -259,36 +249,76 @@ struct ResolvedPathSegments {
 
 fn resolve_path_handle_point(
     input: PathHandleInput<'_>,
-    ctx: &mut PathBuildCtx<'_, '_>,
-) -> Option<(f64, f64)> {
+    node_id: &str,
+    source_span: Option<Span>,
+    ctx: RenderCtx,
+    diagnostics: &mut Vec<Diagnostic>,
+) -> Option<Option<Point2>> {
     let PathHandleInput {
         x,
         y,
         fallback,
         label,
     } = input;
+    if x.is_none() && y.is_none() {
+        return Some(None);
+    }
     let (Some(xd), Some(yd)) = (x, y) else {
-        return Some(fallback);
+        return Some(Some(fallback));
     };
     let Some(px) = dim_to_px(xd.value, &xd.unit) else {
-        ctx.diagnostics.push(unsupported_unit_diag(
-            "path",
-            ctx.node_id,
-            label,
-            ctx.source_span,
-        ));
+        diagnostics.push(unsupported_unit_diag("path", node_id, label, source_span));
         return None;
     };
     let Some(py) = dim_to_px(yd.value, &yd.unit) else {
-        ctx.diagnostics.push(unsupported_unit_diag(
-            "path",
-            ctx.node_id,
-            label,
-            ctx.source_span,
-        ));
+        diagnostics.push(unsupported_unit_diag("path", node_id, label, source_span));
         return None;
     };
-    Some((px + ctx.render.dx, py + ctx.render.dy))
+    let point = geometry_point_or_diag(
+        px + ctx.dx,
+        py + ctx.dy,
+        node_id,
+        label,
+        source_span,
+        diagnostics,
+    )?;
+    Some(Some(point))
+}
+
+fn invalid_path_geometry_diag(
+    node_id: &str,
+    field: &str,
+    source_span: Option<Span>,
+    error: GeometryError,
+) -> Diagnostic {
+    Diagnostic::advisory(
+        "scene.missing_geometry",
+        format!("path '{node_id}' has invalid {field} ({error}); skipped"),
+        source_span,
+        Some(node_id.to_owned()),
+    )
+}
+
+fn geometry_point_or_diag(
+    x: f64,
+    y: f64,
+    node_id: &str,
+    field: &str,
+    source_span: Option<Span>,
+    diagnostics: &mut Vec<Diagnostic>,
+) -> Option<Point2> {
+    match Point2::new(x, y) {
+        Ok(point) => Some(point),
+        Err(error) => {
+            diagnostics.push(invalid_path_geometry_diag(
+                node_id,
+                field,
+                source_span,
+                error,
+            ));
+            None
+        }
+    }
 }
 
 fn path_anchor_bbox_center(points: &[(f64, f64)]) -> (f64, f64) {
@@ -308,54 +338,74 @@ fn path_anchor_bbox_center(points: &[(f64, f64)]) -> (f64, f64) {
     ((min_x + max_x) / 2.0, (min_y + max_y) / 2.0)
 }
 
-fn push_path_segment(
-    segments: &mut Vec<PathSegment>,
-    edge: PathEdgeInput<'_>,
-    ctx: &mut PathBuildCtx<'_, '_>,
-) -> Option<()> {
-    let PathEdgeInput {
-        prev_anchor,
-        prev_point,
-        next_anchor,
-        next_point,
-    } = edge;
-    let has_prev_out = prev_anchor.out_x.is_some() || prev_anchor.out_y.is_some();
-    let has_next_in = next_anchor.in_x.is_some() || next_anchor.in_y.is_some();
-    if !has_prev_out && !has_next_in {
-        segments.push(PathSegment::LineTo {
-            x: next_point.0,
-            y: next_point.1,
-        });
-        return Some(());
-    }
-
-    let c1 = resolve_path_handle_point(
-        PathHandleInput {
-            x: &prev_anchor.out_x,
-            y: &prev_anchor.out_y,
-            fallback: prev_point,
-            label: "out handle",
-        },
-        ctx,
+fn resolve_geometry_path_anchor(
+    anchor: &PathAnchor,
+    node_id: &str,
+    idx: usize,
+    source_span: Option<Span>,
+    ctx: RenderCtx,
+    diagnostics: &mut Vec<Diagnostic>,
+) -> Option<GeometryPathAnchor> {
+    let point = resolve_path_anchor_point(anchor, node_id, idx, source_span, ctx, diagnostics)?;
+    let point_label = format!("anchor[{idx}] point");
+    let point = geometry_point_or_diag(
+        point.0,
+        point.1,
+        node_id,
+        &point_label,
+        source_span,
+        diagnostics,
     )?;
-    let c2 = resolve_path_handle_point(
+    let in_handle = resolve_path_handle_point(
         PathHandleInput {
-            x: &next_anchor.in_x,
-            y: &next_anchor.in_y,
-            fallback: next_point,
+            x: &anchor.in_x,
+            y: &anchor.in_y,
+            fallback: point,
             label: "in handle",
         },
+        node_id,
+        source_span,
         ctx,
+        diagnostics,
     )?;
-    segments.push(PathSegment::CubicTo {
-        x1: c1.0,
-        y1: c1.1,
-        x2: c2.0,
-        y2: c2.1,
-        x: next_point.0,
-        y: next_point.1,
-    });
-    Some(())
+    let out_handle = resolve_path_handle_point(
+        PathHandleInput {
+            x: &anchor.out_x,
+            y: &anchor.out_y,
+            fallback: point,
+            label: "out handle",
+        },
+        node_id,
+        source_span,
+        ctx,
+        diagnostics,
+    )?;
+    match GeometryPathAnchor::new(point, in_handle, out_handle) {
+        Ok(anchor) => Some(anchor),
+        Err(error) => {
+            diagnostics.push(invalid_path_geometry_diag(
+                node_id,
+                &point_label,
+                source_span,
+                error,
+            ));
+            None
+        }
+    }
+}
+
+fn map_geometry_path_segment(segment: GeometryPathSegment) -> PathSegment {
+    match segment {
+        GeometryPathSegment::Line { end, .. } => PathSegment::LineTo { x: end.x, y: end.y },
+        GeometryPathSegment::Cubic { curve } => PathSegment::CubicTo {
+            x1: curve.p1.x,
+            y1: curve.p1.y,
+            x2: curve.p2.x,
+            y2: curve.p2.y,
+            x: curve.p3.x,
+            y: curve.p3.y,
+        },
+    }
 }
 
 fn resolve_path_segments(
@@ -364,72 +414,63 @@ fn resolve_path_segments(
     diagnostics: &mut Vec<Diagnostic>,
 ) -> Option<ResolvedPathSegments> {
     let closed = path.closed == Some(true);
-    let mut build_ctx = PathBuildCtx {
-        node_id: &path.id,
-        source_span: path.source_span,
-        render: ctx,
-        diagnostics,
-    };
-    let mut points = Vec::with_capacity(path.anchors.len());
+    let mut anchors = Vec::with_capacity(path.anchors.len());
+    let mut anchor_points = Vec::with_capacity(path.anchors.len());
     for (idx, anchor) in path.anchors.iter().enumerate() {
-        points.push(resolve_path_anchor_point(
+        let geometry_anchor = resolve_geometry_path_anchor(
             anchor,
             &path.id,
             idx,
             path.source_span,
             ctx,
-            build_ctx.diagnostics,
-        )?);
+            diagnostics,
+        )?;
+        anchor_points.push((geometry_anchor.point.x, geometry_anchor.point.y));
+        anchors.push(geometry_anchor);
     }
 
-    let first = points.first().copied()?;
+    let geometry = match PathGeometry::new(anchors, closed) {
+        Ok(geometry) => geometry,
+        Err(error) => {
+            diagnostics.push(invalid_path_geometry_diag(
+                &path.id,
+                "topology",
+                path.source_span,
+                error,
+            ));
+            return None;
+        }
+    };
+    let first = geometry.anchors().first()?;
     let mut segments = Vec::with_capacity(path.anchors.len() + 2);
     segments.push(PathSegment::MoveTo {
-        x: first.0,
-        y: first.1,
+        x: first.point.x,
+        y: first.point.y,
     });
 
-    for pair in path.anchors.windows(2).zip(points.windows(2)) {
-        let (anchor_pair, point_pair) = pair;
-        let (Some(prev_anchor), Some(next_anchor)) = (anchor_pair.first(), anchor_pair.get(1))
-        else {
+    let geometry_segments = match geometry.segments() {
+        Ok(segments) => segments,
+        Err(error) => {
+            diagnostics.push(invalid_path_geometry_diag(
+                &path.id,
+                "segments",
+                path.source_span,
+                error,
+            ));
             return None;
-        };
-        let (Some(&prev_point), Some(&next_point)) = (point_pair.first(), point_pair.get(1)) else {
-            return None;
-        };
-        push_path_segment(
-            &mut segments,
-            PathEdgeInput {
-                prev_anchor,
-                prev_point,
-                next_anchor,
-                next_point,
-            },
-            &mut build_ctx,
-        )?;
+        }
+    };
+    for segment in geometry_segments {
+        segments.push(map_geometry_path_segment(segment));
     }
 
-    if closed
-        && let (Some(prev_anchor), Some(first_anchor), Some(&prev_point)) =
-            (path.anchors.last(), path.anchors.first(), points.last())
-    {
-        push_path_segment(
-            &mut segments,
-            PathEdgeInput {
-                prev_anchor,
-                prev_point,
-                next_anchor: first_anchor,
-                next_point: first,
-            },
-            &mut build_ctx,
-        )?;
+    if closed {
         segments.push(PathSegment::Close);
     }
 
     Some(ResolvedPathSegments {
         segments,
-        anchor_points: points,
+        anchor_points,
         closed,
     })
 }

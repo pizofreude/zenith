@@ -86,3 +86,83 @@ page id="page.path" w=(px)320 h=(px)220 {
         other => panic!("cmd[2] must be StrokePath, got {other:?}"),
     }
 }
+
+#[test]
+fn path_missing_anchor_coordinate_reports_scene_diagnostic() {
+    let src = r##"zenith version=1 {
+  project id="proj.path" name="Path"
+  tokens format="zenith-token-v1" {}
+  styles {}
+  document id="doc.path" title="Path" {
+page id="page.path" w=(px)320 h=(px)220 {
+  path id="path.bad" stroke=(token)"color.stroke" {
+    anchor x=(px)50
+    anchor x=(px)160 y=(px)50
+  }
+}
+  }
+}
+"##;
+    let doc = parse(src);
+    let result = compile(&doc, &default_provider());
+
+    assert!(
+        result
+            .diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.code == "scene.missing_geometry"
+                && diagnostic.message.contains("anchor[0]")),
+        "expected missing anchor coordinate diagnostic, got {:?}",
+        result.diagnostics
+    );
+    assert!(
+        result
+            .scene
+            .commands
+            .iter()
+            .all(|command| !matches!(command, SceneCommand::StrokePath { .. })),
+        "invalid path should not emit a stroke command: {:?}",
+        result.scene.commands
+    );
+}
+
+#[test]
+fn path_unsupported_handle_unit_reports_scene_diagnostic() {
+    let src = r##"zenith version=1 {
+  project id="proj.path" name="Path"
+  tokens format="zenith-token-v1" {
+token id="color.stroke" type="color" value="#0000ff"
+  }
+  styles {}
+  document id="doc.path" title="Path" {
+page id="page.path" w=(px)320 h=(px)220 {
+  path id="path.bad" stroke=(token)"color.stroke" {
+    anchor x=(px)50 y=(px)150 out-x=(pct)80 out-y=(px)30
+    anchor x=(px)160 y=(px)50
+  }
+}
+  }
+}
+"##;
+    let doc = parse(src);
+    let result = compile(&doc, &default_provider());
+
+    assert!(
+        result
+            .diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.code == "scene.unsupported_unit"
+                && diagnostic.message.contains("out handle")),
+        "expected unsupported handle unit diagnostic, got {:?}",
+        result.diagnostics
+    );
+    assert!(
+        result
+            .scene
+            .commands
+            .iter()
+            .all(|command| !matches!(command, SceneCommand::StrokePath { .. })),
+        "invalid path should not emit a stroke command: {:?}",
+        result.scene.commands
+    );
+}
