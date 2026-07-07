@@ -1,6 +1,7 @@
-use crate::{CubicBezier, GeometryError, Point2};
+use crate::{CubicBezier, GeometryError, Point2, validation::validate_tolerance};
 
 const MIN_HANDLE_SCALE: f64 = 1.0e-6;
+const MAX_CUBIC_FIT_SEGMENTS: usize = 4096;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct PolylineEndpointTangentDirections {
@@ -95,6 +96,72 @@ pub fn fit_cubic_bezier_to_points(
         max_error_point_index,
         max_error_squared,
     }))
+}
+
+pub fn fit_cubic_beziers_to_points(
+    points: &[Point2],
+    max_error: f64,
+) -> Result<Option<Vec<CubicBezier>>, GeometryError> {
+    validate_tolerance(max_error)?;
+    if points.len() < 2 {
+        validate_points(points)?;
+        return Ok(None);
+    }
+    let compacted_points = compact_consecutive_points(points)?;
+    if compacted_points.len() < 2 {
+        return Err(GeometryError::DegenerateLine);
+    }
+    let max_error_squared = max_error * max_error;
+    if !max_error_squared.is_finite() {
+        return Err(GeometryError::CountOutOfRange);
+    }
+
+    let mut curves = Vec::new();
+    fit_cubic_bezier_range(&compacted_points, max_error_squared, &mut curves)?;
+    Ok(Some(curves))
+}
+
+fn compact_consecutive_points(points: &[Point2]) -> Result<Vec<Point2>, GeometryError> {
+    let mut compacted = Vec::with_capacity(points.len());
+    for point in points.iter().copied() {
+        point.validate()?;
+        match compacted.last() {
+            Some(previous) if *previous == point => {}
+            Some(_) | None => compacted.push(point),
+        }
+    }
+    Ok(compacted)
+}
+
+fn fit_cubic_bezier_range(
+    points: &[Point2],
+    max_error_squared: f64,
+    curves: &mut Vec<CubicBezier>,
+) -> Result<(), GeometryError> {
+    if curves.len() >= MAX_CUBIC_FIT_SEGMENTS {
+        return Err(GeometryError::CountOutOfRange);
+    }
+
+    let Some(fit) = fit_cubic_bezier_to_points(points)? else {
+        return Ok(());
+    };
+    if fit.max_error_squared <= max_error_squared || points.len() <= 2 {
+        curves.push(fit.curve);
+        return Ok(());
+    }
+
+    let split_index = interior_split_index(points, fit.max_error_point_index);
+    let left = &points[..=split_index];
+    let right = &points[split_index..];
+    fit_cubic_bezier_range(left, max_error_squared, curves)?;
+    fit_cubic_bezier_range(right, max_error_squared, curves)
+}
+
+fn interior_split_index(points: &[Point2], requested_index: usize) -> usize {
+    if points.len() <= 2 {
+        return 1;
+    }
+    requested_index.clamp(1, points.len() - 2)
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -551,5 +618,101 @@ mod tests {
             fit_cubic_bezier_to_points(&[point(0.0, 0.0), point(f64::NAN, 1.0)]),
             Err(GeometryError::NonFinitePoint)
         );
+    }
+
+    #[test]
+    fn recursive_cubic_fit_returns_none_for_underdefined_input() {
+        assert_eq!(fit_cubic_beziers_to_points(&[], 0.1), Ok(None));
+        assert_eq!(
+            fit_cubic_beziers_to_points(&[point(0.0, 0.0)], 0.1),
+            Ok(None)
+        );
+    }
+
+    #[test]
+    fn recursive_cubic_fit_validates_tolerance_and_samples() {
+        assert_eq!(
+            fit_cubic_beziers_to_points(&[point(0.0, 0.0), point(1.0, 0.0)], 0.0),
+            Err(GeometryError::NonPositiveTolerance)
+        );
+        assert_eq!(
+            fit_cubic_beziers_to_points(&[point(0.0, 0.0), point(f64::NAN, 0.0)], 0.1),
+            Err(GeometryError::NonFinitePoint)
+        );
+        assert_eq!(
+            fit_cubic_beziers_to_points(&[point(0.0, 0.0), point(1.0, 0.0)], f64::MAX),
+            Err(GeometryError::CountOutOfRange)
+        );
+        assert_eq!(
+            fit_cubic_beziers_to_points(&[point(0.0, 0.0), point(0.0, 0.0)], 0.1),
+            Err(GeometryError::DegenerateLine)
+        );
+    }
+
+    #[test]
+    fn recursive_cubic_fit_keeps_single_curve_when_within_tolerance() {
+        let curves = fit_cubic_beziers_to_points(
+            &[
+                point(0.0, 0.0),
+                point(1.0, 0.0),
+                point(2.0, 0.0),
+                point(3.0, 0.0),
+            ],
+            1.0e-6,
+        )
+        .expect("valid fit")
+        .expect("enough points");
+
+        assert_eq!(curves.len(), 1);
+        assert_point_close(curves[0].p0, point(0.0, 0.0));
+        assert_point_close(curves[0].p3, point(3.0, 0.0));
+    }
+
+    #[test]
+    fn recursive_cubic_fit_splits_until_within_tolerance() {
+        let curves = fit_cubic_beziers_to_points(
+            &[
+                point(0.0, 0.0),
+                point(1.0, 3.0),
+                point(2.0, -3.0),
+                point(3.0, 3.0),
+                point(4.0, 0.0),
+            ],
+            0.01,
+        )
+        .expect("valid fit")
+        .expect("enough points");
+
+        assert!(curves.len() > 1);
+        assert_eq!(curves.first().map(|curve| curve.p0), Some(point(0.0, 0.0)));
+        assert_eq!(curves.last().map(|curve| curve.p3), Some(point(4.0, 0.0)));
+        for pair in curves.windows(2) {
+            let [left, right] = pair else {
+                continue;
+            };
+            assert_eq!(left.p3, right.p0);
+        }
+    }
+
+    #[test]
+    fn recursive_cubic_fit_compacts_repeated_sample_runs() {
+        let curves = fit_cubic_beziers_to_points(
+            &[
+                point(0.0, 0.0),
+                point(0.0, 0.0),
+                point(1.0, 0.0),
+                point(1.0, 0.0),
+                point(2.0, 0.0),
+                point(3.0, 0.0),
+                point(3.0, 0.0),
+            ],
+            1.0e-6,
+        )
+        .expect("valid fit")
+        .expect("enough points");
+
+        assert_eq!(curves.len(), 1);
+        assert_point_close(curves[0].p0, point(0.0, 0.0));
+        assert_point_close(curves[0].p3, point(3.0, 0.0));
     }
 }
