@@ -42,5 +42,7 @@ pub use vector_mark::{
     VectorMarkPerceptionReport, analyze_vector_mark,
 };
 pub use vector_report::{
-    VectorPathPerceptionInput, VectorPathPerceptionReport, analyze_vector_path,
+    CompoundVectorPathPerceptionInput, CompoundVectorPathPerceptionReport, VectorPathContourInput,
+    VectorPathPerceptionInput, VectorPathPerceptionReport, analyze_compound_vector_path,
+    analyze_vector_path,
 };

@@ -5,7 +5,7 @@ use crate::{
     path_tangent_quality,
 };
 use zenith_core::PathAnchor;
-use zenith_geometry::{PathGeometry, PathTopology, RectBounds};
+use zenith_geometry::{CompoundPathGeometry, PathGeometry, PathTopology, RectBounds};
 
 /// Input for path-level vector perception.
 ///
@@ -19,6 +19,17 @@ pub struct VectorPathPerceptionInput<'a> {
     pub closed: bool,
 }
 
+#[derive(Debug, Clone, Copy)]
+pub struct VectorPathContourInput<'a> {
+    pub anchors: &'a [PathAnchor],
+    pub closed: bool,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct CompoundVectorPathPerceptionInput<'a> {
+    pub contours: &'a [VectorPathContourInput<'a>],
+}
+
 /// Aggregated deterministic perception metrics for one editable path.
 #[derive(Debug, Clone, PartialEq)]
 pub struct VectorPathPerceptionReport {
@@ -28,6 +39,20 @@ pub struct VectorPathPerceptionReport {
     pub bounds: Option<RectBounds>,
     pub anchor_economy: AnchorEconomyReport,
     pub tangent_quality: PathTangentQualityReport,
+    pub diagnostics: Vec<PerceptionDiagnostic>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct CompoundVectorPathPerceptionReport {
+    pub contour_count: usize,
+    pub anchor_count: usize,
+    pub segment_count: usize,
+    pub open_subpath_count: usize,
+    pub closed_subpath_count: usize,
+    pub bounds: Option<RectBounds>,
+    pub anchor_economy: AnchorEconomyReport,
+    pub tangent_quality_reports: Vec<PathTangentQualityReport>,
+    pub tangent_quality_score_mean: Option<f32>,
     pub diagnostics: Vec<PerceptionDiagnostic>,
 }
 
@@ -63,6 +88,42 @@ pub fn analyze_vector_path(input: VectorPathPerceptionInput<'_>) -> VectorPathPe
     }
 }
 
+pub fn analyze_compound_vector_path(
+    input: CompoundVectorPathPerceptionInput<'_>,
+) -> CompoundVectorPathPerceptionReport {
+    let topology = compound_topology(input.contours);
+    let anchor_economy = anchor_economy(AnchorEconomyInput {
+        anchor_count: topology.anchor_count,
+        segment_count: topology.segment_count,
+        handle_count: compound_handle_count(input.contours),
+        open_subpath_count: topology.open_subpath_count,
+        closed_subpath_count: topology.closed_subpath_count,
+    });
+    let tangent_quality_reports = compound_tangent_quality(input.contours);
+    let (bounds, bounds_diagnostic) = compound_path_bounds(input.contours);
+
+    let mut diagnostics = anchor_economy.diagnostics.clone();
+    for report in &tangent_quality_reports {
+        diagnostics.extend(report.diagnostics.iter().cloned());
+    }
+    if let Some(diagnostic) = bounds_diagnostic {
+        diagnostics.push(diagnostic);
+    }
+
+    CompoundVectorPathPerceptionReport {
+        contour_count: input.contours.len(),
+        anchor_count: topology.anchor_count,
+        segment_count: topology.segment_count,
+        open_subpath_count: topology.open_subpath_count,
+        closed_subpath_count: topology.closed_subpath_count,
+        bounds,
+        anchor_economy,
+        tangent_quality_score_mean: tangent_quality_score_mean(&tangent_quality_reports),
+        tangent_quality_reports,
+        diagnostics,
+    }
+}
+
 fn anchor_economy_input(
     input: VectorPathPerceptionInput<'_>,
     anchor_count: usize,
@@ -87,6 +148,85 @@ fn path_bounds(
         },
         Err(()) => (None, Some(invalid_geometry_diagnostic())),
     }
+}
+
+fn compound_topology(contours: &[VectorPathContourInput<'_>]) -> PathTopology {
+    contours.iter().fold(
+        PathTopology {
+            anchor_count: 0,
+            segment_count: 0,
+            open_subpath_count: 0,
+            closed_subpath_count: 0,
+        },
+        |mut topology, contour| {
+            let contour_topology =
+                PathGeometry::topology_for(contour.anchors.len(), contour.closed);
+            topology.anchor_count = topology
+                .anchor_count
+                .saturating_add(contour_topology.anchor_count);
+            topology.segment_count = topology
+                .segment_count
+                .saturating_add(contour_topology.segment_count);
+            topology.open_subpath_count = topology
+                .open_subpath_count
+                .saturating_add(contour_topology.open_subpath_count);
+            topology.closed_subpath_count = topology
+                .closed_subpath_count
+                .saturating_add(contour_topology.closed_subpath_count);
+            topology
+        },
+    )
+}
+
+fn compound_handle_count(contours: &[VectorPathContourInput<'_>]) -> usize {
+    contours
+        .iter()
+        .flat_map(|contour| contour.anchors.iter())
+        .map(complete_handle_count)
+        .sum()
+}
+
+fn compound_tangent_quality(
+    contours: &[VectorPathContourInput<'_>],
+) -> Vec<PathTangentQualityReport> {
+    contours
+        .iter()
+        .map(|contour| {
+            path_tangent_quality(PathTangentQualityInput {
+                anchors: contour.anchors,
+                closed: contour.closed,
+            })
+        })
+        .collect()
+}
+
+fn compound_path_bounds(
+    contours: &[VectorPathContourInput<'_>],
+) -> (Option<RectBounds>, Option<PerceptionDiagnostic>) {
+    let mut geometry_contours = Vec::with_capacity(contours.len());
+    for contour in contours {
+        match geometry_path(contour.anchors, contour.closed) {
+            Ok(geometry) => geometry_contours.push(geometry),
+            Err(()) => return (None, Some(invalid_geometry_diagnostic())),
+        }
+    }
+
+    match CompoundPathGeometry::new(geometry_contours).bounds() {
+        Ok(bounds) => (bounds, None),
+        Err(_) => (None, Some(invalid_geometry_diagnostic())),
+    }
+}
+
+fn tangent_quality_score_mean(reports: &[PathTangentQualityReport]) -> Option<f32> {
+    if reports.is_empty() {
+        return None;
+    }
+
+    let total: f32 = reports
+        .iter()
+        .map(|report| report.craftsmanship_score)
+        .sum();
+    Some(total / reports.len() as f32)
 }
 
 fn invalid_geometry_diagnostic() -> PerceptionDiagnostic {
@@ -297,6 +437,88 @@ mod tests {
         );
     }
 
+    #[test]
+    fn compound_vector_path_aggregates_topology_and_bounds() {
+        let open = [line_anchor(0.0, 0.0), line_anchor(20.0, 0.0)];
+        let closed = [
+            line_anchor(40.0, 10.0),
+            line_anchor(60.0, 10.0),
+            line_anchor(60.0, 30.0),
+        ];
+        let contours = [
+            VectorPathContourInput {
+                anchors: &open,
+                closed: false,
+            },
+            VectorPathContourInput {
+                anchors: &closed,
+                closed: true,
+            },
+        ];
+
+        let report = analyze_compound_vector_path(CompoundVectorPathPerceptionInput {
+            contours: &contours,
+        });
+
+        assert_eq!(report.contour_count, 2);
+        assert_eq!(report.anchor_count, 5);
+        assert_eq!(report.segment_count, 4);
+        assert_eq!(report.open_subpath_count, 1);
+        assert_eq!(report.closed_subpath_count, 1);
+        assert_eq!(report.anchor_economy.handle_count, 0);
+        assert_eq!(report.tangent_quality_reports.len(), 2);
+        assert!(report.tangent_quality_score_mean.is_some());
+        assert_eq!(
+            report.bounds,
+            Some(RectBounds {
+                min_x: 0.0,
+                min_y: 0.0,
+                max_x: 60.0,
+                max_y: 30.0,
+            })
+        );
+    }
+
+    #[test]
+    fn compound_vector_path_reports_invalid_bounds_geometry() {
+        let valid = [anchor(0.0, 0.0, -10.0, 0.0, 10.0, 0.0)];
+        let invalid = [PathAnchor {
+            x: Some(px(20.0)),
+            y: Some(px(20.0)),
+            kind: None,
+            in_x: Some(px(10.0)),
+            in_y: None,
+            out_x: None,
+            out_y: None,
+        }];
+        let contours = [
+            VectorPathContourInput {
+                anchors: &valid,
+                closed: false,
+            },
+            VectorPathContourInput {
+                anchors: &invalid,
+                closed: false,
+            },
+        ];
+
+        let report = analyze_compound_vector_path(CompoundVectorPathPerceptionInput {
+            contours: &contours,
+        });
+
+        assert_eq!(report.bounds, None);
+        assert_eq!(report.anchor_count, 2);
+        assert_eq!(report.open_subpath_count, 2);
+        assert!(
+            report
+                .diagnostics
+                .iter()
+                .any(|diagnostic| diagnostic.code == "vector_path.invalid_geometry"),
+            "expected invalid compound bounds diagnostic; got {:?}",
+            report.diagnostics
+        );
+    }
+
     fn anchor(x: f64, y: f64, in_x: f64, in_y: f64, out_x: f64, out_y: f64) -> PathAnchor {
         PathAnchor {
             x: Some(px(x)),
@@ -306,6 +528,18 @@ mod tests {
             in_y: Some(px(in_y)),
             out_x: Some(px(out_x)),
             out_y: Some(px(out_y)),
+        }
+    }
+
+    fn line_anchor(x: f64, y: f64) -> PathAnchor {
+        PathAnchor {
+            x: Some(px(x)),
+            y: Some(px(y)),
+            kind: None,
+            in_x: None,
+            in_y: None,
+            out_x: None,
+            out_y: None,
         }
     }
 
