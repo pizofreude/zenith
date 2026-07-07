@@ -6,6 +6,7 @@ pub mod boolean_piece;
 pub mod boolean_reconstruct;
 pub mod bounds;
 pub mod collision;
+pub mod compound_path;
 pub mod contour;
 pub mod error;
 pub mod fit;
@@ -33,6 +34,9 @@ pub use bounds::RectBounds;
 pub use collision::{
     PathGeometryIntersections, PathGeometryNearestPoints, collect_path_geometry_intersections,
     nearest_path_geometry_points,
+};
+pub use compound_path::{
+    CompoundPathGeometry, CompoundPathProjection, FlattenedPathContour, PathContourSpec,
 };
 pub use contour::{
     ClosedPolyline, ClosedPolylineIntersectionEvent, ClosedPolylineRelation, ClosedPolylineWinding,
