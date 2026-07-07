@@ -17,8 +17,9 @@ mod validation;
 pub use bezier::{CubicBezier, CubicBezierProjection, project_onto_cubic_bezier};
 pub use bounds::RectBounds;
 pub use contour::{
-    ClosedPolyline, ClosedPolylineRelation, ClosedPolylineWinding, PointLocation,
-    classify_closed_polyline_relation, collect_raw_closed_polyline_intersections,
+    ClosedPolyline, ClosedPolylineIntersectionEvent, ClosedPolylineRelation, ClosedPolylineWinding,
+    PointLocation, classify_closed_polyline_relation, collect_closed_polyline_intersection_events,
+    collect_raw_closed_polyline_intersections,
 };
 pub use error::GeometryError;
 pub use guide::{ConstructionGuide, modular_guides, polar_guides, ratio_guides};

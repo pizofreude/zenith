@@ -31,6 +31,21 @@ pub enum ClosedPolylineRelation {
     SecondContainsFirst,
 }
 
+#[derive(Debug, Clone, PartialEq)]
+pub enum ClosedPolylineIntersectionEvent {
+    Point {
+        point: Point2,
+        first_segment_indices: Vec<usize>,
+        second_segment_indices: Vec<usize>,
+    },
+    Overlap {
+        first_segment_index: usize,
+        second_segment_index: usize,
+        start: crate::IntersectionPoint,
+        end: crate::IntersectionPoint,
+    },
+}
+
 impl ClosedPolyline {
     pub fn new(points: Vec<Point2>) -> Result<Self, GeometryError> {
         let points = normalized_points(points)?;
@@ -218,6 +233,68 @@ pub fn classify_closed_polyline_relation(
         PointLocation::Inside => Ok(ClosedPolylineRelation::FirstContainsSecond),
         PointLocation::Boundary => Ok(ClosedPolylineRelation::Intersecting),
         PointLocation::Outside => Ok(ClosedPolylineRelation::Disjoint),
+    }
+}
+
+pub fn collect_closed_polyline_intersection_events(
+    first: &ClosedPolyline,
+    second: &ClosedPolyline,
+) -> Result<Vec<ClosedPolylineIntersectionEvent>, GeometryError> {
+    let mut events = Vec::new();
+    for raw in collect_raw_closed_polyline_intersections(first, second)? {
+        match raw.intersection {
+            SegmentIntersection::Point(point) => push_point_event(
+                &mut events,
+                point.point,
+                raw.first_segment_index,
+                raw.second_segment_index,
+            ),
+            SegmentIntersection::Overlap { start, end } => {
+                events.push(ClosedPolylineIntersectionEvent::Overlap {
+                    first_segment_index: raw.first_segment_index,
+                    second_segment_index: raw.second_segment_index,
+                    start,
+                    end,
+                });
+            }
+        }
+    }
+    Ok(events)
+}
+
+fn push_point_event(
+    events: &mut Vec<ClosedPolylineIntersectionEvent>,
+    point: Point2,
+    first_segment_index: usize,
+    second_segment_index: usize,
+) {
+    for event in &mut *events {
+        let ClosedPolylineIntersectionEvent::Point {
+            point: event_point,
+            first_segment_indices,
+            second_segment_indices,
+        } = event
+        else {
+            continue;
+        };
+
+        if *event_point == point {
+            push_unique_index(first_segment_indices, first_segment_index);
+            push_unique_index(second_segment_indices, second_segment_index);
+            return;
+        }
+    }
+
+    events.push(ClosedPolylineIntersectionEvent::Point {
+        point,
+        first_segment_indices: vec![first_segment_index],
+        second_segment_indices: vec![second_segment_index],
+    });
+}
+
+fn push_unique_index(indices: &mut Vec<usize>, index: usize) {
+    if !indices.contains(&index) {
+        indices.push(index);
     }
 }
 
@@ -550,6 +627,67 @@ mod tests {
                         first_t: 0.4,
                         second_t: 1.0,
                     }),
+                },
+            ])
+        );
+    }
+
+    #[test]
+    fn intersection_events_merge_duplicate_point_touches() {
+        let first = contour(&[
+            point(0.0, 0.0),
+            point(10.0, 0.0),
+            point(10.0, 10.0),
+            point(0.0, 10.0),
+        ]);
+        let second = contour(&[point(10.0, 0.0), point(14.0, -2.0), point(12.0, 2.0)]);
+
+        assert_eq!(
+            collect_closed_polyline_intersection_events(&first, &second),
+            Ok(vec![ClosedPolylineIntersectionEvent::Point {
+                point: point(10.0, 0.0),
+                first_segment_indices: vec![0, 1],
+                second_segment_indices: vec![0, 2],
+            }])
+        );
+    }
+
+    #[test]
+    fn intersection_events_preserve_overlap_events() {
+        let first = contour(&[
+            point(0.0, 0.0),
+            point(10.0, 0.0),
+            point(10.0, 10.0),
+            point(0.0, 10.0),
+        ]);
+        let second = contour(&[point(4.0, 0.0), point(8.0, 0.0), point(6.0, -3.0)]);
+
+        assert_eq!(
+            collect_closed_polyline_intersection_events(&first, &second),
+            Ok(vec![
+                ClosedPolylineIntersectionEvent::Overlap {
+                    first_segment_index: 0,
+                    second_segment_index: 0,
+                    start: IntersectionPoint {
+                        point: point(4.0, 0.0),
+                        first_t: 0.4,
+                        second_t: 0.0,
+                    },
+                    end: IntersectionPoint {
+                        point: point(8.0, 0.0),
+                        first_t: 0.8,
+                        second_t: 1.0,
+                    },
+                },
+                ClosedPolylineIntersectionEvent::Point {
+                    point: point(8.0, 0.0),
+                    first_segment_indices: vec![0],
+                    second_segment_indices: vec![1],
+                },
+                ClosedPolylineIntersectionEvent::Point {
+                    point: point(4.0, 0.0),
+                    first_segment_indices: vec![0],
+                    second_segment_indices: vec![2],
                 },
             ])
         );
