@@ -60,7 +60,8 @@ use super::text::{
     BlockStyleEnv, ChainSourceShape, HyphenationContext, LINK_COLOR, Line, LineDecoration,
     LineStyle, NodeShape, ResolvedSpan, ShapeEnv, WordMetrics, WordToken, en_us_hyphenator,
     flatten_lines_to_tokens, pack_lines, resolve_family_with_fallback, resolve_font_family_name,
-    resolve_font_weight, resolve_vertical_align, shape_source_blocks, shape_words,
+    resolve_font_features, resolve_font_weight, resolve_vertical_align, shape_source_blocks,
+    shape_words,
 };
 use super::util::{resolve_geometry_px, resolve_property_dimension_px};
 
@@ -273,6 +274,12 @@ fn resolve_chain_style(
         .font_weight
         .as_ref()
         .or_else(|| style_prop(&source.style, style_map, "font-weight"));
+    let node_features = resolve_font_features(
+        source.font_features.as_deref(),
+        diagnostics,
+        &source.id,
+        source.source_span,
+    );
 
     let mut spans: Vec<ResolvedSpan> = Vec::new();
     for span in &source.spans {
@@ -315,6 +322,12 @@ fn resolve_chain_style(
         // single-box wrap path so a chained article honors vertical-align too.
         let (span_font_size, baseline_dy) =
             resolve_vertical_align(span.vertical_align.as_deref(), font_size);
+        let features = match span.font_features.as_deref() {
+            Some(raw) => {
+                resolve_font_features(Some(raw), diagnostics, &source.id, source.source_span)
+            }
+            None => node_features.clone(),
+        };
         spans.push(ResolvedSpan {
             text: span.text.clone(),
             color,
@@ -328,6 +341,7 @@ fn resolve_chain_style(
             style,
             font_size: span_font_size,
             baseline_dy,
+            features,
         });
     }
 

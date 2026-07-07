@@ -42,6 +42,7 @@ pub(super) fn write_span(span: &TextSpan, out: &mut String, depth: usize) {
     // without any of them is byte-identical to before.
     write_opt_property_value(out, "fill", &span.fill);
     write_opt_property_value(out, "font-weight", &span.font_weight);
+    write_opt_str(out, "font-features", &span.font_features);
     write_opt_bool(out, "italic", &span.italic);
     write_opt_bool(out, "underline", &span.underline);
     write_opt_bool(out, "strikethrough", &span.strikethrough);

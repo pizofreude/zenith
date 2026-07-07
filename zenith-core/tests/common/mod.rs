@@ -166,6 +166,7 @@ pub fn minimal_text(id: &str, fill: Option<PropertyValue>) -> Node {
         font_size: None,
         font_size_min: None,
         font_weight: None,
+        font_features: None,
         opacity: None,
         visible: None,
         locked: None,

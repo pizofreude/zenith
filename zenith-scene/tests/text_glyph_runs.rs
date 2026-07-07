@@ -448,6 +448,63 @@ page id="page.fw" w=(px)400 h=(px)200 {
     );
 }
 
+#[test]
+fn text_font_features_reach_shaper() {
+    fn first_glyph_ids(src: &str) -> Vec<u16> {
+        let doc = parse(src);
+        let result = compile(&doc, &default_provider());
+        assert!(
+            result
+                .diagnostics
+                .iter()
+                .all(|d| d.code != "scene.text_unshaped"),
+            "text must shape without scene.text_unshaped diagnostics: {:?}",
+            result.diagnostics
+        );
+        result
+            .scene
+            .commands
+            .iter()
+            .find_map(|c| match c {
+                SceneCommand::DrawGlyphRun { glyphs, .. } => {
+                    Some(glyphs.iter().map(|g| g.glyph_id).collect::<Vec<_>>())
+                }
+                _ => None,
+            })
+            .expect("a DrawGlyphRun must exist")
+    }
+
+    let default_src = r##"zenith version=1 {
+  project id="proj.features" name="Features"
+  tokens format="zenith-token-v1" {}
+  styles {}
+  document id="doc.features" title="Features" {
+page id="page.features" w=(px)400 h=(px)200 {
+  text id="text.default" x=(px)10 y=(px)20 w=(px)380 h=(px)80 { span "fi" }
+}
+  }
+}
+"##;
+    let disabled_src = r##"zenith version=1 {
+  project id="proj.features" name="Features"
+  tokens format="zenith-token-v1" {}
+  styles {}
+  document id="doc.features" title="Features" {
+page id="page.features" w=(px)400 h=(px)200 {
+  text id="text.disabled" x=(px)10 y=(px)20 w=(px)380 h=(px)80 { span "fi" font-features="liga=0" }
+}
+  }
+}
+"##;
+
+    let default_glyphs = first_glyph_ids(default_src);
+    let disabled_glyphs = first_glyph_ids(disabled_src);
+    assert_ne!(
+        default_glyphs, disabled_glyphs,
+        "liga=0 should change the shaped glyph sequence for 'fi'"
+    );
+}
+
 /// Two spans with different fill tokens → two runs, distinct colors, the
 /// second positioned to the right of the first.
 #[test]

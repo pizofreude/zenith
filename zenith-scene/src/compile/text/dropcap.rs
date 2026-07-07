@@ -3,7 +3,7 @@
 
 use zenith_core::{FontProvider, FontStyle};
 use zenith_layout::{
-    RustybuzzEngine, ShapeRequest, TextDirection, TextLayoutEngine, ZenithGlyphRun,
+    FontFeature, RustybuzzEngine, ShapeRequest, TextDirection, TextLayoutEngine, ZenithGlyphRun,
 };
 
 use crate::ir::Color;
@@ -40,6 +40,7 @@ pub(in crate::compile) struct DropCapInitial {
     ch: char,
     color: Color,
     style: FontStyle,
+    features: Vec<FontFeature>,
 }
 
 /// Lift the first character out of the body spans for a drop cap.
@@ -61,6 +62,7 @@ pub(in crate::compile) fn take_drop_cap_initial(
         ch: first,
         color: donor.color,
         style: donor.style,
+        features: donor.features.clone(),
     })
 }
 
@@ -96,7 +98,7 @@ pub(in crate::compile) fn shape_drop_cap(
         // Drop caps are a single glyph; RTL drop caps are a documented v0
         // follow-up, so the cap always shapes LTR.
         direction: TextDirection::Ltr,
-        features: &[],
+        features: &initial.features,
     };
     let run = engine
         .shape_with_fallback(&req, fonts)

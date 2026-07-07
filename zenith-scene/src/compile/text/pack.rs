@@ -488,6 +488,7 @@ mod packer_tests {
                 weight: 400,
                 style: FontStyle::Normal,
                 font_size: 16.0,
+                features: Vec::new(),
                 paragraph: 0,
                 hyphen_part: None,
             },

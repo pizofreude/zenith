@@ -467,6 +467,7 @@ fn test_span_vertical_align_round_trip() {
     }
   }
 }
+
 "##;
     let adapter = KdlAdapter;
     let doc = adapter.parse(src.as_bytes()).expect("parse");
@@ -513,6 +514,54 @@ fn test_span_vertical_align_round_trip() {
         strip_spans(reparsed),
         "span vertical-align must survive parse → format → parse"
     );
+}
+
+/// **OpenType font-features round-trip**: node, code, and span feature lists
+/// parse, format canonically, and survive parse -> format -> parse.
+#[test]
+fn test_font_features_round_trip() {
+    use zenith_core::Node;
+
+    let src = r##"zenith version=1 {
+  project id="proj.features" name="Features"
+  tokens format="zenith-token-v1" {
+  }
+  styles {
+  }
+  document id="doc.features" title="Features" {
+    page id="page.one" w=(px)400 h=(px)400 {
+      text id="body" x=(px)10 y=(px)10 w=(px)300 h=(px)100 font-features="liga=0,kern=1" {
+        span "Serif" font-features="ss01=1"
+      }
+      code id="code" x=(px)10 y=(px)140 w=(px)300 h=(px)100 font-features="calt=0" {
+        content "let x = 1;"
+      }
+    }
+  }
+}
+"##;
+    let adapter = KdlAdapter;
+    let doc = adapter.parse(src.as_bytes()).expect("parse");
+
+    let page = &doc.body.pages[0];
+    let Node::Text(text_node) = &page.children[0] else {
+        panic!("expected text node");
+    };
+    assert_eq!(text_node.font_features.as_deref(), Some("liga=0,kern=1"));
+    assert_eq!(text_node.spans[0].font_features.as_deref(), Some("ss01=1"));
+    let Node::Code(code_node) = &page.children[1] else {
+        panic!("expected code node");
+    };
+    assert_eq!(code_node.font_features.as_deref(), Some("calt=0"));
+
+    let formatted = format_document(&doc).expect("format");
+    let text = String::from_utf8(formatted).expect("utf8");
+    assert!(text.contains("font-features=\"liga=0,kern=1\""));
+    assert!(text.contains("span \"Serif\" font-features=\"ss01=1\""));
+    assert!(text.contains("font-features=\"calt=0\""));
+
+    let reparsed = adapter.parse(text.as_bytes()).expect("reparse");
+    assert_eq!(strip_spans(doc), strip_spans(reparsed));
 }
 
 /// **Span data-ref + format round-trip**: a `span "" data-ref="rev"

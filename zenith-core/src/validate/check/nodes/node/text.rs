@@ -7,8 +7,8 @@ use crate::ast::value::dim_to_px;
 use crate::diagnostics::Diagnostic;
 
 use super::shared::{
-    AnchorParentCtx, AnchorProps, TokenEnv, check_anchor, check_dimension_geom, check_optional_dim,
-    check_spans, check_style_ref, is_valid_blend_mode,
+    AnchorParentCtx, AnchorProps, TokenEnv, check_anchor, check_dimension_geom,
+    check_font_features, check_optional_dim, check_spans, check_style_ref, is_valid_blend_mode,
 };
 use super::suggest::check_unknown_props;
 use crate::validate::check::nodes::WalkCtx;
@@ -187,6 +187,12 @@ pub(in crate::validate::check) fn check_text(
         VisualExpect::FontWeight,
         referenced_token_ids,
         resolved_tokens,
+        diagnostics,
+    );
+    check_font_features(
+        &t.id,
+        t.font_features.as_deref(),
+        t.source_span,
         diagnostics,
     );
     check_visual_prop(

@@ -55,6 +55,10 @@ pub struct TextSpan {
     pub fill: Option<PropertyValue>,
     /// Per-span font-weight override.
     pub font_weight: Option<PropertyValue>,
+    /// Comma-separated OpenType feature requests (`liga=0`, `ss01=1`, or
+    /// bare `kern` for value 1). Scene compilation validates each feature tag
+    /// before passing it to the layout engine. `None` keeps default shaping.
+    pub font_features: Option<String>,
     /// Italic override.
     pub italic: Option<bool>,
     /// Underline decoration.

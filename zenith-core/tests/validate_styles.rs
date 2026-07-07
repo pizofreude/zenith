@@ -315,6 +315,7 @@ fn minimal_code(id: &str, fill: Option<PropertyValue>) -> Node {
         font_family: None,
         font_size: None,
         font_weight: None,
+        font_features: None,
         syntax_theme: None,
         opacity: None,
         visible: None,

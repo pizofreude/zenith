@@ -35,6 +35,39 @@ fn clean_doc_no_errors() {
     assert!(!report.has_errors());
 }
 
+#[test]
+fn font_features_validate_tags_and_values() {
+    let src = r##"zenith version=1 {
+  project id="proj.features" name="Features"
+  tokens format="zenith-token-v1" {}
+  styles {}
+  document id="doc.features" title="Features" {
+    page id="page.one" w=(px)400 h=(px)400 {
+      text id="body" x=(px)10 y=(px)10 w=(px)300 h=(px)100 font-features="liga=0,bad" {
+        span "Text" font-features="kern=on"
+      }
+      code id="code" x=(px)10 y=(px)140 w=(px)300 h=(px)100 font-features="toolong=1" {
+        content "let x = 1;"
+      }
+    }
+  }
+}
+"##;
+    let doc = KdlAdapter.parse(src.as_bytes()).expect("parse");
+    let report = validate(&doc);
+    let invalid_count = report
+        .diagnostics
+        .iter()
+        .filter(|d| d.code == "font.invalid_feature")
+        .count();
+    assert_eq!(
+        invalid_count,
+        3,
+        "expected invalid tag/value diagnostics, got codes: {:?}",
+        codes(&report)
+    );
+}
+
 // ── Test 2: duplicate id across two nodes ─────────────────────────────
 
 #[test]
@@ -230,6 +263,7 @@ fn font_weight_with_missing_token_ref_produces_unknown_reference() {
         font_size: None,
         font_size_min: None,
         font_weight: Some(token_ref("weight.does.not.exist")),
+        font_features: None,
         opacity: None,
         visible: None,
         locked: None,

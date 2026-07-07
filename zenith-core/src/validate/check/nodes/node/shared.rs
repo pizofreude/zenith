@@ -847,9 +847,9 @@ pub(super) fn check_dimension_geom(
 
 // ── Style helpers ─────────────────────────────────────────────────────────────
 
-/// Validate the `fill` and `font-weight` visual properties on a slice of
-/// [`TextSpan`]s, registering any token references so they are not falsely
-/// flagged as unused.
+/// Validate the `fill`, `font-weight`, `highlight`, and `font-features`
+/// properties on a slice of [`TextSpan`]s, registering any token references so
+/// they are not falsely flagged as unused.
 ///
 /// Used by every node kind that carries a `spans` field (`text`, `shape`,
 /// `footnote`). The `node_id` is the PARENT node's id (spans have no id of
@@ -889,6 +889,50 @@ pub(super) fn check_spans(
             resolved_tokens,
             diagnostics,
         );
+        check_font_features(node_id, span.font_features.as_deref(), None, diagnostics);
+    }
+}
+
+pub(super) fn check_font_features(
+    node_id: &str,
+    raw: Option<&str>,
+    span: Option<crate::ast::Span>,
+    diagnostics: &mut Vec<Diagnostic>,
+) {
+    let Some(raw) = raw else {
+        return;
+    };
+
+    for item in raw.split(',') {
+        let spec = item.trim();
+        if spec.is_empty() {
+            continue;
+        }
+
+        let (tag, value) = match spec.split_once('=') {
+            Some((tag, value_raw)) => (tag.trim(), Some(value_raw.trim())),
+            None => (spec, None),
+        };
+        if tag.len() != 4 || !tag.as_bytes().iter().all(u8::is_ascii) {
+            diagnostics.push(Diagnostic::warning(
+                "font.invalid_feature",
+                format!(
+                    "node '{node_id}' has OpenType feature tag '{tag}', expected exactly four ASCII bytes"
+                ),
+                span,
+                Some(node_id.to_owned()),
+            ));
+        }
+        if let Some(value) = value
+            && value.parse::<u32>().is_err()
+        {
+            diagnostics.push(Diagnostic::warning(
+                "font.invalid_feature",
+                format!("node '{node_id}' has OpenType feature '{spec}' with a non-u32 value"),
+                span,
+                Some(node_id.to_owned()),
+            ));
+        }
     }
 }
 

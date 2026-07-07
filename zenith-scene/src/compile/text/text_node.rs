@@ -28,8 +28,8 @@ use super::measure::{
     MeasureEnv, font_size_px, measure_text_wrapped_height, resolve_text_families,
 };
 use super::shape::{
-    CODE_BG, CODE_MONO_FAMILY, LINK_COLOR, ResolvedSpan, emit_glyph_missing, resolve_font_weight,
-    resolve_vertical_align, run_to_scene_glyphs,
+    CODE_BG, CODE_MONO_FAMILY, LINK_COLOR, ResolvedSpan, emit_glyph_missing, resolve_font_features,
+    resolve_font_weight, resolve_vertical_align, run_to_scene_glyphs,
 };
 use super::tableader::compile_tab_leader;
 use super::wrap::{WrapEnv, WrapGeom, emit_wrap_path};
@@ -354,6 +354,7 @@ pub(in crate::compile) fn compile_text_sized(
                         text: marker.clone(),
                         fill: span.fill.clone(),
                         font_weight: None,
+                        font_features: span.font_features.clone(),
                         italic: None,
                         underline: None,
                         strikethrough: None,
@@ -456,6 +457,12 @@ pub(in crate::compile) fn compile_text_sized(
         .font_weight
         .as_ref()
         .or_else(|| style_prop(&text.style, style_map, "font-weight"));
+    let node_features = resolve_font_features(
+        text.font_features.as_deref(),
+        diagnostics,
+        &text.id,
+        text.source_span,
+    );
 
     // Glyph stroke (outline). Resolved earlier (before chain early-return) and
     // re-bound here for use in the text emit paths below.
@@ -483,6 +490,7 @@ pub(in crate::compile) fn compile_text_sized(
                 &families,
                 TabLeaderArgs {
                     font_size,
+                    features: &node_features,
                     node_fill_prop,
                     node_weight_prop,
                     node_opacity: 1.0,
@@ -505,6 +513,7 @@ pub(in crate::compile) fn compile_text_sized(
             &families,
             TabLeaderArgs {
                 font_size,
+                features: &node_features,
                 node_fill_prop,
                 node_weight_prop,
                 node_opacity,
@@ -561,6 +570,7 @@ pub(in crate::compile) fn compile_text_sized(
         style: FontStyle,
         font_size: f32,
         baseline_dy: f64,
+        features: Vec<zenith_layout::FontFeature>,
         vertical_align: bool,
     }
 
@@ -635,6 +645,10 @@ pub(in crate::compile) fn compile_text_sized(
         let (span_font_size, baseline_dy) =
             resolve_vertical_align(span.vertical_align.as_deref(), font_size);
         let is_vertical_align = baseline_dy != 0.0;
+        let span_features = match span.font_features.as_deref() {
+            Some(raw) => resolve_font_features(Some(raw), diagnostics, &text.id, text.source_span),
+            None => node_features.clone(),
+        };
 
         // `code` spans use the bundled mono family instead of the node family.
         // Allocate the override slice only when needed; non-code spans are
@@ -653,7 +667,7 @@ pub(in crate::compile) fn compile_text_sized(
             style,
             font_size: span_font_size,
             direction: node_direction,
-            features: &[],
+            features: &span_features,
         };
 
         // Shape with per-glyph font fallback: a span whose characters are all
@@ -708,6 +722,7 @@ pub(in crate::compile) fn compile_text_sized(
                         style,
                         font_size: span_font_size,
                         baseline_dy,
+                        features: span_features.clone(),
                         vertical_align: is_vertical_align,
                     });
                 }
@@ -979,6 +994,7 @@ pub(in crate::compile) fn compile_text_sized(
                 style: s.style,
                 font_size: s.font_size,
                 baseline_dy: s.baseline_dy,
+                features: s.features.clone(),
             })
             .collect();
 

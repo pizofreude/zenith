@@ -8,7 +8,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use zenith_core::{
     Diagnostic, FontProvider, FontSource, FontStyle, PropertyValue, ResolvedToken, ResolvedValue,
 };
-use zenith_layout::{ShapeRequest, TextDirection, TextLayoutEngine, ZenithGlyphRun};
+use zenith_layout::{FontFeature, ShapeRequest, TextDirection, TextLayoutEngine, ZenithGlyphRun};
 
 use crate::ir::{Color, SceneCommand, SceneGlyph};
 
@@ -75,6 +75,7 @@ pub(in crate::compile) struct WordSource {
     pub(in crate::compile) weight: u16,
     pub(in crate::compile) style: FontStyle,
     pub(in crate::compile) font_size: f32,
+    pub(in crate::compile) features: Vec<FontFeature>,
     /// 0-based paragraph index (each `\n` in the source starts a new paragraph).
     pub(in crate::compile) paragraph: usize,
     /// When this token is a hyphenation fragment, the ORIGINAL unsplit word it
@@ -117,6 +118,62 @@ pub(in crate::compile) struct ResolvedSpan {
     pub(in crate::compile) font_size: f32,
     /// Super/subscript baseline shift in pixels (negative = up; 0 = baseline).
     pub(in crate::compile) baseline_dy: f64,
+    /// Validated OpenType feature requests for this span. Empty keeps default
+    /// shaping behavior.
+    pub(in crate::compile) features: Vec<FontFeature>,
+}
+
+pub(in crate::compile) fn resolve_font_features(
+    raw: Option<&str>,
+    diagnostics: &mut Vec<Diagnostic>,
+    node_id: &str,
+    span: Option<zenith_core::Span>,
+) -> Vec<FontFeature> {
+    let Some(raw) = raw else {
+        return Vec::new();
+    };
+
+    let mut features = Vec::new();
+    for item in raw.split(',') {
+        let spec = item.trim();
+        if spec.is_empty() {
+            continue;
+        }
+        let (tag, value) = match spec.split_once('=') {
+            Some((tag, value_raw)) => {
+                let value_trimmed = value_raw.trim();
+                match value_trimmed.parse::<u32>() {
+                    Ok(value) => (tag.trim(), value),
+                    Err(_) => {
+                        diagnostics.push(Diagnostic::warning(
+                            "font.invalid_feature",
+                            format!(
+                                "text node '{node_id}' has OpenType feature '{spec}' with a non-u32 value"
+                            ),
+                            span,
+                            Some(node_id.to_owned()),
+                        ));
+                        continue;
+                    }
+                }
+            }
+            None => (spec, 1),
+        };
+
+        match FontFeature::new(tag, value) {
+            Some(feature) => features.push(feature),
+            None => diagnostics.push(Diagnostic::warning(
+                "font.invalid_feature",
+                format!(
+                    "text node '{node_id}' has OpenType feature tag '{tag}', expected exactly four ASCII bytes"
+                ),
+                span,
+                Some(node_id.to_owned()),
+            )),
+        }
+    }
+
+    features
 }
 
 /// Emit a `font.glyph_missing` warning for `node_id` when `missing` is
@@ -240,7 +297,7 @@ pub(in crate::compile) fn shape_words(
                     style: shaped.style,
                     font_size: word_font_size,
                     direction,
-                    features: &[],
+                    features: &shaped.features,
                 };
                 match engine.shape_with_fallback(&req, fonts) {
                     Err(e) => {
@@ -284,6 +341,7 @@ pub(in crate::compile) fn shape_words(
                                 weight: shaped.weight,
                                 style: shaped.style,
                                 font_size: word_font_size,
+                                features: shaped.features.clone(),
                                 paragraph,
                                 hyphen_part: None,
                             },
@@ -310,7 +368,7 @@ pub(in crate::compile) fn shape_words(
             // A single space's advance is direction-independent; keep LTR so the
             // inter-word gap measurement is identical for LTR and RTL.
             direction: TextDirection::Ltr,
-            features: &[],
+            features: spans.first().map_or(&[], |s| s.features.as_slice()),
         };
         match engine.shape(&req, fonts) {
             Ok(run) => run.advance_width as f64,

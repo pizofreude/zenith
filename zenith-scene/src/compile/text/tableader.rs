@@ -4,7 +4,7 @@
 
 use zenith_core::{Diagnostic, FontProvider, FontStyle, TextNode};
 use zenith_layout::{
-    RustybuzzEngine, ShapeRequest, TextDirection, TextLayoutEngine, ZenithGlyphRun,
+    FontFeature, RustybuzzEngine, ShapeRequest, TextDirection, TextLayoutEngine, ZenithGlyphRun,
 };
 
 use crate::ir::{Color, SceneCommand};
@@ -43,6 +43,7 @@ fn shape_tab_leader_row(
     families: &[String],
     font_size: f32,
     weight: u16,
+    features: &[FontFeature],
     engine: &RustybuzzEngine,
     fonts: &dyn FontProvider,
 ) -> TabLeaderRow {
@@ -63,7 +64,7 @@ fn shape_tab_leader_row(
             font_size,
             // Tab-leader (TOC) rows are LTR in v0; RTL TOC is a follow-up.
             direction: TextDirection::Ltr,
-            features: &[],
+            features,
         };
         match engine.shape_with_fallback(&req, fonts) {
             Ok(result) => {
@@ -146,6 +147,7 @@ pub(in crate::compile) fn compile_tab_leader(
 ) -> f64 {
     let TabLeaderArgs {
         font_size,
+        features,
         node_fill_prop,
         node_weight_prop,
         node_opacity,
@@ -198,7 +200,7 @@ pub(in crate::compile) fn compile_tab_leader(
         font_size,
         // Tab-leader (TOC) mode is LTR in v0.
         direction: TextDirection::Ltr,
-        features: &[],
+        features,
     };
     let leader_run = match engine.shape_with_fallback(&leader_req, fonts) {
         Ok(result) => result.runs.into_iter().next(),
@@ -213,7 +215,7 @@ pub(in crate::compile) fn compile_tab_leader(
     // non-empty run) define a uniform line grid for the whole block.
     let rows: Vec<TabLeaderRow> = combined
         .split('\n')
-        .map(|row| shape_tab_leader_row(row, families, font_size, weight, engine, fonts))
+        .map(|row| shape_tab_leader_row(row, families, font_size, weight, features, engine, fonts))
         .collect();
 
     // Shared metrics from the first available run (left, right, or the leader).

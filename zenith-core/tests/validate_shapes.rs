@@ -772,6 +772,7 @@ fn minimal_shape(id: &str, kind: Option<&str>, h_align: Option<&str>) -> Node {
             text: "Label".to_owned(),
             fill: None,
             font_weight: None,
+            font_features: None,
             italic: None,
             underline: None,
             strikethrough: None,

@@ -6,7 +6,7 @@
 use std::collections::BTreeMap;
 
 use zenith_core::{Diagnostic, PropertyValue, ResolvedToken, TextNode, dim_to_px};
-use zenith_layout::{ShapeRequest, TextDirection, TextLayoutEngine, ZenithGlyphRun};
+use zenith_layout::{FontFeature, ShapeRequest, TextDirection, TextLayoutEngine, ZenithGlyphRun};
 
 use crate::ir::{Color, SceneCommand};
 
@@ -109,6 +109,9 @@ pub(in crate::compile) fn emit_wrap_path(
         Some(n) if n >= 1 => take_drop_cap_initial(&mut resolved_spans).map(|init| (init, n)),
         _ => None,
     };
+    let plain_wrap_features = resolved_spans
+        .first()
+        .map_or_else(Vec::new, |s| s.features.clone());
 
     let (tokens, metrics) = shape_words(
         &resolved_spans,
@@ -246,6 +249,7 @@ pub(in crate::compile) fn emit_wrap_path(
                 node_fill_prop,
                 color_opacity,
                 base_weight,
+                features: plain_wrap_features,
             },
             commands,
             diagnostics,
@@ -478,6 +482,7 @@ struct PlainWrapStyle<'a> {
     node_fill_prop: Option<&'a PropertyValue>,
     color_opacity: f64,
     base_weight: u16,
+    features: Vec<FontFeature>,
 }
 
 /// Emit the plain wrap path (hyphenation/break-word + bullet/hanging-indent),
@@ -509,6 +514,7 @@ fn emit_plain_wrap(
         node_fill_prop,
         color_opacity,
         base_weight,
+        features,
     } = style;
     let engine = env.engine;
     let fonts = env.fonts;
@@ -587,7 +593,7 @@ fn emit_plain_wrap(
                     // Bullet marker is always LTR (the glyph faces left
                     // regardless of body direction in v0).
                     direction: TextDirection::Ltr,
-                    features: &[],
+                    features: &features,
                 };
                 match engine.shape_with_fallback(&req, fonts) {
                     Ok(result) => result.runs.into_iter().next().map(|r| (r, marker_color)),
@@ -817,6 +823,7 @@ mod indent_tests {
                 weight: 400,
                 style: FontStyle::Normal,
                 font_size: 16.0,
+                features: Vec::new(),
                 paragraph: 0,
                 hyphen_part: None,
             },

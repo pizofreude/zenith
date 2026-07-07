@@ -330,6 +330,7 @@ fn emit_shape_label(
         font_size: None,
         font_size_min: None,
         font_weight: None,
+        font_features: None,
         shadow: None,
         filter: None,
         mask: None,

@@ -496,6 +496,8 @@ pub(crate) const TEXT_KNOWN_PROPS: &[&str] = &[
     "font_size_min",
     "font-weight",
     "font_weight",
+    "font-features",
+    "font_features",
     "shadow",
     "filter",
     "mask",
@@ -554,6 +556,8 @@ pub(super) fn transform_text(node: &KdlNode) -> Result<TextNode, ParseError> {
     let font_size = optional_property_value_aliased(node, "font-size", "font_size");
     let font_size_min = optional_property_value_aliased(node, "font-size-min", "font_size_min");
     let font_weight = optional_property_value_aliased(node, "font-weight", "font_weight");
+    let font_features =
+        optional_string_prop_aliased(node, "font-features", "font_features").map(str::to_owned);
     let drop_cap_lines = optional_u32_prop(node, "drop-cap-lines")
         .or_else(|| optional_u32_prop(node, "drop_cap_lines"));
     let hyphenate = optional_bool_prop(node, "hyphenate");
@@ -621,6 +625,7 @@ pub(super) fn transform_text(node: &KdlNode) -> Result<TextNode, ParseError> {
         font_size,
         font_size_min,
         font_weight,
+        font_features,
         shadow: optional_property_value(node, "shadow"),
         filter: optional_property_value(node, "filter"),
         mask: optional_property_value(node, "mask"),
@@ -687,6 +692,8 @@ pub(crate) const CODE_KNOWN_PROPS: &[&str] = &[
     "font_size",
     "font-weight",
     "font_weight",
+    "font-features",
+    "font_features",
     "syntax-theme",
     "syntax_theme",
     "opacity",
@@ -713,6 +720,8 @@ pub(super) fn transform_code(node: &KdlNode) -> Result<CodeNode, ParseError> {
     let font_family = optional_property_value_aliased(node, "font-family", "font_family");
     let font_size = optional_property_value_aliased(node, "font-size", "font_size");
     let font_weight = optional_property_value_aliased(node, "font-weight", "font_weight");
+    let font_features =
+        optional_string_prop_aliased(node, "font-features", "font_features").map(str::to_owned);
     let line_numbers = optional_bool_prop(node, "line-numbers")
         .or_else(|| optional_bool_prop(node, "line_numbers"));
     let tab_width =
@@ -757,6 +766,7 @@ pub(super) fn transform_code(node: &KdlNode) -> Result<CodeNode, ParseError> {
         font_family,
         font_size,
         font_weight,
+        font_features,
         syntax_theme,
         opacity: optional_f64_prop(node, "opacity"),
         visible: optional_bool_prop(node, "visible"),
@@ -1022,6 +1032,8 @@ pub(super) fn transform_span(node: &KdlNode) -> Result<TextSpan, ParseError> {
         .entry("fill")
         .and_then(|e| entry_to_property_value(e).ok());
     let font_weight = optional_property_value_aliased(node, "font-weight", "font_weight");
+    let font_features =
+        optional_string_prop_aliased(node, "font-features", "font_features").map(str::to_owned);
     let italic = optional_bool_prop(node, "italic");
     let underline = optional_bool_prop(node, "underline");
     let strikethrough = optional_bool_prop(node, "strikethrough");
@@ -1055,6 +1067,7 @@ pub(super) fn transform_span(node: &KdlNode) -> Result<TextSpan, ParseError> {
         text,
         fill,
         font_weight,
+        font_features,
         italic,
         underline,
         strikethrough,

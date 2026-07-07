@@ -33,7 +33,7 @@ use std::collections::BTreeMap;
 use zenith_core::{
     BlockStyle, Diagnostic, FontStyle, ListKind, MdBlock, ResolvedToken, TextNode, TextSpan,
 };
-use zenith_layout::TextDirection;
+use zenith_layout::{FontFeature, TextDirection};
 
 use crate::ir::Color;
 
@@ -46,7 +46,7 @@ use super::markdown_block::{
 use super::pack::{LineDecoration, LineStyle};
 use super::shape::{
     LINK_COLOR, ResolvedSpan, WordMetrics, WordToken, resolve_font_family_name,
-    resolve_font_weight, resolve_vertical_align, shape_words,
+    resolve_font_features, resolve_font_weight, resolve_vertical_align, shape_words,
 };
 
 /// One shaped markdown block ready for per-member packing in the chain flow.
@@ -152,6 +152,12 @@ pub(in crate::compile) fn shape_source_blocks(
             style_env.resolved,
             shape.base_weight,
         );
+        let block_features = resolve_font_features(
+            src.font_features.as_deref(),
+            diagnostics,
+            &src.id,
+            src.source_span,
+        );
         let block_fill: Option<Color> = style
             .fill
             .as_ref()
@@ -194,6 +200,7 @@ pub(in crate::compile) fn shape_source_blocks(
             font_size: block_font_size,
             weight: block_weight,
             fill: block_fill,
+            features: &block_features,
             resolved: style_env.resolved,
             node_id: &src.id,
         };
@@ -255,6 +262,7 @@ struct BlockShapeCtx<'a> {
     font_size: f32,
     weight: u16,
     fill: Option<Color>,
+    features: &'a [FontFeature],
     resolved: &'a BTreeMap<String, ResolvedToken>,
     node_id: &'a str,
 }
@@ -303,6 +311,7 @@ fn block_spans(
                 style: FontStyle::Normal,
                 font_size: ctx.font_size,
                 baseline_dy: 0.0,
+                features: ctx.features.to_vec(),
             }]
         }
         // A horizontal rule contributes no shaped text: the distributor emits a
@@ -343,6 +352,7 @@ fn text_spans_to_resolved(
             },
             font_size: ctx.font_size,
             baseline_dy: 0.0,
+            features: ctx.features.to_vec(),
         });
     }
 
@@ -375,6 +385,10 @@ fn text_spans_to_resolved(
         };
         let (span_font_size, baseline_dy) =
             resolve_vertical_align(span.vertical_align.as_deref(), ctx.font_size);
+        let features = match span.font_features.as_deref() {
+            Some(raw) => resolve_font_features(Some(raw), diagnostics, node_id, None),
+            None => ctx.features.to_vec(),
+        };
         out.push(ResolvedSpan {
             text: span.text.clone(),
             color,
@@ -387,6 +401,7 @@ fn text_spans_to_resolved(
             style: font_style,
             font_size: span_font_size,
             baseline_dy,
+            features,
         });
     }
 

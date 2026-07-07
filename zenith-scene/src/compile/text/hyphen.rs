@@ -76,7 +76,7 @@ fn reshape_fragment(
         style: donor.src.style,
         font_size: donor.src.font_size,
         direction: ctx.direction,
-        features: &[],
+        features: &donor.src.features,
     };
     let result = ctx.engine.shape_with_fallback(&req, ctx.fonts).ok()?;
     let advance: f64 = result.runs.iter().map(|r| r.advance_width as f64).sum();
@@ -101,6 +101,7 @@ fn reshape_fragment(
             weight: donor.src.weight,
             style: donor.src.style,
             font_size: donor.src.font_size,
+            features: donor.src.features.clone(),
             paragraph: donor.src.paragraph,
             hyphen_part,
         },
@@ -294,6 +295,7 @@ mod break_word_tests {
             style: FontStyle::Normal,
             font_size: 16.0,
             baseline_dy: 0.0,
+            features: Vec::new(),
         }];
         let mut diags = Vec::new();
         let (mut tokens, _m) = shape_words(

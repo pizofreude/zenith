@@ -17,8 +17,8 @@ use super::super::util::resolve_property_dimension_px;
 use super::ctx::{NodeShape, ShapeEnv};
 use super::pack::pack_lines;
 use super::shape::{
-    ResolvedSpan, resolve_font_family_name, resolve_font_weight, resolve_vertical_align,
-    shape_words,
+    ResolvedSpan, resolve_font_family_name, resolve_font_features, resolve_font_weight,
+    resolve_vertical_align, shape_words,
 };
 
 /// Resolve a text node's font size in pixels with style cascade (default 16.0).
@@ -104,6 +104,7 @@ fn build_resolved_spans(
     text: &TextNode,
     resolved: &BTreeMap<String, ResolvedToken>,
     style_map: &BTreeMap<&str, &Style>,
+    diagnostics: &mut Vec<Diagnostic>,
 ) -> (Vec<ResolvedSpan>, f32, u16) {
     let font_size = font_size_px(text, resolved, style_map);
 
@@ -115,6 +116,12 @@ fn build_resolved_spans(
         .as_ref()
         .or_else(|| style_prop(&text.style, style_map, "font-weight"));
     let base_weight = resolve_font_weight(node_weight_prop, resolved, 400);
+    let node_features = resolve_font_features(
+        text.font_features.as_deref(),
+        diagnostics,
+        &text.id,
+        text.source_span,
+    );
 
     let mut spans: Vec<ResolvedSpan> = Vec::with_capacity(text.spans.len());
     for span in &text.spans {
@@ -130,6 +137,10 @@ fn build_resolved_spans(
         };
         let (span_font_size, baseline_dy) =
             resolve_vertical_align(span.vertical_align.as_deref(), font_size);
+        let features = match span.font_features.as_deref() {
+            Some(raw) => resolve_font_features(Some(raw), diagnostics, &text.id, text.source_span),
+            None => node_features.clone(),
+        };
         spans.push(ResolvedSpan {
             text: span.text.clone(),
             color: Color::srgb(0, 0, 0, 255),
@@ -148,6 +159,7 @@ fn build_resolved_spans(
             style,
             font_size: span_font_size,
             baseline_dy,
+            features,
         });
     }
     (spans, font_size, base_weight)
@@ -179,7 +191,8 @@ pub(in crate::compile) fn measure_text_natural(
     env: MeasureEnv,
     diagnostics: &mut Vec<Diagnostic>,
 ) -> Option<f64> {
-    let (spans, font_size, base_weight) = build_resolved_spans(text, env.resolved, env.style_map);
+    let (spans, font_size, base_weight) =
+        build_resolved_spans(text, env.resolved, env.style_map, diagnostics);
     if spans.is_empty() {
         return None;
     }
@@ -235,7 +248,8 @@ pub(in crate::compile) fn measure_text_wrapped_height(
     env: MeasureEnv,
     diagnostics: &mut Vec<Diagnostic>,
 ) -> Option<f64> {
-    let (spans, font_size, base_weight) = build_resolved_spans(text, env.resolved, env.style_map);
+    let (spans, font_size, base_weight) =
+        build_resolved_spans(text, env.resolved, env.style_map, diagnostics);
     if spans.is_empty() {
         return None;
     }
