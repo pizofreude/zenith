@@ -30,6 +30,16 @@ impl RectBounds {
     }
 
     #[must_use]
+    pub fn include_bounds(self, bounds: Self) -> Self {
+        Self {
+            min_x: self.min_x.min(bounds.min_x),
+            min_y: self.min_y.min(bounds.min_y),
+            max_x: self.max_x.max(bounds.max_x),
+            max_y: self.max_y.max(bounds.max_y),
+        }
+    }
+
+    #[must_use]
     pub fn width(self) -> f64 {
         self.max_x - self.min_x
     }
@@ -61,5 +71,26 @@ mod tests {
         );
         assert_eq!(bounds.width(), 5.0);
         assert_eq!(bounds.height(), 7.0);
+    }
+
+    #[test]
+    fn expands_to_include_bounds() {
+        let bounds =
+            RectBounds::from_point(Point2::new_unchecked(2.0, 3.0)).include_bounds(RectBounds {
+                min_x: -4.0,
+                min_y: 1.0,
+                max_x: 8.0,
+                max_y: 9.0,
+            });
+
+        assert_eq!(
+            bounds,
+            RectBounds {
+                min_x: -4.0,
+                min_y: 1.0,
+                max_x: 8.0,
+                max_y: 9.0
+            }
+        );
     }
 }

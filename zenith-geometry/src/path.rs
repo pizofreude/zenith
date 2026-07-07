@@ -1,5 +1,5 @@
 use crate::{
-    AffineTransform, CubicBezier, GeometryError, Point2, project_onto_cubic_bezier,
+    AffineTransform, CubicBezier, GeometryError, Point2, RectBounds, project_onto_cubic_bezier,
     validation::{validate_parameter, validate_tolerance},
 };
 
@@ -94,6 +94,22 @@ impl PathGeometry {
         }
 
         Ok(segments)
+    }
+
+    pub fn bounds(&self) -> Result<Option<RectBounds>, GeometryError> {
+        let Some(first) = self.anchors.first() else {
+            return Ok(None);
+        };
+        let mut bounds = RectBounds::from_point(first.point);
+
+        for segment in self.segments()? {
+            bounds = match segment {
+                PathSegment::Line { end, .. } => bounds.include_point(end),
+                PathSegment::Cubic { curve } => bounds.include_bounds(curve.bounds()?),
+            };
+        }
+
+        Ok(Some(bounds))
     }
 
     pub fn split_segment(
@@ -849,6 +865,55 @@ mod tests {
         assert_eq!(
             path.project(point(0.0, 0.0), 0.0),
             Err(GeometryError::NonPositiveTolerance)
+        );
+    }
+
+    #[test]
+    fn bounds_handles_empty_and_closed_lines() {
+        assert_eq!(
+            PathGeometry::new(Vec::new(), false)
+                .expect("valid path")
+                .bounds(),
+            Ok(None)
+        );
+
+        let closed = PathGeometry::new(
+            vec![anchor(0.0, 0.0), anchor(10.0, -4.0), anchor(-2.0, 6.0)],
+            true,
+        )
+        .expect("valid path");
+
+        assert_eq!(
+            closed.bounds(),
+            Ok(Some(RectBounds {
+                min_x: -2.0,
+                min_y: -4.0,
+                max_x: 10.0,
+                max_y: 6.0,
+            }))
+        );
+    }
+
+    #[test]
+    fn bounds_uses_cubic_extrema_not_control_point_box() {
+        let curve = CubicBezier::new_unchecked(
+            point(0.0, 0.0),
+            point(0.0, 10.0),
+            point(10.0, 10.0),
+            point(10.0, 0.0),
+        );
+        let start = PathAnchor::new(curve.p0, None, Some(curve.p1)).expect("valid anchor");
+        let end = PathAnchor::new(curve.p3, Some(curve.p2), None).expect("valid anchor");
+        let path = PathGeometry::new(vec![start, end], false).expect("valid path");
+
+        assert_eq!(
+            path.bounds(),
+            Ok(Some(RectBounds {
+                min_x: 0.0,
+                min_y: 0.0,
+                max_x: 10.0,
+                max_y: 7.5,
+            }))
         );
     }
 
