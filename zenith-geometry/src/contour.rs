@@ -23,6 +23,14 @@ pub enum PointLocation {
     Boundary,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ClosedPolylineRelation {
+    Disjoint,
+    Intersecting,
+    FirstContainsSecond,
+    SecondContainsFirst,
+}
+
 impl ClosedPolyline {
     pub fn new(points: Vec<Point2>) -> Result<Self, GeometryError> {
         let points = normalized_points(points)?;
@@ -175,6 +183,44 @@ pub fn collect_raw_closed_polyline_intersections(
     Ok(intersections)
 }
 
+pub fn classify_closed_polyline_relation(
+    first: &ClosedPolyline,
+    second: &ClosedPolyline,
+    tolerance: f64,
+) -> Result<ClosedPolylineRelation, GeometryError> {
+    validate_tolerance(tolerance)?;
+
+    if !bounds_overlap(first.bounds(), second.bounds(), tolerance) {
+        return Ok(ClosedPolylineRelation::Disjoint);
+    }
+
+    if !collect_raw_closed_polyline_intersections(first, second)?.is_empty() {
+        return Ok(ClosedPolylineRelation::Intersecting);
+    }
+
+    let first_point = first
+        .points()
+        .first()
+        .copied()
+        .ok_or(GeometryError::InvalidContour)?;
+    match second.locate_point(first_point, tolerance)? {
+        PointLocation::Inside => return Ok(ClosedPolylineRelation::SecondContainsFirst),
+        PointLocation::Boundary => return Ok(ClosedPolylineRelation::Intersecting),
+        PointLocation::Outside => {}
+    }
+
+    let second_point = second
+        .points()
+        .first()
+        .copied()
+        .ok_or(GeometryError::InvalidContour)?;
+    match first.locate_point(second_point, tolerance)? {
+        PointLocation::Inside => Ok(ClosedPolylineRelation::FirstContainsSecond),
+        PointLocation::Boundary => Ok(ClosedPolylineRelation::Intersecting),
+        PointLocation::Outside => Ok(ClosedPolylineRelation::Disjoint),
+    }
+}
+
 fn normalized_points(mut points: Vec<Point2>) -> Result<Vec<Point2>, GeometryError> {
     for point in &points {
         point.validate()?;
@@ -184,6 +230,15 @@ fn normalized_points(mut points: Vec<Point2>) -> Result<Vec<Point2>, GeometryErr
         points.pop();
     }
     Ok(points)
+}
+
+fn bounds_overlap(first: RectBounds, second: RectBounds, tolerance: f64) -> bool {
+    first.is_valid()
+        && second.is_valid()
+        && first.min_x <= second.max_x + tolerance
+        && first.max_x + tolerance >= second.min_x
+        && first.min_y <= second.max_y + tolerance
+        && first.max_y + tolerance >= second.min_y
 }
 
 fn validate_edges(points: &[Point2]) -> Result<(), GeometryError> {
@@ -497,6 +552,102 @@ mod tests {
                     }),
                 },
             ])
+        );
+    }
+
+    #[test]
+    fn relation_classifies_disjoint_and_intersecting_contours() {
+        let first = contour(&[
+            point(0.0, 0.0),
+            point(10.0, 0.0),
+            point(10.0, 10.0),
+            point(0.0, 10.0),
+        ]);
+        let disjoint = contour(&[
+            point(20.0, 0.0),
+            point(30.0, 0.0),
+            point(30.0, 10.0),
+            point(20.0, 10.0),
+        ]);
+        let intersecting = contour(&[
+            point(5.0, 5.0),
+            point(15.0, 5.0),
+            point(15.0, 15.0),
+            point(5.0, 15.0),
+        ]);
+
+        assert_eq!(
+            classify_closed_polyline_relation(&first, &disjoint, 0.001),
+            Ok(ClosedPolylineRelation::Disjoint)
+        );
+        assert_eq!(
+            classify_closed_polyline_relation(&first, &intersecting, 0.001),
+            Ok(ClosedPolylineRelation::Intersecting)
+        );
+    }
+
+    #[test]
+    fn relation_classifies_nested_contours_in_either_order() {
+        let outer = contour(&[
+            point(0.0, 0.0),
+            point(10.0, 0.0),
+            point(10.0, 10.0),
+            point(0.0, 10.0),
+        ]);
+        let inner = contour(&[
+            point(2.0, 2.0),
+            point(4.0, 2.0),
+            point(4.0, 4.0),
+            point(2.0, 4.0),
+        ]);
+
+        assert_eq!(
+            classify_closed_polyline_relation(&outer, &inner, 0.001),
+            Ok(ClosedPolylineRelation::FirstContainsSecond)
+        );
+        assert_eq!(
+            classify_closed_polyline_relation(&inner, &outer, 0.001),
+            Ok(ClosedPolylineRelation::SecondContainsFirst)
+        );
+    }
+
+    #[test]
+    fn relation_uses_tolerance_for_boundary_contact() {
+        let first = contour(&[
+            point(0.0, 0.0),
+            point(10.0, 0.0),
+            point(10.0, 10.0),
+            point(0.0, 10.0),
+        ]);
+        let near = contour(&[
+            point(10.05, 2.0),
+            point(12.0, 2.0),
+            point(12.0, 4.0),
+            point(10.05, 4.0),
+        ]);
+
+        assert_eq!(
+            classify_closed_polyline_relation(&first, &near, 0.01),
+            Ok(ClosedPolylineRelation::Disjoint)
+        );
+        assert_eq!(
+            classify_closed_polyline_relation(&first, &near, 0.1),
+            Ok(ClosedPolylineRelation::Intersecting)
+        );
+    }
+
+    #[test]
+    fn relation_rejects_invalid_tolerance() {
+        let first = contour(&[point(0.0, 0.0), point(2.0, 0.0), point(0.0, 2.0)]);
+        let second = contour(&[point(4.0, 0.0), point(6.0, 0.0), point(4.0, 2.0)]);
+
+        assert_eq!(
+            classify_closed_polyline_relation(&first, &second, f64::NAN),
+            Err(GeometryError::NonFiniteTolerance)
+        );
+        assert_eq!(
+            classify_closed_polyline_relation(&first, &second, 0.0),
+            Err(GeometryError::NonPositiveTolerance)
         );
     }
 
