@@ -5,7 +5,7 @@
 
 use std::collections::BTreeMap;
 
-use zenith_core::{ComponentDef, Diagnostic, Document, ResolvedToken, Style, resolve_tokens};
+use zenith_core::{ComponentDef, Diagnostic, Document, Page, ResolvedToken, Style, resolve_tokens};
 
 use super::ComponentMap;
 
@@ -85,6 +85,11 @@ impl<'a> ImportScopes<'a> {
                     .or_insert(component);
             }
 
+            let mut page_map: BTreeMap<&str, &Page> = BTreeMap::new();
+            for page in &imported.document.body.pages {
+                page_map.entry(page.id.as_str()).or_insert(page);
+            }
+
             scopes.insert(
                 id.clone(),
                 ImportedScope {
@@ -92,6 +97,7 @@ impl<'a> ImportScopes<'a> {
                     resolved: token_resolution.resolved,
                     style_map,
                     components: component_map,
+                    pages: page_map,
                 },
             );
         }
@@ -116,12 +122,17 @@ pub(in crate::compile) struct ImportedScope<'a> {
     pub(in crate::compile) resolved: BTreeMap<String, ResolvedToken>,
     pub(in crate::compile) style_map: BTreeMap<&'a str, &'a Style>,
     pub(in crate::compile) components: ComponentMap<'a>,
+    pub(in crate::compile) pages: BTreeMap<&'a str, &'a Page>,
 }
 
 pub(in crate::compile) enum ImportSource<'a> {
     Component {
         import_id: &'a str,
         component_id: &'a str,
+    },
+    Page {
+        import_id: &'a str,
+        page_id: &'a str,
     },
     UnsupportedTarget {
         import_id: &'a str,
@@ -137,6 +148,9 @@ pub(in crate::compile) fn parse_import_source(source: &str) -> ImportSource<'_> 
     if import_id.is_empty() || target.is_empty() {
         return ImportSource::Invalid;
     }
+    if target.contains('#') {
+        return ImportSource::Invalid;
+    }
 
     if let Some(component_id) = target.strip_prefix("component.") {
         if component_id.is_empty() {
@@ -146,6 +160,13 @@ pub(in crate::compile) fn parse_import_source(source: &str) -> ImportSource<'_> 
             import_id,
             component_id,
         };
+    }
+
+    if let Some(page_id) = target.strip_prefix("page.") {
+        if page_id.is_empty() {
+            return ImportSource::Invalid;
+        }
+        return ImportSource::Page { import_id, page_id };
     }
 
     ImportSource::UnsupportedTarget { import_id, target }

@@ -208,6 +208,65 @@ fn to_scene_json_expands_loaded_composition_import() {
 }
 
 #[test]
+fn to_scene_json_expands_loaded_page_source_import() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    std::fs::write(
+        dir.path().join("slide.zen"),
+        r##"zenith version=1 {
+  project id="proj.slide" name="Slide"
+  tokens format="zenith-token-v1" {
+    token id="color.slide" type="color" value="#0000ff"
+  }
+  styles {}
+  document id="doc.slide" title="Slide" {
+    page id="page.main" w=(px)100 h=(px)100 background=(token)"color.slide" {
+      rect id="mark" x=(px)10 y=(px)20 w=(px)30 h=(px)40 fill="#00ff00"
+    }
+  }
+}
+"##,
+    )
+    .expect("write imported document");
+    let src = r##"zenith version=1 {
+  project id="proj.host" name="Host"
+  imports {
+    import id="slide" kind="zen" src="slide.zen"
+  }
+  tokens format="zenith-token-v1" {
+    token id="color.host" type="color" value="#ff0000"
+  }
+  document id="doc.host" title="Host" {
+    page id="page.host" source="slide#page.page.main" fit="fill" w=(px)200 h=(px)100 background=(token)"color.host"
+  }
+}
+"##;
+
+    let artifact = to_scene_json(src, Some(dir.path()), 1, &CliPolicyFlags::default(), None)
+        .expect("scene JSON render must succeed");
+
+    assert!(
+        artifact.diagnostics.is_empty(),
+        "imported page render must be clean; got {:?}",
+        artifact.diagnostics
+    );
+    assert!(
+        artifact.json.contains(r#""op": "PushScaleTranslate""#),
+        "scene JSON must include the imported page transform; got {}",
+        artifact.json
+    );
+    assert!(
+        artifact.json.contains(r#""sx": 2.0"#) && artifact.json.contains(r#""sy": 1.0"#),
+        "imported page must fill the host dimensions; got {}",
+        artifact.json
+    );
+    assert!(
+        artifact.json.contains(r#""w": 30.0"#) && artifact.json.contains(r#""h": 40.0"#),
+        "scene JSON must keep imported native rect geometry under the transform; got {}",
+        artifact.json
+    );
+}
+
+#[test]
 fn construction_guides_do_not_affect_default_scene_json() {
     let artifact = to_scene_json(CONSTRUCTION_DOC, None, 1, &CliPolicyFlags::default(), None)
         .expect("scene render must succeed");

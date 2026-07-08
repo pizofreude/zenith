@@ -654,6 +654,11 @@ pub const DIAGNOSTIC_CODES: &[DiagnosticCodeInfo] = &[
         "An instance references a component that is not present in the imported document.",
     ),
     info(
+        "scene.unknown_import_page",
+        Severity::Advisory,
+        "A page source references a page that is not present in the imported document.",
+    ),
+    info(
         "scene.unresolved_token",
         Severity::Advisory,
         "A paint references a token that could not be resolved at compile time.",
@@ -1121,6 +1126,7 @@ mod tests {
             ("scene.unknown_component", Severity::Advisory),
             ("scene.unknown_import", Severity::Advisory),
             ("scene.unknown_import_component", Severity::Advisory),
+            ("scene.unknown_import_page", Severity::Advisory),
             ("scene.unresolved_token", Severity::Advisory),
             ("scene.unsupported_import_source", Severity::Advisory),
             ("scene.unsupported_import_target", Severity::Advisory),

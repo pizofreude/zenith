@@ -122,6 +122,18 @@ fn compile_imported_instance(
             import_id,
             component_id,
         } => (import_id, component_id),
+        ImportSource::Page { import_id, page_id } => {
+            diagnostics.push(Diagnostic::advisory(
+                "scene.unsupported_import_target",
+                format!(
+                    "instance '{}' references unsupported import target '{}#page.{}'; the instance is skipped",
+                    instance.id, import_id, page_id
+                ),
+                instance.source_span,
+                Some(instance.id.clone()),
+            ));
+            return;
+        }
         ImportSource::UnsupportedTarget { import_id, target } => {
             diagnostics.push(Diagnostic::advisory(
                 "scene.unsupported_import_target",

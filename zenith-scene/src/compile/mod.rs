@@ -31,6 +31,7 @@ mod imports;
 mod leaf;
 mod line_jumps;
 mod markdown_resolve;
+mod page_source;
 mod paint;
 mod pattern;
 mod table;
@@ -67,6 +68,7 @@ use leaf::{
     compile_line, compile_path, compile_polygon, compile_polyline, compile_rect, compile_shape,
 };
 use markdown_resolve::{resolve_markdown, scan_for_markdown_text};
+use page_source::{PageSourceEnv, compile_page_source};
 use paint::{resolve_property_color, resolve_property_gradient};
 use pattern::compile_pattern;
 use table::{TableEmitCtx, compile_table};
@@ -566,6 +568,21 @@ pub(in crate::compile) fn compile_page_inner(
             );
         }
     }
+
+    compile_page_source(
+        PageSourceEnv {
+            page,
+            page_w,
+            page_h,
+            root_ctx,
+            fonts,
+            data,
+            graph: imports,
+            scopes: &import_scopes,
+        },
+        &mut scene.commands,
+        &mut diagnostics,
+    );
 
     // ── Step 7b: page children in source order (z-order: first = bottom) ─
     for node in &page.children {
