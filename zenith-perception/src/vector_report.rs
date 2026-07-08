@@ -98,6 +98,10 @@ pub fn analyze_vector_path(input: VectorPathPerceptionInput<'_>) -> VectorPathPe
 
     let mut diagnostics = anchor_economy.diagnostics.clone();
     diagnostics.extend(tangent_quality.diagnostics.iter().cloned());
+    diagnostics.extend(path_craft_diagnostics(
+        &anchor_economy.diagnostics,
+        &[&tangent_quality],
+    ));
     diagnostics.extend(small_legibility.diagnostics.iter().cloned());
     if let Some(diagnostic) = bounds_diagnostic {
         diagnostics.push(diagnostic);
@@ -138,6 +142,10 @@ pub fn analyze_compound_vector_path(
     for report in &tangent_quality_reports {
         diagnostics.extend(report.diagnostics.iter().cloned());
     }
+    diagnostics.extend(path_craft_diagnostics(
+        &anchor_economy.diagnostics,
+        &tangent_quality_reports.iter().collect::<Vec<_>>(),
+    ));
     diagnostics.extend(small_legibility.diagnostics.iter().cloned());
     if let Some(diagnostic) = bounds_diagnostic {
         diagnostics.push(diagnostic);
@@ -258,6 +266,63 @@ fn tangent_quality_score_mean(reports: &[PathTangentQualityReport]) -> Option<f3
         .map(|report| report.craftsmanship_score)
         .sum();
     Some(total / reports.len() as f32)
+}
+
+fn path_craft_diagnostics(
+    anchor_diagnostics: &[PerceptionDiagnostic],
+    tangent_reports: &[&PathTangentQualityReport],
+) -> Vec<PerceptionDiagnostic> {
+    let mut diagnostics = Vec::new();
+
+    if anchor_diagnostics
+        .iter()
+        .any(|diagnostic| diagnostic.code == "anchor_economy.high_excess_anchor_ratio")
+    {
+        diagnostics.push(PerceptionDiagnostic::new(
+            "path.redundant_anchor",
+            PerceptionSeverity::Info,
+            "path anchor count exceeds the deterministic topology minimum",
+        ));
+    }
+
+    if tangent_reports.iter().any(|report| {
+        report
+            .diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.code == "path_tangent_quality.low_tangent_alignment")
+    }) {
+        diagnostics.push(PerceptionDiagnostic::new(
+            "path.tangent_discontinuity",
+            PerceptionSeverity::Info,
+            "path handles have low tangent alignment across evaluated joins",
+        ));
+    }
+
+    if tangent_reports.iter().any(|report| {
+        report
+            .diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.code == "path_tangent_quality.unbalanced_handle_lengths")
+    }) {
+        diagnostics.push(PerceptionDiagnostic::new(
+            "path.handle_ratio_out_of_range",
+            PerceptionSeverity::Info,
+            "path handle lengths are imbalanced across evaluated joins",
+        ));
+    }
+
+    if tangent_reports
+        .iter()
+        .any(|report| report.sharp_turn_count > 0)
+    {
+        diagnostics.push(PerceptionDiagnostic::new(
+            "path.turn_too_sharp",
+            PerceptionSeverity::Info,
+            "path contains one or more sharp tangent turns",
+        ));
+    }
+
+    diagnostics
 }
 
 fn invalid_geometry_diagnostic() -> PerceptionDiagnostic {
@@ -401,6 +466,54 @@ mod tests {
                 .iter()
                 .any(|diagnostic| diagnostic.code == "anchor_economy.invalid_missing_topology"),
             "expected invalid topology diagnostic; got {:?}",
+            report.diagnostics
+        );
+    }
+
+    #[test]
+    fn vector_path_report_adds_tangent_discontinuity_craft_diagnostic() {
+        let anchors = [anchor(0.0, 0.0, 10.0, 0.0, 20.0, 0.0)];
+
+        let report = analyze_vector_path(VectorPathPerceptionInput {
+            anchors: &anchors,
+            closed: true,
+            fill_rule: None,
+        });
+
+        assert!(
+            report
+                .diagnostics
+                .iter()
+                .any(|diagnostic| diagnostic.code == "path.tangent_discontinuity"),
+            "expected path.tangent_discontinuity; got {:?}",
+            report.diagnostics
+        );
+        assert!(
+            report
+                .diagnostics
+                .iter()
+                .any(|diagnostic| diagnostic.code == "path.turn_too_sharp"),
+            "expected path.turn_too_sharp; got {:?}",
+            report.diagnostics
+        );
+    }
+
+    #[test]
+    fn vector_path_report_adds_handle_ratio_craft_diagnostic() {
+        let anchors = [anchor(0.0, 0.0, -1.0, 0.0, 10.0, 0.0)];
+
+        let report = analyze_vector_path(VectorPathPerceptionInput {
+            anchors: &anchors,
+            closed: true,
+            fill_rule: None,
+        });
+
+        assert!(
+            report
+                .diagnostics
+                .iter()
+                .any(|diagnostic| diagnostic.code == "path.handle_ratio_out_of_range"),
+            "expected path.handle_ratio_out_of_range; got {:?}",
             report.diagnostics
         );
     }
