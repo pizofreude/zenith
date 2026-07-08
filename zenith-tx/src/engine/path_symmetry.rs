@@ -13,6 +13,7 @@ pub(super) struct MakePathSymmetricArgs<'a> {
     pub cx: f64,
     pub cy: f64,
     pub start_angle_degrees: f64,
+    pub mirror: bool,
 }
 
 pub(super) fn apply_make_path_symmetric(
@@ -36,10 +37,12 @@ pub(super) fn apply_make_path_symmetric(
 
     for page in &mut doc.body.pages {
         if subtree_contains_path(&page.children, args.node_id) {
-            insert_after_source(&mut page.children, args.node_id, &copies);
-            for index in 1..args.count {
-                record_affected(&format!("{}{}", args.id_prefix, index), affected);
+            for copy in &copies {
+                if let Some(id) = node_id_of(copy) {
+                    record_affected(id, affected);
+                }
             }
+            insert_after_source(&mut page.children, args.node_id, &copies);
             return;
         }
     }
@@ -106,10 +109,13 @@ fn symmetry_copies(
     args: &MakePathSymmetricArgs<'_>,
     diagnostics: &mut Vec<Diagnostic>,
 ) -> Option<Vec<Node>> {
-    if args.count < 2 {
+    // Radial symmetry needs at least 2 positions to produce a copy; mirror
+    // (dihedral) symmetry produces a reflected copy even for a single axis.
+    let minimum = if args.mirror { 1 } else { 2 };
+    if args.count < minimum {
         diagnostics.push(Diagnostic::error(
             "tx.invalid_geometry",
-            "make_path_symmetric count must be at least 2",
+            format!("make_path_symmetric count must be at least {minimum}"),
             None,
             Some(args.node_id.to_owned()),
         ));
@@ -123,14 +129,18 @@ fn symmetry_copies(
             return None;
         }
     };
-    let transforms =
-        match AffineTransform::radial_symmetry(args.count, center, args.start_angle_degrees) {
-            Ok(transforms) => transforms,
-            Err(error) => {
-                diagnostics.push(symmetry_geometry_diagnostic(args.node_id, error));
-                return None;
-            }
-        };
+    let transforms_result = if args.mirror {
+        AffineTransform::dihedral_symmetry(args.count, center, args.start_angle_degrees)
+    } else {
+        AffineTransform::radial_symmetry(args.count, center, args.start_angle_degrees)
+    };
+    let transforms = match transforms_result {
+        Ok(transforms) => transforms,
+        Err(error) => {
+            diagnostics.push(symmetry_geometry_diagnostic(args.node_id, error));
+            return None;
+        }
+    };
     let geometry =
         match resolved_path_geometry(args.node_id, &source.anchors, source.closed == Some(true)) {
             Ok(geometry) => geometry,

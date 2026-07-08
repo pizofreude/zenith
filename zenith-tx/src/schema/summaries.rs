@@ -42,9 +42,9 @@ pub fn op_summary(name: &str) -> Option<&'static str> {
         "snap_path_anchors" => {
             Some("Translate a path so its nearest boundary point lands on another path.")
         }
-        "make_path_symmetric" => {
-            Some("Materialize radial symmetry copies of a path as editable sibling paths.")
-        }
+        "make_path_symmetric" => Some(
+            "Materialize radial (or, with mirror=true, dihedral mirror) symmetry copies of a path as editable sibling paths.",
+        ),
         "path_boolean" => {
             Some("Materialize a simple closed-contour boolean result as a sibling path.")
         }
