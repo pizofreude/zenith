@@ -67,6 +67,18 @@ struct BackdropCandidate {
 }
 
 #[derive(Clone, Copy)]
+struct SampledBackdrop {
+    rgb: (u8, u8, u8),
+    source: &'static str,
+}
+
+#[derive(Clone, Copy)]
+struct ContrastSample {
+    lc: f64,
+    source: &'static str,
+}
+
+#[derive(Clone, Copy)]
 struct ContrastEnv<'a> {
     resolved_tokens: &'a BTreeMap<String, ResolvedToken>,
     style_map: &'a BTreeMap<&'a str, &'a Style>,
@@ -242,33 +254,30 @@ fn check_text_node(
         return;
     };
 
-    let hint_rgb = resolve_color_property(text.contrast_bg.as_ref(), env.resolved_tokens);
-    let backdrop = text_box(text, ctx.page_size, env.resolved_tokens)
-        .and_then(|bbox| backdrop_rgb(bbox, ctx.clip, candidates));
-    let bg_source = if hint_rgb.is_some() {
-        "contrast-bg hint"
-    } else if backdrop.is_some() {
-        "backdrop"
-    } else {
-        "page background"
-    };
-    let Some(bg_rgb) = hint_rgb.or(backdrop).or(ctx.page_bg_rgb) else {
-        return;
-    };
-
     let size_px = resolve_font_size(text, env.style_map, env.resolved_tokens);
     let weight = resolve_font_weight(text, env.style_map, env.resolved_tokens);
     let is_large = size_px >= 24.0 || (size_px >= 18.66 && weight >= 700);
     let threshold = if is_large { 45.0_f64 } else { 60.0_f64 };
-    let lc = apca_lc(fg_rgb, bg_rgb).abs();
 
-    if lc < threshold {
-        let (code, detail) = if lc < INVISIBLE_LC_FLOOR {
+    let hint_rgb = resolve_color_property(text.contrast_bg.as_ref(), env.resolved_tokens);
+    let backdrop_samples = if hint_rgb.is_some() {
+        Vec::new()
+    } else {
+        text_box(text, ctx.page_size, env.resolved_tokens)
+            .map(|bbox| collect_backdrop_samples(bbox, ctx.clip, candidates, ctx.page_bg_rgb))
+            .unwrap_or_default()
+    };
+    let best = select_contrast_sample(fg_rgb, hint_rgb, &backdrop_samples, ctx.page_bg_rgb);
+
+    if let Some(sample) = best
+        && sample.lc < threshold
+    {
+        let (code, detail) = if sample.lc < INVISIBLE_LC_FLOOR {
             (
                 "contrast.invisible",
                 format!(
                     "is effectively invisible against {} (Lc below {:.0})",
-                    bg_source, INVISIBLE_LC_FLOOR
+                    sample.source, INVISIBLE_LC_FLOOR
                 ),
             )
         } else {
@@ -276,35 +285,91 @@ fn check_text_node(
                 "contrast.low",
                 format!(
                     "of fill on {} is below the WCAG 3 draft threshold (Lc {:.0})",
-                    bg_source, threshold
+                    sample.source, threshold
                 ),
             )
         };
         diagnostics.push(Diagnostic::warning(
             code,
-            format!("text '{}': APCA contrast Lc {:.1} {}", text.id, lc, detail),
+            format!(
+                "text '{}': APCA contrast Lc {:.1} {}",
+                text.id, sample.lc, detail
+            ),
             text.source_span,
             Some(text.id.clone()),
         ));
     }
 }
 
-fn backdrop_rgb(
-    text_bbox: RectPx,
+fn collect_backdrop_samples(
+    text_box: RectPx,
     clip: Option<RectPx>,
     candidates: &[BackdropCandidate],
-) -> Option<(u8, u8, u8)> {
+    page_bg_rgb: Option<(u8, u8, u8)>,
+) -> Vec<SampledBackdrop> {
+    let mut backdrops = Vec::with_capacity(5);
     if let Some(clip) = clip
-        && !clip.contains_rect(text_bbox)
+        && !clip.contains_rect(text_box)
     {
-        return None;
+        return backdrops;
     }
-    for candidate in candidates.iter().rev() {
-        if candidate.shape.contains_rect(candidate.bounds, text_bbox) {
-            return Some(candidate.rgb);
+    for (x, y) in text_box.sample_points() {
+        let mut sampled = None;
+        for candidate in candidates.iter().rev() {
+            if candidate.shape.contains_point(candidate.bounds, x, y) {
+                sampled = Some(SampledBackdrop {
+                    rgb: candidate.rgb,
+                    source: "backdrop",
+                });
+                break;
+            }
+        }
+        let sampled = sampled.or_else(|| {
+            page_bg_rgb.map(|rgb| SampledBackdrop {
+                rgb,
+                source: "page background",
+            })
+        });
+        if let Some(sampled) = sampled
+            && !backdrops
+                .iter()
+                .any(|backdrop| backdrop.rgb == sampled.rgb && backdrop.source == sampled.source)
+        {
+            backdrops.push(sampled);
         }
     }
-    None
+    backdrops
+}
+
+fn select_contrast_sample(
+    fg_rgb: (u8, u8, u8),
+    hint_rgb: Option<(u8, u8, u8)>,
+    sampled_backdrops: &[SampledBackdrop],
+    page_bg_rgb: Option<(u8, u8, u8)>,
+) -> Option<ContrastSample> {
+    if let Some(rgb) = hint_rgb {
+        return Some(ContrastSample {
+            lc: apca_lc(fg_rgb, rgb).abs(),
+            source: "contrast-bg hint",
+        });
+    }
+    if !sampled_backdrops.is_empty() {
+        let mut worst: Option<ContrastSample> = None;
+        for backdrop in sampled_backdrops {
+            let sample = ContrastSample {
+                lc: apca_lc(fg_rgb, backdrop.rgb).abs(),
+                source: backdrop.source,
+            };
+            if worst.is_none_or(|w| sample.lc < w.lc) {
+                worst = Some(sample);
+            }
+        }
+        return worst;
+    }
+    page_bg_rgb.map(|rgb| ContrastSample {
+        lc: apca_lc(fg_rgb, rgb).abs(),
+        source: "page background",
+    })
 }
 
 fn check_table_text_contrast(

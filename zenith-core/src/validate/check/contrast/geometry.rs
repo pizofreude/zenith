@@ -46,13 +46,18 @@ impl RectPx {
         }
     }
 
-    fn corners(self) -> [(f64, f64); 4] {
+    pub(super) fn sample_points(self) -> [(f64, f64); 5] {
         [
+            (self.x + self.w / 2.0, self.y + self.h / 2.0),
             (self.x, self.y),
             (self.x + self.w, self.y),
             (self.x, self.y + self.h),
             (self.x + self.w, self.y + self.h),
         ]
+    }
+
+    pub(super) fn contains_point(self, x: f64, y: f64) -> bool {
+        x >= self.x && x <= self.x + self.w && y >= self.y && y <= self.y + self.h
     }
 }
 
@@ -65,24 +70,15 @@ pub(super) enum CoverageShape {
 }
 
 impl CoverageShape {
-    pub(super) fn contains_rect(self, bounds: RectPx, subject: RectPx) -> bool {
-        if !bounds.contains_rect(subject) {
+    pub(super) fn contains_point(self, bounds: RectPx, x: f64, y: f64) -> bool {
+        if !bounds.contains_point(x, y) {
             return false;
         }
         match self {
             CoverageShape::Rect => true,
-            CoverageShape::Ellipse => subject
-                .corners()
-                .into_iter()
-                .all(|(x, y)| point_in_ellipse(bounds, x, y)),
-            CoverageShape::Diamond => subject
-                .corners()
-                .into_iter()
-                .all(|(x, y)| point_in_diamond(bounds, x, y)),
-            CoverageShape::Capsule => subject
-                .corners()
-                .into_iter()
-                .all(|(x, y)| point_in_capsule(bounds, x, y)),
+            CoverageShape::Ellipse => point_in_ellipse(bounds, x, y),
+            CoverageShape::Diamond => point_in_diamond(bounds, x, y),
+            CoverageShape::Capsule => point_in_capsule(bounds, x, y),
         }
     }
 }

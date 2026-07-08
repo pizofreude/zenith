@@ -603,6 +603,31 @@ fn decision_shape_can_be_text_backdrop() {
     );
 }
 
+#[test]
+fn text_straddling_backdrop_uses_worst_sample() {
+    let doc = doc_with(
+        vec![
+            color_token_hex("color.page", "#ffffff"),
+            color_token_hex("color.backdrop", "#003087"),
+            color_token_hex("color.text", "#000000"),
+        ],
+        vec![page_with_bg(
+            "page.one",
+            "color.page",
+            vec![
+                rect_backdrop_at("backdrop", "color.backdrop", 100.0, 100.0, 120.0, 80.0),
+                text_at("headline", "color.text", 180.0, 120.0, 100.0, 30.0),
+            ],
+        )],
+    );
+    let report = validate(&doc);
+    assert!(
+        has_code(&report, "contrast.invisible"),
+        "text partly over the dark backdrop should use the worst sampled backdrop; codes: {:?}",
+        codes(&report)
+    );
+}
+
 /// Text node with no fill → no contrast check → no warning.
 #[test]
 fn text_without_fill_skips_contrast_check() {
