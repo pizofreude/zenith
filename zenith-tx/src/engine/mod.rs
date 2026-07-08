@@ -14,6 +14,8 @@ mod asset;
 mod flags;
 mod geometry;
 mod path;
+mod path_anchor;
+mod path_contour;
 mod path_handle;
 mod path_snap;
 mod path_symmetry;
@@ -30,10 +32,10 @@ use geometry::{
     apply_set_geometry,
 };
 use path::{
-    apply_insert_path_anchor, apply_insert_path_anchor_at_point, apply_move_path_anchor,
-    apply_set_path_anchor_kind, apply_set_path_anchors, apply_simplify_path_anchors,
-    apply_transform_path_anchors,
+    apply_insert_path_anchor, apply_insert_path_anchor_at_point, apply_set_path_anchor_kind,
+    apply_set_path_anchors, apply_simplify_path_anchors, apply_transform_path_anchors,
 };
+use path_anchor::{MovePathAnchorArgs, apply_move_path_anchor};
 use path_handle::{MovePathHandleArgs, apply_move_path_handle};
 use path_snap::apply_snap_path_anchors;
 use path_symmetry::{MakePathSymmetricArgs, apply_make_path_symmetric};
@@ -237,11 +239,13 @@ fn apply_op(
         }
         Op::SetPathAnchorKind {
             node: node_id,
+            subpath_index,
             anchor_index,
             kind,
         } => {
             apply_set_path_anchor_kind(
                 node_id,
+                *subpath_index,
                 *anchor_index,
                 kind.as_deref(),
                 doc,
@@ -251,10 +255,19 @@ fn apply_op(
         }
         Op::InsertPathAnchor {
             node: node_id,
+            subpath_index,
             segment_index,
             t,
         } => {
-            apply_insert_path_anchor(node_id, *segment_index, *t, doc, diagnostics, affected);
+            apply_insert_path_anchor(
+                node_id,
+                *subpath_index,
+                *segment_index,
+                *t,
+                doc,
+                diagnostics,
+                affected,
+            );
         }
         Op::InsertPathAnchorAtPoint {
             node: node_id,
@@ -274,14 +287,27 @@ fn apply_op(
         }
         Op::MovePathAnchor {
             node: node_id,
+            subpath_index,
             anchor_index,
             dx,
             dy,
         } => {
-            apply_move_path_anchor(node_id, *anchor_index, *dx, *dy, doc, diagnostics, affected);
+            apply_move_path_anchor(
+                MovePathAnchorArgs {
+                    node_id,
+                    subpath_index: *subpath_index,
+                    anchor_index: *anchor_index,
+                    dx: *dx,
+                    dy: *dy,
+                },
+                doc,
+                diagnostics,
+                affected,
+            );
         }
         Op::MovePathHandle {
             node: node_id,
+            subpath_index,
             anchor_index,
             handle,
             dx,
@@ -290,6 +316,7 @@ fn apply_op(
             apply_move_path_handle(
                 MovePathHandleArgs {
                     node_id,
+                    subpath_index: *subpath_index,
                     anchor_index: *anchor_index,
                     handle: *handle,
                     dx: *dx,

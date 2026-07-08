@@ -6,6 +6,7 @@ fn set_path_anchor_kind_sets_metadata_without_moving_anchor() {
     let tx = Transaction {
         ops: vec![Op::SetPathAnchorKind {
             node: "path1".to_owned(),
+            subpath_index: None,
             anchor_index: 1,
             kind: Some("smooth".to_owned()),
         }],
@@ -32,6 +33,7 @@ fn set_path_anchor_kind_clears_existing_metadata_without_moving_anchor() {
     let tx = Transaction {
         ops: vec![Op::SetPathAnchorKind {
             node: "path1".to_owned(),
+            subpath_index: None,
             anchor_index: 1,
             kind: None,
         }],
@@ -52,11 +54,40 @@ fn set_path_anchor_kind_clears_existing_metadata_without_moving_anchor() {
 }
 
 #[test]
+fn set_path_anchor_kind_targets_compound_subpath() {
+    let doc = parse(COMPOUND_PATH_DOC);
+    let tx = Transaction {
+        ops: vec![Op::SetPathAnchorKind {
+            node: "compound".to_owned(),
+            subpath_index: Some(1),
+            anchor_index: 1,
+            kind: Some("smooth".to_owned()),
+        }],
+        permissions: Permissions::default(),
+    };
+    let result = run_transaction(&doc, &tx).expect("run_transaction should not error");
+
+    assert_eq!(result.status, TxStatus::Accepted);
+    assert_eq!(result.affected_node_ids, vec!["compound".to_owned()]);
+    assert!(
+        anchor_line(&result.source_after, 4).contains("kind=\"smooth\""),
+        "subpath anchor kind should be updated; got:\n{}",
+        result.source_after
+    );
+    assert!(
+        !anchor_line(&result.source_after, 1).contains("kind="),
+        "first contour should remain unchanged; got:\n{}",
+        result.source_after
+    );
+}
+
+#[test]
 fn set_path_anchor_kind_preserves_unknown_future_kind_with_warning() {
     let doc = parse(PATH_DOC);
     let tx = Transaction {
         ops: vec![Op::SetPathAnchorKind {
             node: "path1".to_owned(),
+            subpath_index: None,
             anchor_index: 0,
             kind: Some("future".to_owned()),
         }],
@@ -86,6 +117,7 @@ fn set_path_anchor_kind_out_of_range_rejected_without_source_change() {
     let tx = Transaction {
         ops: vec![Op::SetPathAnchorKind {
             node: "path1".to_owned(),
+            subpath_index: None,
             anchor_index: 2,
             kind: Some("smooth".to_owned()),
         }],
@@ -125,6 +157,7 @@ fn set_path_anchor_kind_locked_path_rejected() {
     let tx = Transaction {
         ops: vec![Op::SetPathAnchorKind {
             node: "path1".to_owned(),
+            subpath_index: None,
             anchor_index: 1,
             kind: Some("smooth".to_owned()),
         }],
@@ -147,6 +180,7 @@ fn set_path_anchor_kind_unsupported_on_rect() {
     let tx = Transaction {
         ops: vec![Op::SetPathAnchorKind {
             node: "rect".to_owned(),
+            subpath_index: None,
             anchor_index: 0,
             kind: Some("smooth".to_owned()),
         }],

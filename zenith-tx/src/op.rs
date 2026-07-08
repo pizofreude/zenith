@@ -419,6 +419,9 @@ pub enum Op {
     SetPathAnchorKind {
         /// The stable node `id` to target.
         node: String,
+        /// Optional zero-based subpath index for compound paths.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        subpath_index: Option<usize>,
         /// Zero-based anchor index to update.
         anchor_index: usize,
         /// Optional authoring intent. `None`/`null` clears it.
@@ -443,6 +446,9 @@ pub enum Op {
     MovePathAnchor {
         /// The stable node `id` to target.
         node: String,
+        /// Optional zero-based subpath index for compound paths.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        subpath_index: Option<usize>,
         /// Zero-based anchor index to move.
         anchor_index: usize,
         /// X-axis translation in document pixels. Must be finite.
@@ -468,6 +474,9 @@ pub enum Op {
     MovePathHandle {
         /// The stable node `id` to target.
         node: String,
+        /// Optional zero-based subpath index for compound paths.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        subpath_index: Option<usize>,
         /// Zero-based anchor index whose handle should move.
         anchor_index: usize,
         /// Which handle on the anchor to move.
@@ -495,6 +504,9 @@ pub enum Op {
     InsertPathAnchor {
         /// The stable node `id` to target.
         node: String,
+        /// Optional zero-based subpath index for compound paths.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        subpath_index: Option<usize>,
         /// Zero-based segment index to split.
         segment_index: usize,
         /// Normalized position along the segment. Must be finite and in the range 0..=1.

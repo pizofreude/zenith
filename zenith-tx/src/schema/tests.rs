@@ -234,11 +234,13 @@ fn op_tag_strings_match_exhaustive_set() {
         },
         Op::SetPathAnchorKind {
             node: String::new(),
+            subpath_index: None,
             anchor_index: 0,
             kind: Some("smooth".into()),
         },
         Op::InsertPathAnchor {
             node: String::new(),
+            subpath_index: None,
             segment_index: 0,
             t: 0.5,
         },
@@ -250,12 +252,14 @@ fn op_tag_strings_match_exhaustive_set() {
         },
         Op::MovePathAnchor {
             node: String::new(),
+            subpath_index: None,
             anchor_index: 0,
             dx: 0.0,
             dy: 0.0,
         },
         Op::MovePathHandle {
             node: String::new(),
+            subpath_index: None,
             anchor_index: 0,
             handle: OpPathHandle::Out,
             dx: 0.0,
@@ -596,6 +600,7 @@ fn op_fields_names_match_serde_keys() {
             "set_path_anchor_kind",
             Op::SetPathAnchorKind {
                 node: "n".into(),
+                subpath_index: None,
                 anchor_index: 1,
                 kind: Some("smooth".into()),
             },
@@ -604,6 +609,7 @@ fn op_fields_names_match_serde_keys() {
             "insert_path_anchor",
             Op::InsertPathAnchor {
                 node: "n".into(),
+                subpath_index: None,
                 segment_index: 0,
                 t: 0.5,
             },
@@ -621,6 +627,7 @@ fn op_fields_names_match_serde_keys() {
             "move_path_anchor",
             Op::MovePathAnchor {
                 node: "n".into(),
+                subpath_index: None,
                 anchor_index: 0,
                 dx: 10.0,
                 dy: -4.0,
@@ -630,6 +637,7 @@ fn op_fields_names_match_serde_keys() {
             "move_path_handle",
             Op::MovePathHandle {
                 node: "n".into(),
+                subpath_index: None,
                 anchor_index: 0,
                 handle: OpPathHandle::Out,
                 dx: 10.0,

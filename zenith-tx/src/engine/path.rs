@@ -12,6 +12,7 @@ use zenith_geometry::{
 
 use crate::op::{OpPathAnchor, OpPathTransform};
 
+use super::path_contour::path_contour_mut;
 use super::{find_node_any_mut, node_kind_str, px, record_affected};
 
 const MAX_SIMPLIFY_INTERMEDIATE_POINTS: usize = 8192;
@@ -106,6 +107,7 @@ pub(super) fn apply_set_path_anchors(
 
 pub(super) fn apply_set_path_anchor_kind(
     node_id: &str,
+    subpath_index: Option<usize>,
     anchor_index: usize,
     kind: Option<&str>,
     doc: &mut Document,
@@ -118,10 +120,16 @@ pub(super) fn apply_set_path_anchor_kind(
             let node_kind = node_kind_str(node);
             match node {
                 Node::Path(path) => {
-                    if reject_compound_path(node_id, "set_path_anchor_kind", path, diagnostics) {
+                    let Some(contour) = path_contour_mut(
+                        node_id,
+                        "set_path_anchor_kind",
+                        path,
+                        subpath_index,
+                        diagnostics,
+                    ) else {
                         return;
-                    }
-                    let Some(anchor) = path.anchors.get_mut(anchor_index) else {
+                    };
+                    let Some(anchor) = contour.anchors.get_mut(anchor_index) else {
                         diagnostics.push(Diagnostic::error(
                             "tx.out_of_range",
                             format!(
@@ -228,6 +236,7 @@ pub(super) fn apply_simplify_path_anchors(
 
 pub(super) fn apply_insert_path_anchor(
     node_id: &str,
+    subpath_index: Option<usize>,
     segment_index: usize,
     t: f64,
     doc: &mut Document,
@@ -240,24 +249,27 @@ pub(super) fn apply_insert_path_anchor(
             let kind = node_kind_str(node);
             match node {
                 Node::Path(path) => {
-                    if reject_compound_path(node_id, "insert_path_anchor", path, diagnostics) {
-                        return;
-                    }
-                    let geometry = match resolved_path_geometry(
+                    let Some(contour) = path_contour_mut(
                         node_id,
-                        &path.anchors,
-                        path.closed == Some(true),
-                    ) {
-                        Ok(geometry) => geometry,
-                        Err(diagnostic) => {
-                            diagnostics.push(diagnostic);
-                            return;
-                        }
+                        "insert_path_anchor",
+                        path,
+                        subpath_index,
+                        diagnostics,
+                    ) else {
+                        return;
                     };
-                    path.anchors = match split_geometry_anchors(
+                    let geometry =
+                        match resolved_path_geometry(node_id, contour.anchors, contour.closed) {
+                            Ok(geometry) => geometry,
+                            Err(diagnostic) => {
+                                diagnostics.push(diagnostic);
+                                return;
+                            }
+                        };
+                    *contour.anchors = match split_geometry_anchors(
                         node_id,
                         &geometry,
-                        &path.anchors,
+                        contour.anchors,
                         segment_index,
                         t,
                     ) {
@@ -371,166 +383,6 @@ pub(super) fn apply_insert_path_anchor_at_point(
                             "insert_path_anchor_at_point is not supported on a {} node",
                             kind
                         ),
-                        None,
-                        Some(node_id.to_owned()),
-                    ));
-                }
-            }
-        }
-    }
-}
-
-pub(super) fn apply_move_path_anchor(
-    node_id: &str,
-    anchor_index: usize,
-    dx: f64,
-    dy: f64,
-    doc: &mut Document,
-    diagnostics: &mut Vec<Diagnostic>,
-    affected: &mut Vec<String>,
-) {
-    match find_node_any_mut(doc, node_id) {
-        None => diagnostics.push(unknown_node(node_id)),
-        Some(node) => {
-            let kind = node_kind_str(node);
-            match node {
-                Node::Path(path) => {
-                    if reject_compound_path(node_id, "move_path_anchor", path, diagnostics) {
-                        return;
-                    }
-                    if !dx.is_finite() || !dy.is_finite() {
-                        diagnostics.push(Diagnostic::error(
-                            "tx.invalid_geometry",
-                            "move_path_anchor dx and dy must be finite",
-                            None,
-                            Some(node_id.to_owned()),
-                        ));
-                        return;
-                    }
-
-                    let Some(anchor) = path.anchors.get(anchor_index) else {
-                        diagnostics.push(Diagnostic::error(
-                            "tx.out_of_range",
-                            format!(
-                                "anchor_index {anchor_index} is out of range for path '{node_id}'"
-                            ),
-                            None,
-                            Some(node_id.to_owned()),
-                        ));
-                        return;
-                    };
-
-                    let x = match anchor_coordinate(node_id, &anchor.x, "x") {
-                        Ok(Some(x)) => x,
-                        Ok(None) => {
-                            diagnostics.push(invalid_anchor(
-                                node_id,
-                                "path anchor is missing required x coordinate",
-                            ));
-                            return;
-                        }
-                        Err(diagnostic) => {
-                            diagnostics.push(diagnostic);
-                            return;
-                        }
-                    };
-                    let y = match anchor_coordinate(node_id, &anchor.y, "y") {
-                        Ok(Some(y)) => y,
-                        Ok(None) => {
-                            diagnostics.push(invalid_anchor(
-                                node_id,
-                                "path anchor is missing required y coordinate",
-                            ));
-                            return;
-                        }
-                        Err(diagnostic) => {
-                            diagnostics.push(diagnostic);
-                            return;
-                        }
-                    };
-                    if let Err(error) = Point2::new(x, y) {
-                        diagnostics.push(move_anchor_geometry_diagnostic(node_id, error));
-                        return;
-                    }
-                    let in_handle = match optional_handle(node_id, &anchor.in_x, &anchor.in_y, "in")
-                    {
-                        Ok(handle) => handle,
-                        Err(diagnostic) => {
-                            diagnostics.push(diagnostic);
-                            return;
-                        }
-                    };
-                    let out_handle =
-                        match optional_handle(node_id, &anchor.out_x, &anchor.out_y, "out") {
-                            Ok(handle) => handle,
-                            Err(diagnostic) => {
-                                diagnostics.push(diagnostic);
-                                return;
-                            }
-                        };
-
-                    let moved_x = x + dx;
-                    let moved_y = y + dy;
-                    if let Err(error) = Point2::new(moved_x, moved_y) {
-                        diagnostics.push(move_anchor_geometry_diagnostic(node_id, error));
-                        return;
-                    }
-                    let moved_in_handle = match in_handle {
-                        Some(point) => {
-                            let moved = Point2::new(point.x + dx, point.y + dy);
-                            match moved {
-                                Ok(point) => Some(point),
-                                Err(error) => {
-                                    diagnostics
-                                        .push(move_anchor_geometry_diagnostic(node_id, error));
-                                    return;
-                                }
-                            }
-                        }
-                        None => None,
-                    };
-                    let moved_out_handle = match out_handle {
-                        Some(point) => {
-                            let moved = Point2::new(point.x + dx, point.y + dy);
-                            match moved {
-                                Ok(point) => Some(point),
-                                Err(error) => {
-                                    diagnostics
-                                        .push(move_anchor_geometry_diagnostic(node_id, error));
-                                    return;
-                                }
-                            }
-                        }
-                        None => None,
-                    };
-
-                    let Some(anchor) = path.anchors.get_mut(anchor_index) else {
-                        diagnostics.push(Diagnostic::error(
-                            "tx.out_of_range",
-                            format!(
-                                "anchor_index {anchor_index} is out of range for path '{node_id}'"
-                            ),
-                            None,
-                            Some(node_id.to_owned()),
-                        ));
-                        return;
-                    };
-                    anchor.x = Some(px(moved_x));
-                    anchor.y = Some(px(moved_y));
-                    if let Some(point) = moved_in_handle {
-                        anchor.in_x = Some(px(point.x));
-                        anchor.in_y = Some(px(point.y));
-                    }
-                    if let Some(point) = moved_out_handle {
-                        anchor.out_x = Some(px(point.x));
-                        anchor.out_y = Some(px(point.y));
-                    }
-                    record_affected(node_id, affected);
-                }
-                non_path_nodes!() => {
-                    diagnostics.push(Diagnostic::error(
-                        "tx.unsupported_property",
-                        format!("move_path_anchor is not supported on a {} node", kind),
                         None,
                         Some(node_id.to_owned()),
                     ));
@@ -960,29 +812,6 @@ fn insert_at_point_geometry_diagnostic(node_id: &str, error: GeometryError) -> D
             Some(node_id.to_owned()),
         ),
     }
-}
-
-fn move_anchor_geometry_diagnostic(node_id: &str, error: GeometryError) -> Diagnostic {
-    let message = match error {
-        GeometryError::NonFinitePoint => "move_path_anchor path coordinates must be finite",
-        GeometryError::NonFiniteParameter
-        | GeometryError::ParameterOutOfRange
-        | GeometryError::NonFiniteTolerance
-        | GeometryError::NonPositiveTolerance
-        | GeometryError::NonPositiveCount
-        | GeometryError::CountOutOfRange
-        | GeometryError::DegenerateLine
-        | GeometryError::InvalidContour
-        | GeometryError::NonFiniteTransform
-        | GeometryError::SingularTransform => "move_path_anchor geometry is invalid",
-    };
-
-    Diagnostic::error(
-        "tx.invalid_geometry",
-        message,
-        None,
-        Some(node_id.to_owned()),
-    )
 }
 
 pub(super) fn invalid_anchor(node_id: &str, message: &str) -> Diagnostic {

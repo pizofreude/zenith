@@ -7,9 +7,8 @@ use zenith_geometry::{GeometryError, Point2};
 
 use crate::op::OpPathHandle;
 
-use super::path::{
-    anchor_coordinate, invalid_anchor, optional_handle, reject_compound_path, unknown_node,
-};
+use super::path::{anchor_coordinate, invalid_anchor, optional_handle, unknown_node};
+use super::path_contour::path_contour_mut;
 use super::{find_node_any_mut, node_kind_str, px, record_affected};
 
 #[derive(Debug, Clone, Copy)]
@@ -21,6 +20,7 @@ struct HandleReplacements {
 #[derive(Debug, Clone, Copy)]
 pub(super) struct MovePathHandleArgs<'a> {
     pub(super) node_id: &'a str,
+    pub(super) subpath_index: Option<usize>,
     pub(super) anchor_index: usize,
     pub(super) handle: OpPathHandle,
     pub(super) dx: f64,
@@ -35,6 +35,7 @@ pub(super) fn apply_move_path_handle(
 ) {
     let MovePathHandleArgs {
         node_id,
+        subpath_index,
         anchor_index,
         handle,
         dx,
@@ -47,9 +48,15 @@ pub(super) fn apply_move_path_handle(
             let kind = node_kind_str(node);
             match node {
                 Node::Path(path) => {
-                    if reject_compound_path(node_id, "move_path_handle", path, diagnostics) {
+                    let Some(contour) = path_contour_mut(
+                        node_id,
+                        "move_path_handle",
+                        path,
+                        subpath_index,
+                        diagnostics,
+                    ) else {
                         return;
-                    }
+                    };
                     if !dx.is_finite() || !dy.is_finite() {
                         diagnostics.push(Diagnostic::error(
                             "tx.invalid_geometry",
@@ -60,7 +67,7 @@ pub(super) fn apply_move_path_handle(
                         return;
                     }
 
-                    let Some(anchor) = path.anchors.get(anchor_index) else {
+                    let Some(anchor) = contour.anchors.get(anchor_index) else {
                         diagnostics.push(out_of_range(node_id, anchor_index));
                         return;
                     };
@@ -74,7 +81,7 @@ pub(super) fn apply_move_path_handle(
                             }
                         };
 
-                    let Some(anchor) = path.anchors.get_mut(anchor_index) else {
+                    let Some(anchor) = contour.anchors.get_mut(anchor_index) else {
                         diagnostics.push(out_of_range(node_id, anchor_index));
                         return;
                     };

@@ -22,6 +22,7 @@ fn move_path_handle_corner_and_none_move_only_selected_handle() {
         ops: vec![
             Op::MovePathHandle {
                 node: "path1".to_owned(),
+                subpath_index: None,
                 anchor_index: 0,
                 handle: OpPathHandle::Out,
                 dx: 3.0,
@@ -29,6 +30,7 @@ fn move_path_handle_corner_and_none_move_only_selected_handle() {
             },
             Op::MovePathHandle {
                 node: "path1".to_owned(),
+                subpath_index: None,
                 anchor_index: 1,
                 handle: OpPathHandle::In,
                 dx: -5.0,
@@ -75,6 +77,7 @@ fn move_path_handle_smooth_rotates_opposite_preserving_old_length() {
     let tx = Transaction {
         ops: vec![Op::MovePathHandle {
             node: "path1".to_owned(),
+            subpath_index: None,
             anchor_index: 0,
             handle: OpPathHandle::Out,
             dx: 0.0,
@@ -119,6 +122,7 @@ fn move_path_handle_symmetric_mirrors_opposite_equal_length() {
     let tx = Transaction {
         ops: vec![Op::MovePathHandle {
             node: "path1".to_owned(),
+            subpath_index: None,
             anchor_index: 0,
             handle: OpPathHandle::Out,
             dx: 0.0,
@@ -133,6 +137,50 @@ fn move_path_handle_symmetric_mirrors_opposite_equal_length() {
     assert_px_close(anchor_px_attr(&result.source_after, 0, "out-y"), 20.0);
     assert_px_close(anchor_px_attr(&result.source_after, 0, "in-x"), 0.0);
     assert_px_close(anchor_px_attr(&result.source_after, 0, "in-y"), 0.0);
+}
+
+#[test]
+fn move_path_handle_targets_compound_subpath() {
+    let doc = parse(
+        r##"zenith version=1 {
+  project id="proj" name="Test"
+  tokens format="zenith-token-v1" { }
+  styles { }
+  document id="doc1" title="T" {
+    page id="pg1" w=(px)400 h=(px)300 {
+      path id="compound" {
+        subpath closed=#true {
+          anchor x=(px)0 y=(px)0
+          anchor x=(px)100 y=(px)0
+          anchor x=(px)100 y=(px)100
+        }
+        subpath {
+          anchor x=(px)10 y=(px)10 kind="corner" out-x=(px)20 out-y=(px)10
+          anchor x=(px)40 y=(px)10
+        }
+      }
+    }
+  }
+}"##,
+    );
+    let tx = Transaction {
+        ops: vec![Op::MovePathHandle {
+            node: "compound".to_owned(),
+            subpath_index: Some(1),
+            anchor_index: 0,
+            handle: OpPathHandle::Out,
+            dx: 3.0,
+            dy: -4.0,
+        }],
+        permissions: Permissions::default(),
+    };
+    let result = run_transaction(&doc, &tx).expect("run_transaction should not error");
+
+    assert_eq!(result.status, TxStatus::Accepted);
+    assert_eq!(result.affected_node_ids, vec!["compound".to_owned()]);
+    assert_px_close(anchor_px_attr(&result.source_after, 0, "x"), 0.0);
+    assert_px_close(anchor_px_attr(&result.source_after, 3, "out-x"), 23.0);
+    assert_px_close(anchor_px_attr(&result.source_after, 3, "out-y"), 6.0);
 }
 
 #[test]
@@ -155,6 +203,7 @@ fn move_path_handle_smooth_landing_on_anchor_rejected_without_source_change() {
     let tx = Transaction {
         ops: vec![Op::MovePathHandle {
             node: "path1".to_owned(),
+            subpath_index: None,
             anchor_index: 0,
             handle: OpPathHandle::Out,
             dx: -10.0,
@@ -181,6 +230,7 @@ fn move_path_handle_missing_target_handle_rejected_without_source_change() {
     let tx = Transaction {
         ops: vec![Op::MovePathHandle {
             node: "path1".to_owned(),
+            subpath_index: None,
             anchor_index: 0,
             handle: OpPathHandle::Out,
             dx: 1.0,
@@ -208,6 +258,7 @@ fn move_path_handle_out_of_range_rejected_without_source_change() {
     let tx = Transaction {
         ops: vec![Op::MovePathHandle {
             node: "path1".to_owned(),
+            subpath_index: None,
             anchor_index: 2,
             handle: OpPathHandle::Out,
             dx: 1.0,
@@ -249,6 +300,7 @@ fn move_path_handle_non_finite_delta_rejected_without_source_change() {
     let tx = Transaction {
         ops: vec![Op::MovePathHandle {
             node: "path1".to_owned(),
+            subpath_index: None,
             anchor_index: 0,
             handle: OpPathHandle::Out,
             dx: f64::NAN,
@@ -292,6 +344,7 @@ fn move_path_handle_non_px_target_or_opposite_handle_rejected() {
         &Transaction {
             ops: vec![Op::MovePathHandle {
                 node: "path1".to_owned(),
+                subpath_index: None,
                 anchor_index: 0,
                 handle: OpPathHandle::Out,
                 dx: 1.0,
@@ -332,6 +385,7 @@ fn move_path_handle_non_px_target_or_opposite_handle_rejected() {
         &Transaction {
             ops: vec![Op::MovePathHandle {
                 node: "path1".to_owned(),
+                subpath_index: None,
                 anchor_index: 0,
                 handle: OpPathHandle::Out,
                 dx: 1.0,
@@ -375,6 +429,7 @@ fn move_path_handle_locked_path_and_unsupported_rect_reject() {
         &Transaction {
             ops: vec![Op::MovePathHandle {
                 node: "path1".to_owned(),
+                subpath_index: None,
                 anchor_index: 0,
                 handle: OpPathHandle::Out,
                 dx: 1.0,
@@ -401,6 +456,7 @@ fn move_path_handle_locked_path_and_unsupported_rect_reject() {
         &Transaction {
             ops: vec![Op::MovePathHandle {
                 node: "rect".to_owned(),
+                subpath_index: None,
                 anchor_index: 0,
                 handle: OpPathHandle::Out,
                 dx: 1.0,
