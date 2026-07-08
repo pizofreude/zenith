@@ -102,6 +102,7 @@ pub fn analyze_vector_path(input: VectorPathPerceptionInput<'_>) -> VectorPathPe
         &anchor_economy.diagnostics,
         &[&tangent_quality],
     ));
+    diagnostics.extend(path_geometry_craft_diagnostics(&contours));
     diagnostics.extend(small_legibility.diagnostics.iter().cloned());
     if let Some(diagnostic) = bounds_diagnostic {
         diagnostics.push(diagnostic);
@@ -146,6 +147,7 @@ pub fn analyze_compound_vector_path(
         &anchor_economy.diagnostics,
         &tangent_quality_reports.iter().collect::<Vec<_>>(),
     ));
+    diagnostics.extend(path_geometry_craft_diagnostics(input.contours));
     diagnostics.extend(small_legibility.diagnostics.iter().cloned());
     if let Some(diagnostic) = bounds_diagnostic {
         diagnostics.push(diagnostic);
@@ -322,6 +324,52 @@ fn path_craft_diagnostics(
         ));
     }
 
+    diagnostics
+}
+
+/// Geometry-derived craftsmanship diagnostics that need the resolved cubic
+/// segments (not just the anchor/tangent summaries): extrema placement and
+/// crossing control handles. Both are read-only advisories.
+///
+/// `path.anchor_off_extrema` doubles as the "clockwork method" check — a closed
+/// contour's extrema are its 12/3/6/9 clock positions, so an interior extremum
+/// is exactly an anchor that clockwork placement would move onto an extreme.
+fn path_geometry_craft_diagnostics(
+    contours: &[VectorPathContourInput<'_>],
+) -> Vec<PerceptionDiagnostic> {
+    let mut off_extrema = false;
+    let mut handle_crossing = false;
+
+    for contour in contours {
+        let Ok(geometry) = geometry_path(contour.anchors, contour.closed) else {
+            continue;
+        };
+        let Ok(segments) = geometry.segments() else {
+            continue;
+        };
+        for segment in segments {
+            if let zenith_geometry::PathSegment::Cubic { curve } = segment {
+                off_extrema = off_extrema || curve.has_interior_extremum().unwrap_or(false);
+                handle_crossing = handle_crossing || curve.handles_cross().unwrap_or(false);
+            }
+        }
+    }
+
+    let mut diagnostics = Vec::new();
+    if off_extrema {
+        diagnostics.push(PerceptionDiagnostic::new(
+            "path.anchor_off_extrema",
+            PerceptionSeverity::Info,
+            "path reaches a curve extremum between anchors; place an anchor on the extreme point",
+        ));
+    }
+    if handle_crossing {
+        diagnostics.push(PerceptionDiagnostic::new(
+            "path.handle_crossing",
+            PerceptionSeverity::Info,
+            "path has crossing control handles that pinch the curve",
+        ));
+    }
     diagnostics
 }
 
@@ -514,6 +562,80 @@ mod tests {
                 .iter()
                 .any(|diagnostic| diagnostic.code == "path.handle_ratio_out_of_range"),
             "expected path.handle_ratio_out_of_range; got {:?}",
+            report.diagnostics
+        );
+    }
+
+    #[test]
+    fn vector_path_report_flags_anchor_off_extrema() {
+        // An open cubic segment arching in y between its anchors: p0=(0,0),
+        // out=(0,10); p1=(10,0), in=(10,10) → interior extremum, no anchor on it.
+        let anchors = [
+            anchor(0.0, 0.0, 0.0, 0.0, 0.0, 10.0),
+            anchor(10.0, 0.0, 10.0, 10.0, 0.0, 0.0),
+        ];
+
+        let report = analyze_vector_path(VectorPathPerceptionInput {
+            anchors: &anchors,
+            closed: false,
+            fill_rule: None,
+        });
+
+        assert!(
+            report
+                .diagnostics
+                .iter()
+                .any(|diagnostic| diagnostic.code == "path.anchor_off_extrema"),
+            "expected path.anchor_off_extrema; got {:?}",
+            report.diagnostics
+        );
+    }
+
+    #[test]
+    fn vector_path_report_flags_handle_crossing() {
+        // Control handles cross: p0=(0,0)->out=(10,10) and in=(0,10)->p1=(10,0)
+        // intersect near the center, pinching the curve.
+        let anchors = [
+            anchor(0.0, 0.0, 0.0, 0.0, 10.0, 10.0),
+            anchor(10.0, 0.0, 0.0, 10.0, 0.0, 0.0),
+        ];
+
+        let report = analyze_vector_path(VectorPathPerceptionInput {
+            anchors: &anchors,
+            closed: false,
+            fill_rule: None,
+        });
+
+        assert!(
+            report
+                .diagnostics
+                .iter()
+                .any(|diagnostic| diagnostic.code == "path.handle_crossing"),
+            "expected path.handle_crossing; got {:?}",
+            report.diagnostics
+        );
+    }
+
+    #[test]
+    fn clean_curve_has_no_extrema_or_crossing_diagnostics() {
+        // A gentle monotonic cubic: no interior extremum, no crossing handles.
+        let anchors = [
+            anchor(0.0, 0.0, 0.0, 0.0, 3.0, 1.0),
+            anchor(10.0, 10.0, 7.0, 9.0, 0.0, 0.0),
+        ];
+
+        let report = analyze_vector_path(VectorPathPerceptionInput {
+            anchors: &anchors,
+            closed: false,
+            fill_rule: None,
+        });
+
+        assert!(
+            !report.diagnostics.iter().any(|diagnostic| {
+                diagnostic.code == "path.anchor_off_extrema"
+                    || diagnostic.code == "path.handle_crossing"
+            }),
+            "expected no extrema/crossing diagnostics; got {:?}",
             report.diagnostics
         );
     }

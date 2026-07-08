@@ -94,6 +94,26 @@ impl CubicBezier {
         Ok(deduped)
     }
 
+    /// Whether this cubic reaches an axis-aligned extreme strictly between its
+    /// endpoints. Draftsmanship convention (Hische's "plot the extrema") places
+    /// an anchor at every N/S/E/W touch point, so an interior extremum means an
+    /// anchor is missing there.
+    pub fn has_interior_extremum(self) -> Result<bool, GeometryError> {
+        Ok(!self.extrema()?.is_empty())
+    }
+
+    /// Whether the two control handles of this segment cross each other — the
+    /// out-handle segment `p0→p1` intersecting the in-handle segment `p2→p3`.
+    /// A crossing control polygon produces a pinch/kink. Degenerate (zero-length)
+    /// handles cannot cross and report `false`.
+    pub fn handles_cross(self) -> Result<bool, GeometryError> {
+        Self::validate_points(self.p0, self.p1, self.p2, self.p3)?;
+        if self.p0 == self.p1 || self.p2 == self.p3 {
+            return Ok(false);
+        }
+        Ok(crate::intersect_segments(self.p0, self.p1, self.p2, self.p3)?.is_some())
+    }
+
     pub fn flatten(self, tolerance: f64) -> Result<Vec<Point2>, GeometryError> {
         validate_tolerance(tolerance)?;
         Self::validate_points(self.p0, self.p1, self.p2, self.p3)?;
@@ -294,6 +314,35 @@ mod tests {
 
         assert_eq!(curve.evaluate(0.0), curve.p0);
         assert_eq!(curve.evaluate(1.0), curve.p3);
+    }
+
+    #[test]
+    fn interior_extremum_detected_for_arch_curve() {
+        // The sample arch peaks in y between the endpoints → interior extremum.
+        assert!(sample_curve().has_interior_extremum().expect("valid"));
+        // A monotonic straight (degenerate) cubic has no interior extremum.
+        let straight = CubicBezier::new_unchecked(
+            Point2::new_unchecked(0.0, 0.0),
+            Point2::new_unchecked(1.0, 1.0),
+            Point2::new_unchecked(2.0, 2.0),
+            Point2::new_unchecked(3.0, 3.0),
+        );
+        assert!(!straight.has_interior_extremum().expect("valid"));
+    }
+
+    #[test]
+    fn handles_cross_detected_for_crossed_control_polygon() {
+        // p0→p1 and p2→p3 cross (a pinch): p0=(0,0)->p1=(10,10) and
+        // p2=(0,10)->p3=(10,0) intersect near the center.
+        let crossed = CubicBezier::new_unchecked(
+            Point2::new_unchecked(0.0, 0.0),
+            Point2::new_unchecked(10.0, 10.0),
+            Point2::new_unchecked(0.0, 10.0),
+            Point2::new_unchecked(10.0, 0.0),
+        );
+        assert!(crossed.handles_cross().expect("valid"));
+        // The sample arch has non-crossing handles.
+        assert!(!sample_curve().handles_cross().expect("valid"));
     }
 
     #[test]
