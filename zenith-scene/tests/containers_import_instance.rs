@@ -14,12 +14,18 @@ fn imported_doc() -> common::Document {
     token id="color.alt" type="color" value="#00ff00"
   }
   styles {}
+  assets {
+    asset id="logo" kind="image" src="logo.png"
+  }
   components {
     component id="component.card" {
       rect id="bg" x=(px)0 y=(px)0 w=(px)40 h=(px)20 fill=(token)"color.brand"
     }
     component id="component.alt" {
       rect id="bg" x=(px)0 y=(px)0 w=(px)30 h=(px)10 fill=(token)"color.alt"
+    }
+    component id="component.image" {
+      image id="img" asset="logo" x=(px)0 y=(px)0 w=(px)10 h=(px)10
     }
   }
   document id="doc.imported" title="Imported" {
@@ -114,6 +120,45 @@ fn diagnostic_codes(result: &zenith_scene::CompileResult) -> Vec<&str> {
         .collect()
 }
 
+fn image_asset_ids(result: &zenith_scene::CompileResult) -> Vec<&str> {
+    result
+        .scene
+        .commands
+        .iter()
+        .filter_map(|command| match command {
+            SceneCommand::DrawImage { asset_id, .. } => Some(asset_id.as_str()),
+            SceneCommand::FillRect { .. }
+            | SceneCommand::StrokeRect { .. }
+            | SceneCommand::FillRoundedRect { .. }
+            | SceneCommand::StrokeRoundedRect { .. }
+            | SceneCommand::FillEllipse { .. }
+            | SceneCommand::StrokeEllipse { .. }
+            | SceneCommand::StrokeLine { .. }
+            | SceneCommand::FillPolygon { .. }
+            | SceneCommand::StrokePolyline { .. }
+            | SceneCommand::FillPath { .. }
+            | SceneCommand::StrokePath { .. }
+            | SceneCommand::DrawSvgAsset { .. }
+            | SceneCommand::DrawGlyphRun { .. }
+            | SceneCommand::PushClip { .. }
+            | SceneCommand::PopClip
+            | SceneCommand::PushLayer { .. }
+            | SceneCommand::PopLayer
+            | SceneCommand::PushTransform { .. }
+            | SceneCommand::PushScaleTranslate { .. }
+            | SceneCommand::PopTransform
+            | SceneCommand::BeginShadow { .. }
+            | SceneCommand::EndShadow
+            | SceneCommand::BeginBlur { .. }
+            | SceneCommand::EndBlur
+            | SceneCommand::BeginFilter { .. }
+            | SceneCommand::EndFilter
+            | SceneCommand::BeginMask { .. }
+            | SceneCommand::EndMask => None,
+        })
+        .collect()
+}
+
 #[test]
 fn imported_instance_expands_component_from_in_memory_graph() {
     let host = host_doc("library#component.component.card");
@@ -152,6 +197,18 @@ fn imported_component_uses_imported_tokens_not_host_tokens() {
 
     let fills = fill_rects(&result);
     assert_eq!(fills, vec![(5.0, 7.0, 40.0, 20.0, (0, 0, 255))]);
+}
+
+#[test]
+fn imported_component_namespaces_asset_ids() {
+    let host = host_doc("library#component.component.image");
+    let imported = imported_doc();
+    let imports = ImportGraph::new().with_document("library", &imported);
+
+    let result = compile_page_with_imports(&host, &default_provider(), 0, None, &imports);
+
+    assert_eq!(diagnostic_codes(&result), Vec::<&str>::new());
+    assert_eq!(image_asset_ids(&result), vec!["library/logo"]);
 }
 
 #[test]

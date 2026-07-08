@@ -21,6 +21,23 @@ fn imported_doc(page_w: f64, page_h: f64) -> common::Document {
     ))
 }
 
+fn imported_doc_with_image() -> common::Document {
+    parse(
+        r##"zenith version=1 {
+  project id="proj.imported" name="Imported"
+  assets {
+    asset id="logo" kind="image" src="logo.png"
+  }
+  document id="doc.imported" title="Imported" {
+    page id="page.imported" w=(px)100 h=(px)100 {
+      image id="logo.node" asset="logo" x=(px)0 y=(px)0 w=(px)20 h=(px)20
+    }
+  }
+}
+"##,
+    )
+}
+
 fn host_doc(source: &str, fit: Option<&str>, page_w: f64, page_h: f64) -> common::Document {
     let fit_attr = fit.map_or(String::new(), |value| format!(r#" fit="{value}""#));
     parse(&format!(
@@ -129,6 +146,45 @@ fn scale_translate_commands(result: &zenith_scene::CompileResult) -> Vec<(f64, f
         .collect()
 }
 
+fn image_asset_ids(result: &zenith_scene::CompileResult) -> Vec<&str> {
+    result
+        .scene
+        .commands
+        .iter()
+        .filter_map(|command| match command {
+            SceneCommand::DrawImage { asset_id, .. } => Some(asset_id.as_str()),
+            SceneCommand::FillRect { .. }
+            | SceneCommand::StrokeRect { .. }
+            | SceneCommand::FillRoundedRect { .. }
+            | SceneCommand::StrokeRoundedRect { .. }
+            | SceneCommand::FillEllipse { .. }
+            | SceneCommand::StrokeEllipse { .. }
+            | SceneCommand::StrokeLine { .. }
+            | SceneCommand::FillPolygon { .. }
+            | SceneCommand::StrokePolyline { .. }
+            | SceneCommand::FillPath { .. }
+            | SceneCommand::StrokePath { .. }
+            | SceneCommand::DrawSvgAsset { .. }
+            | SceneCommand::DrawGlyphRun { .. }
+            | SceneCommand::PushClip { .. }
+            | SceneCommand::PopClip
+            | SceneCommand::PushLayer { .. }
+            | SceneCommand::PopLayer
+            | SceneCommand::PushTransform { .. }
+            | SceneCommand::PushScaleTranslate { .. }
+            | SceneCommand::PopTransform
+            | SceneCommand::BeginShadow { .. }
+            | SceneCommand::EndShadow
+            | SceneCommand::BeginBlur { .. }
+            | SceneCommand::EndBlur
+            | SceneCommand::BeginFilter { .. }
+            | SceneCommand::EndFilter
+            | SceneCommand::BeginMask { .. }
+            | SceneCommand::EndMask => None,
+        })
+        .collect()
+}
+
 #[test]
 fn page_source_imports_same_size_page_as_native_scene_content() {
     let host = host_doc("library#page.page.imported", None, 100.0, 80.0);
@@ -173,6 +229,18 @@ fn page_source_fill_scales_imported_page_to_host_page() {
         scale_translate_commands(&result),
         vec![(2.0, 1.0, 0.0, 0.0)]
     );
+}
+
+#[test]
+fn page_source_namespaces_imported_asset_ids() {
+    let host = host_doc("library#page.page.imported", None, 100.0, 100.0);
+    let imported = imported_doc_with_image();
+    let imports = ImportGraph::new().with_document("library", &imported);
+
+    let result = compile_page_with_imports(&host, &default_provider(), 0, None, &imports);
+
+    assert_eq!(diagnostic_codes(&result), Vec::<&str>::new());
+    assert_eq!(image_asset_ids(&result), vec!["library/logo"]);
 }
 
 #[test]

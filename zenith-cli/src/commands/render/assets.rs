@@ -13,6 +13,8 @@ use zenith_core::{
 
 use crate::commands::fonts::os_font_dirs;
 
+use crate::commands::composition_imports::LoadedImportGraph;
+
 use super::entry::RenderCmdErr;
 use super::pipeline::verify_locked_sha256;
 
@@ -198,6 +200,37 @@ pub(crate) fn build_asset_provider(
     locked: bool,
 ) -> Result<BytesAssetProvider, RenderCmdErr> {
     let mut provider = BytesAssetProvider::new();
+    register_document_assets(&mut provider, doc, "", project_dir, locked)?;
+    Ok(provider)
+}
+
+pub(crate) fn build_asset_provider_with_imports(
+    doc: &Document,
+    project_dir: &Path,
+    imports: &LoadedImportGraph,
+    locked: bool,
+) -> Result<BytesAssetProvider, RenderCmdErr> {
+    let mut provider = BytesAssetProvider::new();
+    register_document_assets(&mut provider, doc, "", project_dir, locked)?;
+    for (import_id, imported, dir) in imports.documents_with_dirs() {
+        register_document_assets(
+            &mut provider,
+            imported,
+            &format!("{import_id}/"),
+            dir,
+            locked,
+        )?;
+    }
+    Ok(provider)
+}
+
+fn register_document_assets(
+    provider: &mut BytesAssetProvider,
+    doc: &Document,
+    id_prefix: &str,
+    project_dir: &Path,
+    locked: bool,
+) -> Result<(), RenderCmdErr> {
     for decl in &doc.assets.assets {
         if !matches!(decl.kind, AssetKind::Image | AssetKind::Svg) {
             continue;
@@ -227,9 +260,13 @@ pub(crate) fn build_asset_provider(
             verify_locked_sha256(&decl.id, "asset", decl.sha256.as_deref(), &bytes)?;
         }
 
-        provider.register(&decl.id, decl.kind.clone(), bytes.into());
+        provider.register(
+            &format!("{id_prefix}{}", decl.id),
+            decl.kind.clone(),
+            bytes.into(),
+        );
     }
-    Ok(provider)
+    Ok(())
 }
 
 /// Collect a hard `asset.missing` diagnostic for every declared asset whose
@@ -445,5 +482,63 @@ fn check_image(img: &ImageNode, doc: &Document, project_dir: &Path, out: &mut Ve
             img.source_span,
             Some(img.id.clone()),
         ));
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use zenith_core::{AssetProvider, KdlAdapter, KdlSource};
+
+    use crate::commands::composition_imports::load_import_graph;
+
+    use super::*;
+
+    fn parse(src: &str) -> Document {
+        KdlAdapter
+            .parse(src.as_bytes())
+            .expect("test document must parse")
+    }
+
+    #[test]
+    fn build_asset_provider_registers_imported_assets_from_import_directory() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        std::fs::create_dir(dir.path().join("brand")).expect("create brand dir");
+        std::fs::write(dir.path().join("brand/logo.bin"), b"imported-logo")
+            .expect("write imported asset");
+        std::fs::write(
+            dir.path().join("brand/brand.zen"),
+            r#"zenith version=1 {
+  project id="proj.brand" name="Brand"
+  assets {
+    asset id="logo" kind="image" src="logo.bin"
+  }
+  document id="doc.brand" title="Brand" {
+    page id="page.brand" w=(px)10 h=(px)10
+  }
+}
+"#,
+        )
+        .expect("write imported document");
+        let root = parse(
+            r#"zenith version=1 {
+  project id="proj.host" name="Host"
+  imports {
+    import id="brand" kind="zen" src="brand/brand.zen"
+  }
+  document id="doc.host" title="Host" {
+    page id="page.host" w=(px)10 h=(px)10
+  }
+}
+"#,
+        );
+        let imports = load_import_graph(&root, Some(dir.path()));
+
+        let provider = build_asset_provider_with_imports(&root, dir.path(), &imports, false)
+            .expect("provider");
+
+        let asset = provider
+            .by_id("brand/logo")
+            .expect("imported asset must be registered under import namespace");
+        assert_eq!(&asset.bytes[..], b"imported-logo");
     }
 }

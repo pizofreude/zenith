@@ -10,7 +10,7 @@ use zenith_scene::{ImportGraph, Scene, append_construction_overlay, compile_page
 
 use crate::config::CliPolicyFlags;
 
-use super::assets::{build_asset_provider, build_font_provider, disk_diagnostics};
+use super::assets::{build_asset_provider_with_imports, build_font_provider, disk_diagnostics};
 use super::pipeline::{govern_compile_diagnostics, parse_validate, resolve_page_index};
 use super::text_source::resolve_text_sources;
 
@@ -264,7 +264,7 @@ pub fn to_png_with_dir_options(
     let fonts = build_font_provider(&doc, project_dir, opts.locked)?;
     let page_index = resolve_page_index(&doc, page)?;
     let assets = match project_dir {
-        Some(dir) => build_asset_provider(&doc, dir, opts.locked)?,
+        Some(dir) => build_asset_provider_with_imports(&doc, dir, &imports, opts.locked)?,
         None => BytesAssetProvider::new(),
     };
     let compile_result = compile_page_for_render(&doc, &fonts, page_index, opts, &scene_imports);
@@ -325,7 +325,7 @@ pub fn to_pdf_with_dir_options(
     let fonts = build_font_provider(&doc, project_dir, opts.locked)?;
     let page_index = resolve_page_index(&doc, page)?;
     let assets = match project_dir {
-        Some(dir) => build_asset_provider(&doc, dir, opts.locked)?,
+        Some(dir) => build_asset_provider_with_imports(&doc, dir, &imports, opts.locked)?,
         None => BytesAssetProvider::new(),
     };
     let compile_result = compile_page_for_render(&doc, &fonts, page_index, opts, &scene_imports);
@@ -399,7 +399,7 @@ pub fn to_pdf_all_pages_with_dir_options(
         return Err(RenderCmdErr::new("document has no pages to render", 2));
     }
     let assets = match project_dir {
-        Some(dir) => build_asset_provider(&doc, dir, opts.locked)?,
+        Some(dir) => build_asset_provider_with_imports(&doc, dir, &imports, opts.locked)?,
         None => BytesAssetProvider::new(),
     };
     let mut scenes: Vec<Scene> = Vec::with_capacity(page_count);
@@ -470,7 +470,7 @@ pub fn to_png_all_pages_options(
         return Err(RenderCmdErr::new("document has no pages to render", 2));
     }
     let assets = match project_dir {
-        Some(dir) => build_asset_provider(&doc, dir, opts.locked)?,
+        Some(dir) => build_asset_provider_with_imports(&doc, dir, &imports, opts.locked)?,
         None => BytesAssetProvider::new(),
     };
     let base_diagnostics: Vec<Diagnostic> = text_src_diagnostics
@@ -557,7 +557,7 @@ pub fn to_png_spread(
     let index_a = resolve_page_index(&doc, page_a)?;
     let index_b = resolve_page_index(&doc, page_b)?;
     let assets = match project_dir {
-        Some(dir) => build_asset_provider(&doc, dir, locked)?,
+        Some(dir) => build_asset_provider_with_imports(&doc, dir, &imports, locked)?,
         None => BytesAssetProvider::new(),
     };
     // Resolve gutter: CLI override wins, then doc.spread_gutter, then 0.

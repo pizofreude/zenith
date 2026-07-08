@@ -145,9 +145,12 @@ pub(in crate::compile) fn compile_page_source(
         Some(graph),
     );
     diagnostics.append(&mut imported_result.diagnostics);
-    prefix_runtime_source_ids(
+    prefix_imported_command_refs(
         &mut imported_result.scene.commands,
-        &format!("{}/{}#page.{}/", env.page.id, import_id, page_id),
+        ImportedCommandPrefixes {
+            source_node: &format!("{}/{}#page.{}/", env.page.id, import_id, page_id),
+            asset: &format!("{import_id}/"),
+        },
     );
 
     if is_identity_transform(sx, sy, tx, ty) {
@@ -235,14 +238,53 @@ fn is_identity_transform(sx: f64, sy: f64, tx: f64, ty: f64) -> bool {
     same_px(sx, 1.0) && same_px(sy, 1.0) && same_px(tx, 0.0) && same_px(ty, 0.0)
 }
 
-fn prefix_runtime_source_ids(commands: &mut [SceneCommand], prefix: &str) {
+struct ImportedCommandPrefixes<'a> {
+    source_node: &'a str,
+    asset: &'a str,
+}
+
+fn prefix_imported_command_refs(commands: &mut [SceneCommand], prefixes: ImportedCommandPrefixes) {
     for command in commands {
-        if let SceneCommand::DrawGlyphRun {
-            source_node_id: Some(id),
-            ..
-        } = command
-        {
-            *id = format!("{prefix}{id}");
+        match command {
+            SceneCommand::DrawGlyphRun {
+                source_node_id: Some(id),
+                ..
+            } => {
+                *id = format!("{}{}", prefixes.source_node, id);
+            }
+            SceneCommand::DrawImage { asset_id, .. } => {
+                *asset_id = format!("{}{}", prefixes.asset, asset_id);
+            }
+            SceneCommand::DrawSvgAsset { asset, .. } => {
+                *asset = format!("{}{}", prefixes.asset, asset);
+            }
+            SceneCommand::FillRect { .. }
+            | SceneCommand::StrokeRect { .. }
+            | SceneCommand::FillRoundedRect { .. }
+            | SceneCommand::StrokeRoundedRect { .. }
+            | SceneCommand::FillEllipse { .. }
+            | SceneCommand::StrokeEllipse { .. }
+            | SceneCommand::StrokeLine { .. }
+            | SceneCommand::FillPolygon { .. }
+            | SceneCommand::StrokePolyline { .. }
+            | SceneCommand::FillPath { .. }
+            | SceneCommand::StrokePath { .. }
+            | SceneCommand::DrawGlyphRun { .. }
+            | SceneCommand::PushClip { .. }
+            | SceneCommand::PopClip
+            | SceneCommand::PushLayer { .. }
+            | SceneCommand::PopLayer
+            | SceneCommand::PushTransform { .. }
+            | SceneCommand::PushScaleTranslate { .. }
+            | SceneCommand::PopTransform
+            | SceneCommand::BeginShadow { .. }
+            | SceneCommand::EndShadow
+            | SceneCommand::BeginBlur { .. }
+            | SceneCommand::EndBlur
+            | SceneCommand::BeginFilter { .. }
+            | SceneCommand::EndFilter
+            | SceneCommand::BeginMask { .. }
+            | SceneCommand::EndMask => {}
         }
     }
 }

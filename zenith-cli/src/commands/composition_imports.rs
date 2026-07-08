@@ -18,6 +18,7 @@ use zenith_scene::ImportGraph as SceneImportGraph;
 pub(crate) struct LoadedImportGraph {
     diagnostics: Vec<Diagnostic>,
     documents: BTreeMap<String, Document>,
+    document_dirs: BTreeMap<String, PathBuf>,
 }
 
 impl LoadedImportGraph {
@@ -39,6 +40,14 @@ impl LoadedImportGraph {
         }
         graph
     }
+
+    pub(crate) fn documents_with_dirs(&self) -> impl Iterator<Item = (&str, &Document, &Path)> {
+        self.documents.iter().filter_map(|(id, doc)| {
+            self.document_dirs
+                .get(id)
+                .map(|dir| (id.as_str(), doc, dir.as_path()))
+        })
+    }
 }
 
 /// Load every reachable `kind="zen"` composition import from `root`.
@@ -50,6 +59,7 @@ pub(crate) fn load_import_graph(root: &Document, root_dir: Option<&Path>) -> Loa
     let mut loader = ImportGraphLoader {
         diagnostics: Vec::new(),
         documents: BTreeMap::new(),
+        document_dirs: BTreeMap::new(),
         documents_by_path: BTreeMap::new(),
         stack: Vec::new(),
     };
@@ -64,6 +74,7 @@ pub(crate) fn load_import_graph(root: &Document, root_dir: Option<&Path>) -> Loa
 struct ImportGraphLoader {
     diagnostics: Vec<Diagnostic>,
     documents: BTreeMap<String, Document>,
+    document_dirs: BTreeMap<String, PathBuf>,
     documents_by_path: BTreeMap<PathBuf, CachedImportDocument>,
     stack: Vec<PathBuf>,
 }
@@ -79,6 +90,7 @@ impl ImportGraphLoader {
         LoadedImportGraph {
             diagnostics: self.diagnostics,
             documents: self.documents,
+            document_dirs: self.document_dirs,
         }
     }
 
@@ -117,6 +129,10 @@ impl ImportGraphLoader {
             let cached_document = cached.document.clone();
             self.verify_hash(import, &cached_sha256);
             self.documents.insert(import.id.clone(), cached_document);
+            if let Some(parent) = path.parent() {
+                self.document_dirs
+                    .insert(import.id.clone(), parent.to_path_buf());
+            }
             return;
         }
 
@@ -162,6 +178,7 @@ impl ImportGraphLoader {
             self.load_document_imports(&doc, next_base);
         }
         self.stack.pop();
+        let document_dir = path.parent().map(Path::to_path_buf);
         self.documents_by_path.insert(
             path,
             CachedImportDocument {
@@ -169,6 +186,9 @@ impl ImportGraphLoader {
                 sha256: actual_sha256,
             },
         );
+        if let Some(dir) = document_dir {
+            self.document_dirs.insert(import.id.clone(), dir);
+        }
         self.documents.insert(import.id.clone(), doc);
     }
 

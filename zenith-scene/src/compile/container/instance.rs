@@ -183,6 +183,7 @@ fn compile_imported_instance(
         let override_value = remap_import_override(ov, cx);
         apply_override(&mut children, &override_value);
     }
+    prefix_imported_asset_refs(&mut children, import_id);
     let prefix = format!("{}/", instance.id);
     prefix_ids_in_children(&mut children, &prefix);
 
@@ -223,6 +224,44 @@ fn invalid_import_source(instance: &InstanceNode, source: &str) -> Diagnostic {
         instance.source_span,
         Some(instance.id.clone()),
     )
+}
+
+fn prefix_imported_asset_refs(nodes: &mut [Node], import_id: &str) {
+    for node in nodes {
+        match node {
+            Node::Image(image) => {
+                image.asset = format!("{}/{}", import_id, image.asset);
+            }
+            Node::Frame(frame) => prefix_imported_asset_refs(&mut frame.children, import_id),
+            Node::Group(group) => prefix_imported_asset_refs(&mut group.children, import_id),
+            Node::Table(table) => {
+                for row in &mut table.rows {
+                    for cell in &mut row.cells {
+                        prefix_imported_asset_refs(&mut cell.children, import_id);
+                    }
+                }
+            }
+            Node::Unknown(unknown) => prefix_imported_asset_refs(&mut unknown.children, import_id),
+            Node::Rect(_)
+            | Node::Ellipse(_)
+            | Node::Line(_)
+            | Node::Text(_)
+            | Node::Code(_)
+            | Node::Polygon(_)
+            | Node::Polyline(_)
+            | Node::Path(_)
+            | Node::Instance(_)
+            | Node::Field(_)
+            | Node::Footnote(_)
+            | Node::Toc(_)
+            | Node::Shape(_)
+            | Node::Connector(_)
+            | Node::Pattern(_)
+            | Node::Chart(_)
+            | Node::Light(_)
+            | Node::Mesh(_) => {}
+        }
+    }
 }
 
 fn remap_import_override(ov: &Override, cx: NodeCtx) -> Override {
