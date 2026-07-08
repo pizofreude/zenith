@@ -124,6 +124,14 @@ pub(crate) const GROUP_KNOWN_PROPS: &[&str] = &[
     "intensity",
     "layer-priority",
     "layer_priority",
+    "symmetry-count",
+    "symmetry_count",
+    "symmetry-cx",
+    "symmetry_cx",
+    "symmetry-cy",
+    "symmetry_cy",
+    "symmetry-start-angle",
+    "symmetry_start_angle",
     "anchor",
     "anchor-zone",
     "anchor_zone",
@@ -187,6 +195,14 @@ pub(super) fn transform_group(node: &KdlNode) -> Result<GroupNode, ParseError> {
         intensity: optional_f64_prop(node, "intensity"),
         layer_priority: optional_i64_prop(node, "layer-priority")
             .or_else(|| optional_i64_prop(node, "layer_priority")),
+        symmetry_count: optional_u32_prop(node, "symmetry-count")
+            .or_else(|| optional_u32_prop(node, "symmetry_count")),
+        symmetry_cx: optional_dimension_prop(node, "symmetry-cx")
+            .or_else(|| optional_dimension_prop(node, "symmetry_cx")),
+        symmetry_cy: optional_dimension_prop(node, "symmetry-cy")
+            .or_else(|| optional_dimension_prop(node, "symmetry_cy")),
+        symmetry_start_angle: optional_dimension_prop(node, "symmetry-start-angle")
+            .or_else(|| optional_dimension_prop(node, "symmetry_start_angle")),
         children,
         protected_regions,
         editable_param_ids,

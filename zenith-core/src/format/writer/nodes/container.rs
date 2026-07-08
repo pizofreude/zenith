@@ -70,9 +70,10 @@ pub(super) fn write_group(g: &GroupNode, out: &mut String, depth: usize) {
     indent(out, depth);
     out.push_str("group");
 
-    // Canonical property order: id, name, role, anchor, anchor-zone, x, y, w, h, opacity,
-    // visible, locked, rotate, blend-mode, shadow, filter, mask, blur, style,
-    // semantic-role, intensity, layer-priority, then unknown props (sorted).
+    // Canonical property order: id, name, role, anchor, anchor-zone, anchor-sibling,
+    // anchor-edge, anchor-gap, anchor-parent, x, y, w, h, opacity, visible, locked,
+    // rotate, blend-mode, shadow, filter, mask, blur, style, semantic-role, intensity,
+    // layer-priority, symmetry, then unknown props (sorted).
     out.push_str(" id=\"");
     out.push_str(&g.id);
     out.push('"');
@@ -103,6 +104,12 @@ pub(super) fn write_group(g: &GroupNode, out: &mut String, depth: usize) {
     if let Some(n) = g.layer_priority {
         let _ = write!(out, " layer-priority={n}");
     }
+    if let Some(n) = g.symmetry_count {
+        let _ = write!(out, " symmetry-count={n}");
+    }
+    write_opt_dimension(out, "symmetry-cx", &g.symmetry_cx);
+    write_opt_dimension(out, "symmetry-cy", &g.symmetry_cy);
+    write_opt_dimension(out, "symmetry-start-angle", &g.symmetry_start_angle);
 
     // Unknown properties in sorted key order (BTreeMap iteration is sorted).
     for (key, prop) in &g.unknown_props {

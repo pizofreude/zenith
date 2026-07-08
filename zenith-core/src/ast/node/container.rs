@@ -166,6 +166,16 @@ pub struct GroupNode {
     /// Advisory z-ordering hint for external tooling. Non-rendering; all integer
     /// values are valid.
     pub layer_priority: Option<i64>,
+    /// Live radial symmetry count for this group's child subtree. When set to
+    /// `n > 1`, the compiler renders the authored children once, then renders
+    /// `n - 1` deterministic rotated copies around `symmetry_cx/cy`.
+    pub symmetry_count: Option<u32>,
+    /// Live radial symmetry center X coordinate.
+    pub symmetry_cx: Option<Dimension>,
+    /// Live radial symmetry center Y coordinate.
+    pub symmetry_cy: Option<Dimension>,
+    /// Optional starting angle for generated copies, in degrees.
+    pub symmetry_start_angle: Option<Dimension>,
     /// Child nodes in source order.
     pub children: Vec<Node>,
     /// Advisory text-safe rectangles declared as `protected-region` children.

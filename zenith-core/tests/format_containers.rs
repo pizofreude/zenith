@@ -661,6 +661,79 @@ fn group_semantic_scalars_absent_byte_identity() {
     );
 }
 
+#[test]
+fn group_live_symmetry_round_trip() {
+    let src = r##"zenith version=1 {
+  project id="proj.sym" name="SYM"
+  tokens format="zenith-token-v1" {
+  }
+  styles {
+  }
+  document id="doc.sym" title="SYM" {
+    page id="page.sym" w=(px)800 h=(px)600 {
+      group id="grp.sym" symmetry-count=6 symmetry-cx=(px)400 symmetry-cy=(px)300 symmetry-start-angle=(deg)15 {
+      }
+    }
+  }
+}
+"##;
+    let adapter = KdlAdapter;
+    let doc = adapter.parse(src.as_bytes()).expect("parse must succeed");
+    let grp = match &doc.body.pages[0].children[0] {
+        Node::Group(g) => g,
+        other => panic!("expected Group node, got {other:?}"),
+    };
+    assert_eq!(grp.symmetry_count, Some(6));
+    assert_eq!(grp.symmetry_cx.as_ref().map(|d| d.value), Some(400.0));
+    assert_eq!(grp.symmetry_cy.as_ref().map(|d| d.value), Some(300.0));
+    assert_eq!(
+        grp.symmetry_start_angle.as_ref().map(|d| d.value),
+        Some(15.0)
+    );
+
+    let formatted = format_document(&doc).expect("format must succeed");
+    let text = String::from_utf8(formatted).expect("formatter output must be valid utf8");
+    let group_line = text
+        .lines()
+        .find(|line| line.contains("group id=\"grp.sym\""))
+        .expect("formatted document must contain the symmetry group line");
+    assert_eq!(
+        group_line,
+        "      group id=\"grp.sym\" symmetry-count=6 symmetry-cx=(px)400 symmetry-cy=(px)300 symmetry-start-angle=(deg)15 {"
+    );
+    let doc2 = adapter
+        .parse(text.as_bytes())
+        .expect("re-parse after format must succeed");
+    assert_eq!(strip_spans(doc).body.pages[0].children, strip_spans(doc2).body.pages[0].children);
+}
+
+#[test]
+fn group_live_symmetry_absent_byte_identity() {
+    let src = r##"zenith version=1 {
+  project id="proj.symplain" name="SYMPLAIN"
+  tokens format="zenith-token-v1" {
+  }
+  styles {
+  }
+  document id="doc.symplain" title="SYMPLAIN" {
+    page id="page.symplain" w=(px)800 h=(px)600 {
+      group id="grp.symplain" {
+      }
+    }
+  }
+}
+"##;
+    let adapter = KdlAdapter;
+    let doc = adapter.parse(src.as_bytes()).expect("parse must succeed");
+    let formatted = format_document(&doc).expect("format must succeed");
+    let text = String::from_utf8(formatted).expect("formatter output must be valid utf8");
+    let group_line = text
+        .lines()
+        .find(|line| line.contains("group id=\"grp.symplain\""))
+        .expect("formatted document must contain the plain group line");
+    assert_eq!(group_line, "      group id=\"grp.symplain\" {");
+}
+
 /// **group semantic scalars format idempotency**: formatting a document that
 /// contains all three semantic scalar fields twice must produce the same output.
 #[test]

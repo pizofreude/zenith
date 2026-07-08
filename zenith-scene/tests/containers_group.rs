@@ -98,6 +98,88 @@ page id="page.gv" w=(px)100 h=(px)100 {
     assert!(matches!(cmds[1], SceneCommand::PopClip));
 }
 
+#[test]
+fn group_live_symmetry_emits_rotated_copies() {
+    let src = r##"zenith version=1 {
+  project id="proj.sym" name="SYM"
+  tokens format="zenith-token-v1" {
+token id="color.r" type="color" value="#ff0000"
+  }
+  styles {}
+  document id="doc.sym" title="SYM" {
+page id="page.sym" w=(px)100 h=(px)100 {
+  group id="group.sym" symmetry-count=4 symmetry-cx=(px)50 symmetry-cy=(px)50 {
+    rect id="rect.sym" x=(px)40 y=(px)10 w=(px)20 h=(px)20 fill=(token)"color.r"
+  }
+}
+  }
+}
+"##;
+    let doc = parse(src);
+    let result = compile(&doc, &default_provider());
+
+    assert!(
+        result.diagnostics.is_empty(),
+        "unexpected diagnostics: {:?}",
+        result.diagnostics
+    );
+
+    let cmds = &result.scene.commands;
+    let fill_count = cmds
+        .iter()
+        .filter(|cmd| matches!(cmd, SceneCommand::FillRect { .. }))
+        .count();
+    let transforms: Vec<_> = cmds
+        .iter()
+        .filter_map(|cmd| match cmd {
+            SceneCommand::PushTransform { angle_deg, cx, cy } => Some((*angle_deg, *cx, *cy)),
+            _ => None,
+        })
+        .collect();
+
+    assert_eq!(fill_count, 4, "seed plus three live copies must render");
+    assert_eq!(
+        transforms,
+        vec![(90.0, 50.0, 50.0), (180.0, 50.0, 50.0), (270.0, 50.0, 50.0)],
+        "copies must be transform-bracketed around the requested symmetry center"
+    );
+}
+
+#[test]
+fn plain_group_does_not_emit_live_symmetry_transforms() {
+    let src = r##"zenith version=1 {
+  project id="proj.symplain" name="SYMPLAIN"
+  tokens format="zenith-token-v1" {
+token id="color.r" type="color" value="#ff0000"
+  }
+  styles {}
+  document id="doc.symplain" title="SYMPLAIN" {
+page id="page.symplain" w=(px)100 h=(px)100 {
+  group id="group.symplain" {
+    rect id="rect.symplain" x=(px)40 y=(px)10 w=(px)20 h=(px)20 fill=(token)"color.r"
+  }
+}
+  }
+}
+"##;
+    let doc = parse(src);
+    let result = compile(&doc, &default_provider());
+
+    assert!(
+        result.diagnostics.is_empty(),
+        "unexpected diagnostics: {:?}",
+        result.diagnostics
+    );
+    assert!(
+        result
+            .scene
+            .commands
+            .iter()
+            .all(|cmd| !matches!(cmd, SceneCommand::PushTransform { .. })),
+        "plain group must not emit live-symmetry transforms"
+    );
+}
+
 // ── Group: opacity cascades to child alpha ────────────────────────────
 
 #[test]

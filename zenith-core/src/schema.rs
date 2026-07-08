@@ -607,6 +607,8 @@ fn attribute_type_generic(name: &str, fallback: &'static str) -> &'static str {
         "bleed" => "px literal",
         "spread-gutter" => "px literal",
         "margin-inner" | "margin-outer" | "margin-top" | "margin-bottom" => "px literal",
+        "symmetry-cx" | "symmetry-cy" => "px literal",
+        "symmetry-start-angle" => "dimension: deg",
 
         // ── Visual — token refs: dimension ────────────────────────────────
         "radius" | "radius-tl" | "radius-tr" | "radius-br" | "radius-bl" => "token ref: dimension",
@@ -637,6 +639,7 @@ fn attribute_type_generic(name: &str, fallback: &'static str) -> &'static str {
         "drop-cap-lines" | "widow-orphan" | "tab-width" | "line-numbers" => "i64",
         "colspan" | "rowspan" | "header-rows" | "columns" | "rows" => "i64",
         "layer-priority" => "i64",
+        "symmetry-count" => "u32 (1..=72)",
 
         // ── Booleans ─────────────────────────────────────────────────────
         "visible" | "locked" | "anchor-parent" | "selectable" | "closed" => "bool",
@@ -1435,6 +1438,38 @@ mod tests {
             assert_eq!(attribute_type_for_kind(kind, "filter"), "token ref: filter");
             assert_eq!(attribute_type_for_kind(kind, "mask"), "token ref: mask");
         }
+    }
+
+    #[test]
+    fn group_live_symmetry_attributes_are_discoverable() {
+        let attrs = node_attributes("group");
+        for attr in &[
+            "symmetry-count",
+            "symmetry-cx",
+            "symmetry-cy",
+            "symmetry-start-angle",
+        ] {
+            assert!(
+                attrs.contains(attr),
+                "group schema must include {attr}; attrs: {attrs:?}"
+            );
+        }
+        assert_eq!(
+            attribute_type_for_kind("group", "symmetry-count"),
+            "u32 (1..=72)"
+        );
+        assert_eq!(
+            attribute_type_for_kind("group", "symmetry-cx"),
+            "px literal"
+        );
+        assert_eq!(
+            attribute_type_for_kind("group", "symmetry-cy"),
+            "px literal"
+        );
+        assert_eq!(
+            attribute_type_for_kind("group", "symmetry-start-angle"),
+            "dimension: deg"
+        );
     }
 
     /// `background` (page surface) reports color/gradient — driver.rs:639 uses

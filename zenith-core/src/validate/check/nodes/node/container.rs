@@ -8,6 +8,7 @@
 use std::collections::BTreeSet;
 
 use crate::ast::node::{FrameNode, GroupNode, TableNode};
+use crate::ast::value::{Dimension, dim_to_px};
 use crate::diagnostics::Diagnostic;
 
 use super::shared::{
@@ -270,8 +271,88 @@ pub(in crate::validate::check) fn check_group(
         ));
     }
 
+    check_group_symmetry(g, diagnostics);
+
     // Unknown properties.
     check_unknown_props("group", &g.id, &g.unknown_props, g.source_span, diagnostics);
+}
+
+fn check_group_symmetry(g: &GroupNode, diagnostics: &mut Vec<Diagnostic>) {
+    let Some(count) = g.symmetry_count else {
+        return;
+    };
+    if count == 0 || count > 72 {
+        diagnostics.push(Diagnostic::warning(
+            "group.invalid_symmetry",
+            format!(
+                "group '{}': symmetry-count {count} is out of range 1..=72",
+                g.id
+            ),
+            g.source_span,
+            Some(g.id.clone()),
+        ));
+        return;
+    }
+    if count <= 1 {
+        return;
+    }
+
+    check_symmetry_center_dimension(g, "symmetry-cx", g.symmetry_cx.as_ref(), diagnostics);
+    check_symmetry_center_dimension(g, "symmetry-cy", g.symmetry_cy.as_ref(), diagnostics);
+    check_symmetry_start_angle(g, g.symmetry_start_angle.as_ref(), diagnostics);
+}
+
+fn check_symmetry_center_dimension(
+    g: &GroupNode,
+    field: &str,
+    value: Option<&Dimension>,
+    diagnostics: &mut Vec<Diagnostic>,
+) {
+    let Some(value) = value else {
+        diagnostics.push(Diagnostic::warning(
+            "group.invalid_symmetry",
+            format!("group '{}': live symmetry requires {field}", g.id),
+            g.source_span,
+            Some(g.id.clone()),
+        ));
+        return;
+    };
+
+    let Some(px) = dim_to_px(value.value, &value.unit) else {
+        diagnostics.push(Diagnostic::warning(
+            "group.invalid_symmetry",
+            format!("group '{}': {field} must use a px/pt dimension", g.id),
+            g.source_span,
+            Some(g.id.clone()),
+        ));
+        return;
+    };
+    if !px.is_finite() {
+        diagnostics.push(Diagnostic::warning(
+            "group.invalid_symmetry",
+            format!("group '{}': {field} must resolve to a finite value", g.id),
+            g.source_span,
+            Some(g.id.clone()),
+        ));
+    }
+}
+
+fn check_symmetry_start_angle(
+    g: &GroupNode,
+    value: Option<&Dimension>,
+    diagnostics: &mut Vec<Diagnostic>,
+) {
+    let Some(value) = value else {
+        return;
+    };
+    if !value.value.is_finite() {
+        diagnostics.push(Diagnostic::warning(
+            "group.invalid_symmetry",
+            format!("group '{}': symmetry-start-angle must be finite", g.id),
+            g.source_span,
+            Some(g.id.clone()),
+        ));
+    }
 }
 
 pub(in crate::validate::check) fn check_table(

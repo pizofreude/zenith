@@ -128,29 +128,25 @@ pub(in crate::compile) fn compile_group(
         baseline_grid: ctx.baseline_grid,
     };
     if effect.is_none() && mask.is_none() {
-        for child in &group.children {
-            compile_node(
-                child,
-                cx,
-                commands,
-                diagnostics,
-                connector_strokes,
-                child_ctx,
-            );
-        }
+        emit_live_symmetry_children(
+            group,
+            cx,
+            commands,
+            diagnostics,
+            connector_strokes,
+            child_ctx,
+        );
     } else {
         let mut draws = Vec::new();
         let mut local_connector_strokes = Vec::new();
-        for child in &group.children {
-            compile_node(
-                child,
-                cx,
-                &mut draws,
-                diagnostics,
-                &mut local_connector_strokes,
-                child_ctx,
-            );
-        }
+        emit_live_symmetry_children(
+            group,
+            cx,
+            &mut draws,
+            diagnostics,
+            &mut local_connector_strokes,
+            child_ctx,
+        );
         emit_wrapped_container(
             commands,
             draws,
@@ -168,6 +164,139 @@ pub(in crate::compile) fn compile_group(
     if group_rot.is_some() && rot_center.is_some() {
         commands.push(SceneCommand::PopTransform);
     }
+}
+
+fn emit_live_symmetry_children(
+    group: &GroupNode,
+    cx: NodeCtx,
+    commands: &mut Vec<SceneCommand>,
+    diagnostics: &mut Vec<Diagnostic>,
+    connector_strokes: &mut Vec<usize>,
+    child_ctx: RenderCtx,
+) {
+    emit_group_children(
+        group,
+        cx,
+        commands,
+        diagnostics,
+        connector_strokes,
+        child_ctx,
+    );
+
+    let Some(count) = group.symmetry_count else {
+        return;
+    };
+    if count <= 1 {
+        return;
+    }
+    if count > 72 {
+        diagnostics.push(Diagnostic::warning(
+            "scene.invalid_symmetry",
+            format!(
+                "group '{}' symmetry-count must be in the range 1..=72",
+                group.id
+            ),
+            group.source_span,
+            Some(group.id.clone()),
+        ));
+        return;
+    }
+
+    let Some(cx_pivot) = group
+        .symmetry_cx
+        .as_ref()
+        .and_then(|d| dim_to_px(d.value, &d.unit))
+    else {
+        diagnostics.push(missing_symmetry_center(
+            &group.id,
+            group.source_span,
+            "symmetry-cx",
+        ));
+        return;
+    };
+    let Some(cy_pivot) = group
+        .symmetry_cy
+        .as_ref()
+        .and_then(|d| dim_to_px(d.value, &d.unit))
+    else {
+        diagnostics.push(missing_symmetry_center(
+            &group.id,
+            group.source_span,
+            "symmetry-cy",
+        ));
+        return;
+    };
+    if !cx_pivot.is_finite() || !cy_pivot.is_finite() {
+        diagnostics.push(Diagnostic::warning(
+            "scene.invalid_symmetry",
+            format!("group '{}' live symmetry center must be finite", group.id),
+            group.source_span,
+            Some(group.id.clone()),
+        ));
+        return;
+    }
+
+    let start_angle = rotation_degrees(group.symmetry_start_angle.as_ref()).unwrap_or(0.0);
+    if !start_angle.is_finite() {
+        diagnostics.push(Diagnostic::warning(
+            "scene.invalid_symmetry",
+            format!("group '{}' symmetry-start-angle must be finite", group.id),
+            group.source_span,
+            Some(group.id.clone()),
+        ));
+        return;
+    }
+
+    let step = 360.0 / f64::from(count);
+    for index in 1..count {
+        commands.push(SceneCommand::PushTransform {
+            angle_deg: start_angle + step * f64::from(index),
+            cx: cx_pivot,
+            cy: cy_pivot,
+        });
+        emit_group_children(
+            group,
+            cx,
+            commands,
+            diagnostics,
+            connector_strokes,
+            child_ctx,
+        );
+        commands.push(SceneCommand::PopTransform);
+    }
+}
+
+fn emit_group_children(
+    group: &GroupNode,
+    cx: NodeCtx,
+    commands: &mut Vec<SceneCommand>,
+    diagnostics: &mut Vec<Diagnostic>,
+    connector_strokes: &mut Vec<usize>,
+    child_ctx: RenderCtx,
+) {
+    for child in &group.children {
+        compile_node(
+            child,
+            cx,
+            commands,
+            diagnostics,
+            connector_strokes,
+            child_ctx,
+        );
+    }
+}
+
+fn missing_symmetry_center(
+    node_id: &str,
+    span: Option<zenith_core::Span>,
+    field: &str,
+) -> Diagnostic {
+    Diagnostic::warning(
+        "scene.invalid_symmetry",
+        format!("group '{node_id}' live symmetry requires {field}"),
+        span,
+        Some(node_id.to_owned()),
+    )
 }
 
 fn resolve_group_mask(

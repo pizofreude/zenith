@@ -35,6 +35,10 @@ fn minimal_group(id: &str, children: Vec<Node>) -> Node {
         semantic_role: None,
         intensity: None,
         layer_priority: None,
+        symmetry_count: None,
+        symmetry_cx: None,
+        symmetry_cy: None,
+        symmetry_start_angle: None,
         anchor: None,
         anchor_zone: None,
         anchor_sibling: None,
@@ -293,6 +297,10 @@ fn group_unknown_property_warns() {
                 semantic_role: None,
                 intensity: None,
                 layer_priority: None,
+                symmetry_count: None,
+                symmetry_cx: None,
+                symmetry_cy: None,
+                symmetry_start_angle: None,
                 anchor: None,
                 anchor_zone: None,
                 anchor_sibling: None,
@@ -916,6 +924,86 @@ fn group_intensity_in_range_no_warning() {
         "intensity=0.5 must not fire group.invalid_intensity; codes: {:?}",
         codes(&report)
     );
+}
+
+#[test]
+fn group_live_symmetry_valid_no_warning() {
+    let src = r##"zenith version=1 {
+  project id="proj.gsv" name="GSV"
+  tokens format="zenith-token-v1" {
+  }
+  styles {
+  }
+  document id="doc.gsv" title="GSV" {
+    page id="page.gsv" w=(px)800 h=(px)600 {
+      group id="grp.gsv" symmetry-count=4 symmetry-cx=(px)400 symmetry-cy=(px)300 symmetry-start-angle=(deg)0 {
+      }
+    }
+  }
+}
+"##;
+    let adapter = KdlAdapter;
+    let doc = adapter.parse(src.as_bytes()).expect("parse must succeed");
+    let report = validate(&doc);
+    assert!(
+        !has_code(&report, "group.invalid_symmetry"),
+        "valid live symmetry must not warn; codes: {:?}",
+        codes(&report)
+    );
+}
+
+#[test]
+fn group_live_symmetry_invalid_count_warns() {
+    let src = r##"zenith version=1 {
+  project id="proj.gsi" name="GSI"
+  tokens format="zenith-token-v1" {
+  }
+  styles {
+  }
+  document id="doc.gsi" title="GSI" {
+    page id="page.gsi" w=(px)800 h=(px)600 {
+      group id="grp.gsi" symmetry-count=73 symmetry-cx=(px)400 symmetry-cy=(px)300 {
+      }
+    }
+  }
+}
+"##;
+    let adapter = KdlAdapter;
+    let doc = adapter.parse(src.as_bytes()).expect("parse must succeed");
+    let report = validate(&doc);
+    assert!(
+        has_code(&report, "group.invalid_symmetry"),
+        "symmetry-count=73 must warn; codes: {:?}",
+        codes(&report)
+    );
+    assert!(!report.has_errors());
+}
+
+#[test]
+fn group_live_symmetry_missing_center_warns() {
+    let src = r##"zenith version=1 {
+  project id="proj.gsm" name="GSM"
+  tokens format="zenith-token-v1" {
+  }
+  styles {
+  }
+  document id="doc.gsm" title="GSM" {
+    page id="page.gsm" w=(px)800 h=(px)600 {
+      group id="grp.gsm" symmetry-count=3 symmetry-cx=(px)400 {
+      }
+    }
+  }
+}
+"##;
+    let adapter = KdlAdapter;
+    let doc = adapter.parse(src.as_bytes()).expect("parse must succeed");
+    let report = validate(&doc);
+    assert!(
+        has_code(&report, "group.invalid_symmetry"),
+        "missing symmetry-cy must warn; codes: {:?}",
+        codes(&report)
+    );
+    assert!(!report.has_errors());
 }
 
 /// `semantic-role` with any string value must not produce any `group.invalid_*`
