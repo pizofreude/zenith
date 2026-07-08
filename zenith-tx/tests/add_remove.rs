@@ -1,6 +1,7 @@
 mod common;
 use common::*;
 use zenith_core::Severity;
+use zenith_tx::op::{OpPathAnchor, OpPathSubpath};
 use zenith_tx::{Op, OpSpan, Permissions, Position, Transaction, TxStatus, run_transaction};
 
 // ── AddNode tests ─────────────────────────────────────────────────────────
@@ -296,6 +297,227 @@ fn add_code_node_into_page_accepted() {
         result.source_after
     );
     assert!(result.source_after.contains("content \"let x = 1;\""));
+}
+
+#[test]
+fn add_path_direct_into_page() {
+    let doc = parse(ADD_BASE_DOC);
+    let tx = Transaction {
+        ops: vec![Op::AddPath {
+            parent: "pg1".to_owned(),
+            id: "path.direct".to_owned(),
+            position: Position::Last,
+            closed: Some(true),
+            anchors: vec![
+                OpPathAnchor {
+                    x: 0.0,
+                    y: 0.0,
+                    kind: Some("corner".to_owned()),
+                    in_x: None,
+                    in_y: None,
+                    out_x: None,
+                    out_y: None,
+                },
+                OpPathAnchor {
+                    x: 100.0,
+                    y: 0.0,
+                    kind: Some("smooth".to_owned()),
+                    in_x: Some(80.0),
+                    in_y: Some(0.0),
+                    out_x: Some(100.0),
+                    out_y: Some(20.0),
+                },
+                OpPathAnchor {
+                    x: 100.0,
+                    y: 80.0,
+                    kind: None,
+                    in_x: None,
+                    in_y: None,
+                    out_x: None,
+                    out_y: None,
+                },
+            ],
+            subpaths: Vec::new(),
+        }],
+        permissions: Permissions::default(),
+    };
+    let result = run_transaction(&doc, &tx).expect("run_transaction should not error");
+
+    assert_eq!(
+        result.status,
+        TxStatus::Accepted,
+        "{:?}",
+        result.diagnostics
+    );
+    assert_eq!(result.affected_node_ids, vec!["path.direct".to_owned()]);
+    assert!(
+        result
+            .source_after
+            .contains("path id=\"path.direct\" closed=#true")
+    );
+    assert!(
+        result
+            .source_after
+            .contains("anchor x=(px)0 y=(px)0 kind=\"corner\"")
+    );
+    assert!(result.source_after.contains(
+        "anchor x=(px)100 y=(px)0 kind=\"smooth\" in-x=(px)80 in-y=(px)0 out-x=(px)100 out-y=(px)20"
+    ));
+    let pos_base = result.source_after.find("id=\"base\"").expect("base");
+    let pos_path = result
+        .source_after
+        .find("id=\"path.direct\"")
+        .expect("path.direct");
+    assert!(pos_base < pos_path, "path.direct should come after base");
+}
+
+#[test]
+fn add_path_compound_into_group_first() {
+    let doc = parse(ADD_GROUP_DOC);
+    let tx = Transaction {
+        ops: vec![Op::AddPath {
+            parent: "grp1".to_owned(),
+            id: "path.compound".to_owned(),
+            position: Position::First,
+            closed: None,
+            anchors: Vec::new(),
+            subpaths: vec![
+                OpPathSubpath {
+                    closed: Some(true),
+                    anchors: vec![
+                        path_anchor(0.0, 0.0),
+                        path_anchor(40.0, 0.0),
+                        path_anchor(40.0, 40.0),
+                    ],
+                },
+                OpPathSubpath {
+                    closed: Some(true),
+                    anchors: vec![
+                        path_anchor(10.0, 10.0),
+                        path_anchor(20.0, 10.0),
+                        path_anchor(20.0, 20.0),
+                    ],
+                },
+            ],
+        }],
+        permissions: Permissions::default(),
+    };
+    let result = run_transaction(&doc, &tx).expect("run_transaction should not error");
+
+    assert_eq!(
+        result.status,
+        TxStatus::Accepted,
+        "{:?}",
+        result.diagnostics
+    );
+    assert_eq!(result.affected_node_ids, vec!["path.compound".to_owned()]);
+    assert!(result.source_after.contains("path id=\"path.compound\""));
+    assert!(result.source_after.contains("subpath closed=#true"));
+    assert!(
+        !result
+            .source_after
+            .contains("path id=\"path.compound\" closed=")
+    );
+    let pos_path = result
+        .source_after
+        .find("id=\"path.compound\"")
+        .expect("path.compound");
+    let pos_a = result.source_after.find("id=\"g.a\"").expect("g.a");
+    assert!(
+        pos_path < pos_a,
+        "path.compound should be first in the group"
+    );
+}
+
+#[test]
+fn add_path_rejects_direct_and_compound_payload() {
+    let doc = parse(ADD_BASE_DOC);
+    let tx = Transaction {
+        ops: vec![Op::AddPath {
+            parent: "pg1".to_owned(),
+            id: "path.bad".to_owned(),
+            position: Position::Last,
+            closed: None,
+            anchors: vec![path_anchor(0.0, 0.0), path_anchor(10.0, 0.0)],
+            subpaths: vec![OpPathSubpath {
+                closed: None,
+                anchors: vec![path_anchor(0.0, 0.0), path_anchor(10.0, 0.0)],
+            }],
+        }],
+        permissions: Permissions::default(),
+    };
+    let result = run_transaction(&doc, &tx).expect("run_transaction should not error");
+
+    assert_eq!(result.status, TxStatus::Rejected);
+    assert!(
+        result
+            .diagnostics
+            .iter()
+            .any(|d| d.code == "tx.invalid_node_spec"),
+        "expected tx.invalid_node_spec; got: {:?}",
+        result.diagnostics
+    );
+    assert_eq!(result.source_after, result.source_before);
+}
+
+#[test]
+fn add_path_rejects_empty_payload() {
+    let doc = parse(ADD_BASE_DOC);
+    let tx = Transaction {
+        ops: vec![Op::AddPath {
+            parent: "pg1".to_owned(),
+            id: "path.empty".to_owned(),
+            position: Position::Last,
+            closed: None,
+            anchors: Vec::new(),
+            subpaths: Vec::new(),
+        }],
+        permissions: Permissions::default(),
+    };
+    let result = run_transaction(&doc, &tx).expect("run_transaction should not error");
+
+    assert_eq!(result.status, TxStatus::Rejected);
+    assert!(
+        result
+            .diagnostics
+            .iter()
+            .any(|d| d.code == "tx.invalid_node_spec"),
+        "expected tx.invalid_node_spec; got: {:?}",
+        result.diagnostics
+    );
+    assert_eq!(result.source_after, result.source_before);
+}
+
+#[test]
+fn add_path_json_defaults_position_and_subpaths() {
+    let tx = Transaction::from_json(
+        r#"{"ops":[{"op":"add_path","parent":"pg1","id":"path.json","closed":false,"anchors":[{"x":0,"y":0},{"x":10,"y":0}]}]}"#,
+    )
+    .expect("transaction JSON should parse");
+
+    assert_eq!(
+        tx.ops,
+        vec![Op::AddPath {
+            parent: "pg1".to_owned(),
+            id: "path.json".to_owned(),
+            position: Position::Last,
+            closed: Some(false),
+            anchors: vec![path_anchor(0.0, 0.0), path_anchor(10.0, 0.0)],
+            subpaths: Vec::new(),
+        }]
+    );
+}
+
+fn path_anchor(x: f64, y: f64) -> OpPathAnchor {
+    OpPathAnchor {
+        x,
+        y,
+        kind: None,
+        in_x: None,
+        in_y: None,
+        out_x: None,
+        out_y: None,
+    }
 }
 
 // ── RemoveNode tests ──────────────────────────────────────────────────────

@@ -49,6 +49,7 @@ pub fn op_summary(name: &str) -> Option<&'static str> {
             Some("Materialize a simple closed-contour boolean result as a sibling path.")
         }
         "add_node" => Some("Parse a .zen source fragment and insert it into a container."),
+        "add_path" => Some("Create a typed path node and insert it into a container."),
         "remove_node" => Some("Remove a node and its subtree from the document."),
         "set_opacity" => Some("Set the opacity of a node (0.0 = fully transparent, 1.0 = opaque)."),
         "replace_text" => Some("Replace all text spans of a text or shape node."),

@@ -473,6 +473,41 @@ pub fn op_fields(name: &str) -> Option<&'static [OpFieldSchema]> {
             ];
             Some(F)
         }
+        "add_path" => {
+            static F: &[OpFieldSchema] = &[
+                OpFieldSchema {
+                    name: "parent",
+                    ty: "node id",
+                    required: true,
+                },
+                OpFieldSchema {
+                    name: "id",
+                    ty: "node id",
+                    required: true,
+                },
+                OpFieldSchema {
+                    name: "position",
+                    ty: r#"{at:"last"} | {at:"first"} | {at:"index",index:N} | {at:"before",id:"<sibling-id>"} | {at:"after",id:"<sibling-id>"}"#,
+                    required: false,
+                },
+                OpFieldSchema {
+                    name: "closed",
+                    ty: "bool",
+                    required: false,
+                },
+                OpFieldSchema {
+                    name: "anchors",
+                    ty: "[{x,y,kind?,in_x?,in_y?,out_x?,out_y?}]",
+                    required: false,
+                },
+                OpFieldSchema {
+                    name: "subpaths",
+                    ty: "[{closed?,anchors:[{x,y,kind?,in_x?,in_y?,out_x?,out_y?}]}]",
+                    required: false,
+                },
+            ];
+            Some(F)
+        }
         "set_opacity" => {
             static F: &[OpFieldSchema] = &[
                 OpFieldSchema {

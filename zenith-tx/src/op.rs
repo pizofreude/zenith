@@ -55,6 +55,20 @@ pub struct OpPathAnchor {
     pub out_y: Option<f64>,
 }
 
+/// A contour payload used by [`Op::AddPath`] for compound paths.
+///
+/// JSON shape: `{"closed": true, "anchors": [{"x": 0.0, "y": 0.0}, ...]}`.
+/// Anchor coordinates are expressed in document pixels.
+#[derive(serde::Serialize, serde::Deserialize, Debug, Clone, PartialEq)]
+pub struct OpPathSubpath {
+    /// Optional per-contour closure. `None` preserves the default open contour.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub closed: Option<bool>,
+    /// Ordered anchor list for this contour.
+    #[serde(default)]
+    pub anchors: Vec<OpPathAnchor>,
+}
+
 /// Which Bezier handle on a path anchor to move.
 ///
 /// JSON values are `"in"` and `"out"`.
@@ -178,7 +192,7 @@ pub struct AddAssetMetadata {
     pub ai_reuse_policy: Option<String>,
 }
 
-/// Insertion position for [`Op::AddNode`] within a container's children.
+/// Insertion position for [`Op::AddNode`] and [`Op::AddPath`] within a container's children.
 ///
 /// JSON shapes: `{"at":"last"}`, `{"at":"first"}`, `{"at":"index","index":2}`,
 /// `{"at":"before","id":"sibling"}`, `{"at":"after","id":"sibling"}`.
@@ -746,6 +760,31 @@ pub enum Op {
         position: Position,
         /// A single `.zen` node fragment to construct and insert.
         source: String,
+    },
+    /// Construct a typed path node and insert it into a container.
+    ///
+    /// Direct paths provide non-empty `anchors` and no `subpaths`; `closed`
+    /// applies to that direct contour. Compound paths provide non-empty
+    /// `subpaths` and no direct `anchors`; each subpath carries its own optional
+    /// `closed` value. Ambiguous or empty payloads are rejected with
+    /// `tx.invalid_node_spec`.
+    AddPath {
+        /// Stable id of the container to insert into: a page id, or a group/frame id.
+        parent: String,
+        /// Stable id assigned to the new path node.
+        id: String,
+        /// Where among the container's children to insert. Defaults to `last`.
+        #[serde(default)]
+        position: Position,
+        /// Direct-path closure. Invalid for compound paths.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        closed: Option<bool>,
+        /// Direct path anchors. Must be non-empty when `subpaths` is empty.
+        #[serde(default)]
+        anchors: Vec<OpPathAnchor>,
+        /// Compound path contours. Must be non-empty when `anchors` is empty.
+        #[serde(default)]
+        subpaths: Vec<OpPathSubpath>,
     },
     /// Remove a node (and its subtree) by id from whatever container holds it.
     ///

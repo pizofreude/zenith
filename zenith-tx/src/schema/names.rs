@@ -8,6 +8,7 @@ pub fn op_names() -> &'static [&'static str] {
         "add_asset",
         "add_node",
         "add_page",
+        "add_path",
         "align_nodes",
         "align_to_edge",
         "create_recipe",

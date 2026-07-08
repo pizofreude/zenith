@@ -413,6 +413,7 @@ fn op_name(op: &zenith_tx::Op) -> &'static str {
         zenith_tx::Op::DuplicateNode { .. } => "duplicate_node",
         zenith_tx::Op::DuplicatePage { .. } => "duplicate_page",
         zenith_tx::Op::AddNode { .. } => "add_node",
+        zenith_tx::Op::AddPath { .. } => "add_path",
         zenith_tx::Op::RemoveNode { .. } => "remove_node",
         zenith_tx::Op::Group { .. } => "group",
         zenith_tx::Op::Ungroup { .. } => "ungroup",

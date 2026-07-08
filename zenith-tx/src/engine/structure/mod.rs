@@ -12,7 +12,9 @@ mod group;
 mod page;
 mod reorder;
 
-pub(in crate::engine) use add_remove::{apply_add_node, apply_remove_node};
+pub(in crate::engine) use add_remove::{
+    AddPathSpec, apply_add_node, apply_add_path, apply_remove_node,
+};
 pub(in crate::engine) use duplicate::{
     apply_duplicate_node, apply_duplicate_page, node_set_id_any,
 };

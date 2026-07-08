@@ -1,6 +1,7 @@
 use super::*;
 use crate::op::{
-    AddAssetMetadata, Op, OpPathAnchor, OpPathBooleanOperation, OpPathHandle, OpPathTransform,
+    AddAssetMetadata, Op, OpPathAnchor, OpPathBooleanOperation, OpPathHandle, OpPathSubpath,
+    OpPathTransform,
 };
 use std::collections::BTreeSet;
 
@@ -59,6 +60,7 @@ fn op_tag(op: &Op) -> &'static str {
         Op::MakePathSymmetric { .. } => "make_path_symmetric",
         Op::PathBoolean { .. } => "path_boolean",
         Op::AddNode { .. } => "add_node",
+        Op::AddPath { .. } => "add_path",
         Op::RemoveNode { .. } => "remove_node",
         Op::SetOpacity { .. } => "set_opacity",
         Op::ReplaceText { .. } => "replace_text",
@@ -120,6 +122,7 @@ fn all_exhaustive_tags() -> BTreeSet<&'static str> {
         "snap_path_anchors",
         "transform_path_anchors",
         "add_node",
+        "add_path",
         "remove_node",
         "set_opacity",
         "replace_text",
@@ -316,6 +319,14 @@ fn op_tag_strings_match_exhaustive_set() {
             parent: String::new(),
             position: Default::default(),
             source: String::new(),
+        },
+        Op::AddPath {
+            parent: String::new(),
+            id: String::new(),
+            position: Default::default(),
+            closed: None,
+            anchors: vec![],
+            subpaths: vec![],
         },
         Op::RemoveNode {
             node: String::new(),
@@ -740,6 +751,36 @@ fn op_fields_names_match_serde_keys() {
                 parent: "p".into(),
                 position: Position::Last,
                 source: "rect id=\"x\"".into(),
+            },
+        ),
+        (
+            "add_path",
+            Op::AddPath {
+                parent: "p".into(),
+                id: "path.new".into(),
+                position: Position::Last,
+                closed: Some(true),
+                anchors: vec![OpPathAnchor {
+                    x: 0.0,
+                    y: 0.0,
+                    kind: Some("corner".into()),
+                    in_x: Some(-10.0),
+                    in_y: Some(0.0),
+                    out_x: Some(10.0),
+                    out_y: Some(0.0),
+                }],
+                subpaths: vec![OpPathSubpath {
+                    closed: Some(false),
+                    anchors: vec![OpPathAnchor {
+                        x: 1.0,
+                        y: 2.0,
+                        kind: None,
+                        in_x: None,
+                        in_y: None,
+                        out_x: None,
+                        out_y: None,
+                    }],
+                }],
             },
         ),
         ("remove_node", Op::RemoveNode { node: "n".into() }),

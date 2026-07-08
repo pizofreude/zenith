@@ -62,6 +62,9 @@ pub fn op_example(name: &str) -> Option<&'static str> {
         "add_node" => Some(
             r#"{"op":"add_node","parent":"page.main","source":"rect id=\"box\" x=(px)10 y=(px)10 w=(px)100 h=(px)80 fill=(token)\"color.accent\""}"#,
         ),
+        "add_path" => Some(
+            r#"{"op":"add_path","parent":"page.main","id":"path.logo","closed":true,"anchors":[{"x":0,"y":0,"kind":"corner"},{"x":100,"y":0,"kind":"smooth","in_x":80,"in_y":0},{"x":100,"y":80,"kind":"corner"}]}"#,
+        ),
         "remove_node" => Some(r#"{"op":"remove_node","node":"old-rect"}"#),
         "set_opacity" => Some(r#"{"op":"set_opacity","node":"overlay","opacity":0.4}"#),
         "replace_text" => Some(
