@@ -27,16 +27,47 @@ pub fn outline_glyph_run_commands(
     commands: &[SceneCommand],
     fonts: &dyn FontProvider,
 ) -> Result<Vec<PathNode>, LayoutError> {
+    outline_matching_glyph_run_commands(id_prefix, commands, fonts, |_| true)
+}
+
+/// Convert glyph-run commands attributed to `source_node_id` into compound
+/// [`PathNode`] values.
+///
+/// This is the intended boundary for callers that want editable outlines for a
+/// specific authored `text`/`code` node after scene compilation has resolved
+/// shaping, wrapping, fallback, OpenType features, and glyph positioning.
+///
+/// Glyph-run ids preserve their original encounter order, so filtered-out runs
+/// leave gaps instead of being renumbered.
+pub fn outline_source_glyph_run_commands(
+    source_node_id: &str,
+    id_prefix: &str,
+    commands: &[SceneCommand],
+    fonts: &dyn FontProvider,
+) -> Result<Vec<PathNode>, LayoutError> {
+    outline_matching_glyph_run_commands(id_prefix, commands, fonts, |source| {
+        source.as_deref() == Some(source_node_id)
+    })
+}
+
+fn outline_matching_glyph_run_commands(
+    id_prefix: &str,
+    commands: &[SceneCommand],
+    fonts: &dyn FontProvider,
+    mut include: impl FnMut(&Option<String>) -> bool,
+) -> Result<Vec<PathNode>, LayoutError> {
     let mut nodes = Vec::new();
     let mut glyph_run_index = 0usize;
 
     for command in commands {
-        if let SceneCommand::DrawGlyphRun { .. } = command {
-            let id = format!("{id_prefix}-{glyph_run_index}");
-            if let Some(node) = outline_glyph_run_command(id, command, fonts)? {
-                nodes.push(node);
+        if let SceneCommand::DrawGlyphRun { source_node_id, .. } = command {
+            if include(source_node_id) {
+                let id = format!("{id_prefix}-{glyph_run_index}");
+                if let Some(node) = outline_glyph_run_command(id, command, fonts)? {
+                    nodes.push(node);
+                }
             }
-            glyph_run_index = glyph_run_index.saturating_add(1);
+            glyph_run_index += 1;
         }
     }
 
@@ -272,6 +303,32 @@ mod tests {
         );
     }
 
+    #[test]
+    fn outlines_only_commands_for_requested_source_node() {
+        let provider = default_provider();
+        let mut first = command_from_run(
+            shape_sample_run(&provider, "A"),
+            Color::srgb(0, 0, 0, 255),
+            None,
+            None,
+        );
+        let mut second = command_from_run(
+            shape_sample_run(&provider, "B"),
+            Color::srgb(0, 0, 0, 255),
+            None,
+            None,
+        );
+        set_source_node_id(&mut first, "label.one");
+        set_source_node_id(&mut second, "label.two");
+
+        let nodes =
+            outline_source_glyph_run_commands("label.two", "outlined", &[first, second], &provider)
+                .expect("outline filtering should not fail");
+
+        assert_eq!(nodes.len(), 1);
+        assert_eq!(nodes[0].id, "outlined-1");
+    }
+
     fn shape_sample_run(provider: &dyn FontProvider, text: &str) -> ZenithGlyphRun {
         let engine = RustybuzzEngine::new();
         let families = [String::from("Noto Sans")];
@@ -307,6 +364,7 @@ mod tests {
             stroke_width,
             link: None,
             selectable: true,
+            source_node_id: None,
             glyphs: run
                 .glyphs
                 .into_iter()
@@ -317,6 +375,12 @@ mod tests {
                     text: glyph.text,
                 })
                 .collect(),
+        }
+    }
+
+    fn set_source_node_id(command: &mut SceneCommand, id: &str) {
+        if let SceneCommand::DrawGlyphRun { source_node_id, .. } = command {
+            *source_node_id = Some(id.to_owned());
         }
     }
 }

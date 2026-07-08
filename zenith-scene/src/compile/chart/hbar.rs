@@ -363,6 +363,7 @@ pub(in crate::compile) fn emit_hbar(
                         stroke_width: None,
                         link: None,
                         selectable: true,
+                        source_node_id: None,
                         glyphs,
                     });
                     label_x += advance;
@@ -505,6 +506,7 @@ pub(in crate::compile) fn emit_hbar(
                         stroke_width: None,
                         link: None,
                         selectable: true,
+                        source_node_id: None,
                         glyphs,
                     });
                     label_x += advance;
@@ -652,6 +654,7 @@ fn emit_hbar_value_label(
                     stroke_width: None,
                     link: None,
                     selectable: true,
+                    source_node_id: None,
                     glyphs,
                 });
                 label_x += advance;

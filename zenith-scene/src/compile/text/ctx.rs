@@ -49,6 +49,7 @@ pub(in crate::compile) struct EmitStyle<'a> {
     pub(in crate::compile) justify_final_line: bool,
     pub(in crate::compile) direction: TextDirection,
     pub(in crate::compile) glyph_stroke: (Option<Color>, Option<f64>),
+    pub(in crate::compile) source_node_id: Option<&'a str>,
 }
 
 /// The threaded maps/providers a `text`/`code` leaf needs to compile: token

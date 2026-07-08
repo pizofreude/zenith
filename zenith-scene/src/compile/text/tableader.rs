@@ -97,6 +97,7 @@ fn emit_tab_leader_runs(
     y: f64,
     color: Color,
     glyph_stroke: (Option<Color>, Option<f64>),
+    source_node_id: &str,
     commands: &mut Vec<SceneCommand>,
 ) {
     let mut x = start_x;
@@ -111,6 +112,7 @@ fn emit_tab_leader_runs(
             stroke_width: glyph_stroke.1,
             link: None,
             selectable: true,
+            source_node_id: Some(source_node_id.to_owned()),
             glyphs: run_to_scene_glyphs(run),
         });
         x += run.advance_width as f64;
@@ -256,6 +258,7 @@ pub(in crate::compile) fn compile_tab_leader(
             baseline_y,
             color,
             glyph_stroke,
+            text.id.as_str(),
             commands,
         );
 
@@ -272,6 +275,7 @@ pub(in crate::compile) fn compile_tab_leader(
             baseline_y,
             color,
             glyph_stroke,
+            text.id.as_str(),
             commands,
         );
 
@@ -312,6 +316,7 @@ pub(in crate::compile) fn compile_tab_leader(
                     stroke_width: glyph_stroke.1,
                     link: None,
                     selectable: true,
+                    source_node_id: Some(text.id.clone()),
                     glyphs: run_to_scene_glyphs(run),
                 });
                 x += leader_advance;

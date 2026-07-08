@@ -28,6 +28,7 @@ pub(in crate::tiny_skia) fn draw_glyph_run(
         // both are PDF-only and render-identical here.
         link: _,
         selectable: _,
+        source_node_id: _,
         glyphs,
     } = cmd
     else {

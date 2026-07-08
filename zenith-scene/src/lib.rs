@@ -43,4 +43,6 @@ pub use ir::{
     LineJoin, MaskShape, MaskSpec, Paint, Rect, Scene, SceneCommand, SceneGlyph, ShadowSpec,
     SrcRect, StrokeAlign,
 };
-pub use text_outline::{outline_glyph_run_command, outline_glyph_run_commands};
+pub use text_outline::{
+    outline_glyph_run_command, outline_glyph_run_commands, outline_source_glyph_run_commands,
+};

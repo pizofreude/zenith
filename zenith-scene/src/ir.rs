@@ -624,6 +624,10 @@ pub enum SceneCommand {
         /// default runs stay byte-identical.
         #[serde(skip_serializing_if = "is_selectable")]
         selectable: bool,
+        /// Authored source `text`/`code` node id that produced this run.
+        /// Runtime-only attribution for outline materialization; never serialized.
+        #[serde(default, skip_serializing, skip_deserializing)]
+        source_node_id: Option<String>,
         /// Positioned glyphs, baseline-relative.
         glyphs: Vec<SceneGlyph>,
     },
@@ -847,6 +851,30 @@ mod tests {
             json.contains(r#""op":"FillRect""#),
             "op tag must be FillRect; got: {json}"
         );
+    }
+
+    #[test]
+    fn glyph_run_source_node_id_does_not_serialize() {
+        let cmd = SceneCommand::DrawGlyphRun {
+            x: 1.0,
+            y: 2.0,
+            font_id: "noto-sans-400-normal".to_owned(),
+            font_size: 12.0,
+            color: Color::srgb(0, 0, 0, 255),
+            stroke_color: None,
+            stroke_width: None,
+            link: None,
+            selectable: true,
+            source_node_id: Some("text.source".to_owned()),
+            glyphs: vec![SceneGlyph {
+                glyph_id: 1,
+                dx: 0.0,
+                dy: 0.0,
+                text: "A".to_owned(),
+            }],
+        };
+        let json = serde_json::to_string(&cmd).expect("serialize");
+        assert!(!json.contains("source_node_id"), "got: {json}");
     }
 
     #[test]

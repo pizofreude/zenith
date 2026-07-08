@@ -55,6 +55,7 @@ page id="page.tx1" w=(px)400 h=(px)200 {
             font_id,
             font_size,
             color,
+            source_node_id,
             glyphs,
             ..
         } => {
@@ -73,6 +74,7 @@ page id="page.tx1" w=(px)400 h=(px)200 {
             assert_eq!(color.g, 0x18, "color.g must be 0x18");
             assert_eq!(color.b, 0x27, "color.b must be 0x27");
             assert_eq!(color.a, 255, "color.a must be 255 (opaque)");
+            assert_eq!(source_node_id.as_deref(), Some("label.tx1"));
             // Glyph run must be non-empty.
             assert!(
                 !glyphs.is_empty(),

@@ -328,6 +328,7 @@ fn draw_entry(
                     stroke_width: None,
                     link: None,
                     selectable: true,
+                    source_node_id: None,
                     glyphs,
                 });
                 text_x += advance;

@@ -60,6 +60,7 @@ pub(in crate::compile) fn emit_lines_profiled<F>(
     let justify_final_line = style.justify_final_line;
     let direction = style.direction;
     let glyph_stroke = style.glyph_stroke;
+    let source_node_id = style.source_node_id;
 
     // Node-global fallback scalars (used when `line.line_style` is `None`,
     // which is every existing path → byte-identical output).
@@ -305,6 +306,7 @@ pub(in crate::compile) fn emit_lines_profiled<F>(
                     stroke_width: glyph_stroke.1,
                     link: word.link.clone(),
                     selectable: true,
+                    source_node_id: source_node_id.map(str::to_owned),
                     glyphs: run_to_scene_glyphs(run),
                 });
                 run_x += run.advance_width as f64;
@@ -496,6 +498,7 @@ mod rtl_tests {
                 justify_final_line: false,
                 direction,
                 glyph_stroke: (None, None),
+                source_node_id: None,
             },
             &mut commands,
         );
@@ -634,6 +637,7 @@ mod line_style_tests {
                 justify_final_line: false,
                 direction: TextDirection::Ltr,
                 glyph_stroke: (None, None),
+                source_node_id: None,
             },
             &mut commands,
         );
@@ -675,6 +679,7 @@ mod line_style_tests {
                 justify_final_line: false,
                 direction: TextDirection::Ltr,
                 glyph_stroke: (None, None),
+                source_node_id: None,
             },
             &mut commands,
         );
@@ -730,6 +735,7 @@ mod line_style_tests {
                 justify_final_line: false,
                 direction: TextDirection::Ltr,
                 glyph_stroke: (None, None),
+                source_node_id: None,
             },
             &mut commands,
         );

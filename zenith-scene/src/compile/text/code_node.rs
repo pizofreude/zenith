@@ -424,6 +424,7 @@ fn compile_code_impl(
                     stroke_width: None,
                     link: None,
                     selectable: true,
+                    source_node_id: Some(code.id.clone()),
                     glyphs,
                 });
             }
@@ -518,6 +519,7 @@ fn compile_code_impl(
                         stroke_width: None,
                         link: None,
                         selectable: true,
+                        source_node_id: Some(code.id.clone()),
                         glyphs,
                     });
                     x_cursor += advance;
@@ -566,6 +568,7 @@ fn compile_code_impl(
                         stroke_width: None,
                         link: None,
                         selectable: true,
+                        source_node_id: Some(code.id.clone()),
                         glyphs,
                     });
                 }

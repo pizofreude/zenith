@@ -61,6 +61,7 @@ fn glyph_run_draws_pixels() {
         stroke_width: None,
         link: None,
         selectable: true,
+        source_node_id: None,
         glyphs,
     });
 
@@ -125,6 +126,7 @@ fn glyph_run_deterministic_png() {
         stroke_width: None,
         link: None,
         selectable: true,
+        source_node_id: None,
         glyphs,
     });
 
@@ -153,6 +155,7 @@ fn glyph_run_missing_font_id_succeeds_silently() {
         stroke_width: None,
         link: None,
         selectable: true,
+        source_node_id: None,
         glyphs: vec![SceneGlyph {
             glyph_id: 36,
             dx: 0.0,
@@ -236,6 +239,7 @@ fn glyph_run_clipped_to_subpage_clip() {
         stroke_width: None,
         link: None,
         selectable: true,
+        source_node_id: None,
         glyphs,
     });
     scene.commands.push(SceneCommand::PopClip);
@@ -305,6 +309,7 @@ fn glyph_run_with_stroke_renders_without_panic() {
         stroke_width: Some(3.0),
         link: None,
         selectable: true,
+        source_node_id: None,
         glyphs: glyphs.clone(),
     });
 
@@ -320,6 +325,7 @@ fn glyph_run_with_stroke_renders_without_panic() {
         stroke_width: None,
         link: None,
         selectable: true,
+        source_node_id: None,
         glyphs,
     });
 
@@ -382,6 +388,7 @@ fn glyph_run_without_stroke_is_byte_identical() {
             stroke_width: sw,
             link: None,
             selectable: true,
+            source_node_id: None,
             glyphs: glyphs.clone(),
         });
         scene

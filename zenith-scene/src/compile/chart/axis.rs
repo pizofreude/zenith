@@ -150,6 +150,7 @@ pub(super) fn emit_gridlines_and_labels(
                         stroke_width: None,
                         link: None,
                         selectable: true,
+                        source_node_id: None,
                         glyphs,
                     });
                     label_x += advance;

@@ -686,6 +686,7 @@ pub(super) fn emit_command(
             stroke_width: _,
             link,
             selectable,
+            source_node_id: _,
             glyphs,
         } => {
             super::glyph::emit_glyph_run(

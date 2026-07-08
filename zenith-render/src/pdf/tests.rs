@@ -75,6 +75,7 @@ fn render_is_byte_identical_across_runs() {
         stroke_width: None,
         link: None,
         selectable: true,
+        source_node_id: None,
         glyphs: vec![
             SceneGlyph {
                 glyph_id: 5,
@@ -229,6 +230,7 @@ fn glyph_run_emits_path_fill_ops() {
         link: None,
         // selectable=false → the outline-fallback path under test.
         selectable: false,
+        source_node_id: None,
         glyphs: vec![SceneGlyph {
             glyph_id: 36, // 'A' in many fonts; any outlined glyph works
             dx: 0.0,
@@ -501,6 +503,7 @@ fn selectable_glyph_run_emits_embedded_text() {
         stroke_width: None,
         link: None,
         selectable: true,
+        source_node_id: None,
         glyphs: vec![SceneGlyph {
             glyph_id: 36,
             dx: 0.0,
@@ -546,6 +549,7 @@ fn selectable_link_run_emits_link_annotation() {
         stroke_width: None,
         link: Some("https://zenith.example/".to_owned()),
         selectable: true,
+        source_node_id: None,
         glyphs: vec![SceneGlyph {
             glyph_id: 36,
             dx: 0.0,
@@ -586,6 +590,7 @@ fn non_selectable_run_has_no_font_or_link() {
         stroke_width: None,
         link: Some("https://zenith.example/".to_owned()),
         selectable: false,
+        source_node_id: None,
         glyphs: vec![SceneGlyph {
             glyph_id: 36,
             dx: 0.0,

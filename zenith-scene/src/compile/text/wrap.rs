@@ -207,6 +207,7 @@ pub(in crate::compile) fn emit_wrap_path(
             align,
             deco_thickness,
             glyph_stroke,
+            source_node_id: text.id.as_str(),
             commands,
         })
     } else if let Some((ex, ey, ew, eh)) = exclusion {
@@ -224,6 +225,7 @@ pub(in crate::compile) fn emit_wrap_path(
             deco_thickness,
             direction: node_direction,
             glyph_stroke,
+            source_node_id: text.id.as_str(),
             commands,
         })
     } else {
@@ -241,6 +243,7 @@ pub(in crate::compile) fn emit_wrap_path(
                 deco_thickness,
                 direction: node_direction,
                 glyph_stroke,
+                source_node_id: text.id.as_str(),
             },
             PlainWrapStyle {
                 env,
@@ -269,6 +272,7 @@ struct EmitDropCap<'a> {
     align: &'a str,
     deco_thickness: f64,
     glyph_stroke: (Option<Color>, Option<f64>),
+    source_node_id: &'a str,
     commands: &'a mut Vec<SceneCommand>,
 }
 
@@ -286,6 +290,7 @@ fn emit_drop_cap(a: EmitDropCap) -> usize {
         align,
         deco_thickness,
         glyph_stroke,
+        source_node_id,
         commands,
     } = a;
     // Gap between the drop cap's right edge and the wrapped body, as a
@@ -318,6 +323,7 @@ fn emit_drop_cap(a: EmitDropCap) -> usize {
         stroke_width: glyph_stroke.1,
         link: None,
         selectable: true,
+        source_node_id: Some(source_node_id.to_owned()),
         glyphs: run_to_scene_glyphs(&cap.run),
     });
 
@@ -343,6 +349,7 @@ fn emit_drop_cap(a: EmitDropCap) -> usize {
             // a documented follow-up.
             direction: TextDirection::Ltr,
             glyph_stroke,
+            source_node_id: Some(source_node_id),
         },
         commands,
     );
@@ -365,6 +372,7 @@ struct EmitRunaround<'a> {
     deco_thickness: f64,
     direction: TextDirection,
     glyph_stroke: (Option<Color>, Option<f64>),
+    source_node_id: &'a str,
     commands: &'a mut Vec<SceneCommand>,
 }
 
@@ -384,6 +392,7 @@ fn emit_runaround(a: EmitRunaround) -> usize {
         deco_thickness,
         direction: node_direction,
         glyph_stroke,
+        source_node_id,
         commands,
     } = a;
 
@@ -452,6 +461,7 @@ fn emit_runaround(a: EmitRunaround) -> usize {
             justify_final_line: false,
             direction: node_direction,
             glyph_stroke,
+            source_node_id: Some(source_node_id),
         },
         commands,
     );
@@ -472,6 +482,7 @@ struct EmitPlainWrap<'a> {
     deco_thickness: f64,
     direction: TextDirection,
     glyph_stroke: (Option<Color>, Option<f64>),
+    source_node_id: &'a str,
 }
 
 /// Borrowed environment for the plain-wrap sub-path (bullet + hyphenation).
@@ -506,6 +517,7 @@ fn emit_plain_wrap(
         deco_thickness,
         direction: node_direction,
         glyph_stroke,
+        source_node_id,
     } = geom;
     let PlainWrapStyle {
         env,
@@ -717,6 +729,7 @@ fn emit_plain_wrap(
             stroke_width: glyph_stroke.1,
             link: None,
             selectable: true,
+            source_node_id: Some(source_node_id.to_owned()),
             glyphs,
         });
     }
@@ -739,6 +752,7 @@ fn emit_plain_wrap(
                 justify_final_line: false,
                 direction: node_direction,
                 glyph_stroke,
+                source_node_id: Some(source_node_id),
             },
             commands,
         );
@@ -764,6 +778,7 @@ fn emit_plain_wrap(
                 justify_final_line: false,
                 direction: node_direction,
                 glyph_stroke,
+                source_node_id: Some(source_node_id),
             },
             commands,
         );
@@ -906,6 +921,7 @@ mod indent_tests {
                     justify_final_line: false,
                     direction: TextDirection::Ltr,
                     glyph_stroke: (None, None),
+                    source_node_id: None,
                 },
                 &mut commands,
             );
@@ -928,6 +944,7 @@ mod indent_tests {
                     justify_final_line: false,
                     direction: TextDirection::Ltr,
                     glyph_stroke: (None, None),
+                    source_node_id: None,
                 },
                 &mut commands,
             );

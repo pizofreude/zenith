@@ -202,6 +202,7 @@ pub(in crate::compile) fn render_chain_member(
             justify_final_line: !assignment.is_last_member,
             direction: chain_direction,
             glyph_stroke,
+            source_node_id: Some(text.id.as_str()),
         },
         &mut draws,
     );

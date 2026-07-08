@@ -962,6 +962,7 @@ pub(in crate::compile) fn compile_text_sized(
                 stroke_width: glyph_stroke.1,
                 link: shaped.link.clone(),
                 selectable: true,
+                source_node_id: Some(text.id.clone()),
                 glyphs,
             });
 
