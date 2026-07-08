@@ -33,7 +33,8 @@ pub use path_collision::{
     PathCollisionInput, PathCollisionNearestPoints, PathCollisionReport, path_collision,
 };
 pub use path_outline::{
-    PathOutlineKind, PathOutlinePerceptionInput, PathOutlinePerceptionReport, path_outline,
+    CompoundPathOutlinePerceptionInput, CompoundPathOutlinePerceptionReport, PathOutlineKind,
+    PathOutlinePerceptionInput, PathOutlinePerceptionReport, compound_path_outline, path_outline,
 };
 pub use path_tangent_quality::{
     PathTangentQualityInput, PathTangentQualityReport, path_tangent_quality,
