@@ -259,6 +259,11 @@ pub const DIAGNOSTIC_CODES: &[DiagnosticCodeInfo] = &[
         "Instance declares both component and source references.",
     ),
     info(
+        "contrast.invisible",
+        Severity::Warning,
+        "Text/background APCA Lc contrast is near zero, so the text is effectively invisible.",
+    ),
+    info(
         "contrast.low",
         Severity::Warning,
         "Text/background APCA Lc contrast is below the WCAG 3 draft threshold.",

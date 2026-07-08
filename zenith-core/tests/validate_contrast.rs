@@ -341,6 +341,40 @@ fn low_contrast_normal_text_warns() {
     assert!(!report.has_errors(), "contrast.low must not be an error");
 }
 
+/// Same-color text and background should hit `contrast.invisible`, not the
+/// ordinary low-contrast bucket.
+#[test]
+fn same_color_text_warns_invisible() {
+    let doc = doc_with(
+        vec![
+            color_token_hex("color.bg", "#222222"),
+            color_token_hex("color.text", "#222222"),
+        ],
+        vec![page_with_bg(
+            "page.one",
+            "color.bg",
+            vec![text_with_fill_and_size(
+                "text.one",
+                Some("color.text"),
+                None,
+                None,
+            )],
+        )],
+    );
+    let report = validate(&doc);
+    let diag = report
+        .diagnostics
+        .iter()
+        .find(|d| d.code == "contrast.invisible")
+        .expect("same-color text should produce contrast.invisible");
+    assert_eq!(diag.severity, Severity::Warning);
+    assert!(
+        !has_code(&report, "contrast.low"),
+        "invisible text should not also emit contrast.low; codes: {:?}",
+        codes(&report)
+    );
+}
+
 /// Black (#000000) text on white page → APCA Lc ~106 → NO warning.
 #[test]
 fn high_contrast_text_no_warning() {
@@ -453,14 +487,14 @@ fn centered_anchor_text_uses_preceding_ellipse_backdrop() {
     );
     let report = validate(&doc);
     assert!(
-        has_code(&report, "contrast.low"),
-        "black centered anchor text over navy ellipse should warn via backdrop, not pass via page background; codes: {:?}",
+        has_code(&report, "contrast.invisible"),
+        "black centered-anchor text over the navy ellipse should warn contrast.invisible via the backdrop; codes: {:?}",
         codes(&report)
     );
     let diag = report
         .diagnostics
         .iter()
-        .find(|d| d.code == "contrast.low")
+        .find(|d| d.code == "contrast.invisible")
         .expect("must exist");
     assert!(
         diag.message.contains("backdrop"),
@@ -493,7 +527,7 @@ fn grouped_text_uses_outer_page_backdrop() {
     );
     let report = validate(&doc);
     assert!(
-        has_code(&report, "contrast.low"),
+        has_code(&report, "contrast.invisible"),
         "grouped text should use the earlier page-level backdrop; codes: {:?}",
         codes(&report)
     );
@@ -530,7 +564,7 @@ fn page_text_uses_backdrop_inside_translated_group() {
     );
     let report = validate(&doc);
     assert!(
-        has_code(&report, "contrast.low"),
+        has_code(&report, "contrast.invisible"),
         "page text should use the absolute backdrop from the earlier translated group; codes: {:?}",
         codes(&report)
     );
@@ -563,7 +597,7 @@ fn decision_shape_can_be_text_backdrop() {
     );
     let report = validate(&doc);
     assert!(
-        has_code(&report, "contrast.low"),
+        has_code(&report, "contrast.invisible"),
         "text inside the decision shape interior should use the shape backdrop; codes: {:?}",
         codes(&report)
     );
@@ -675,11 +709,12 @@ fn text_with_fill_and_contrast_bg(id: &str, fill_token: &str, contrast_bg_token:
 }
 
 /// A `contrast-bg` hint takes TOP priority over the page background: a dark fill
-/// with a dark `contrast-bg` on a WHITE page must still warn `contrast.low`
-/// (judged against the hint, not the page bg), and the message names the hint.
+/// with a near-matching `contrast-bg` on a WHITE page must still warn
+/// `contrast.invisible` (judged against the hint, not the page bg), and the
+/// message names the hint.
 #[test]
 fn contrast_bg_hint_used_as_background() {
-    // Dark hint + dark fill → low contrast despite the white page bg.
+    // Dark hint + dark fill → effectively invisible despite the white page bg.
     let dark = doc_with(
         vec![
             color_token_hex("color.bg", "#ffffff"),
@@ -698,14 +733,14 @@ fn contrast_bg_hint_used_as_background() {
     );
     let report = validate(&dark);
     assert!(
-        has_code(&report, "contrast.low"),
-        "dark fill on a dark contrast-bg hint must warn contrast.low; codes: {:?}",
+        has_code(&report, "contrast.invisible"),
+        "dark fill on a near-matching contrast-bg hint must warn contrast.invisible; codes: {:?}",
         codes(&report)
     );
     let diag = report
         .diagnostics
         .iter()
-        .find(|d| d.code == "contrast.low")
+        .find(|d| d.code == "contrast.invisible")
         .expect("must exist");
     assert!(
         diag.message.contains("contrast-bg hint"),
@@ -734,6 +769,11 @@ fn contrast_bg_hint_used_as_background() {
     assert!(
         !has_code(&report, "contrast.low"),
         "dark fill on a light contrast-bg hint must NOT warn contrast.low; codes: {:?}",
+        codes(&report)
+    );
+    assert!(
+        !has_code(&report, "contrast.invisible"),
+        "dark fill on a light contrast-bg hint must NOT warn contrast.invisible; codes: {:?}",
         codes(&report)
     );
 }

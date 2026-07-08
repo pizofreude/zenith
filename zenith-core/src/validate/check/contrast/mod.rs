@@ -23,6 +23,10 @@ use geometry::{CoverageShape, RectPx, group_offset, local_box, text_box};
 /// skipped so they don't override a more solid backdrop or the page colour.
 const BACKDROP_OPAQUE_ALPHA: u8 = 128;
 
+/// Below this APCA magnitude the text is effectively painted into its backdrop,
+/// which is a stronger signal than ordinary sub-threshold contrast.
+const INVISIBLE_LC_FLOOR: f64 = 15.0;
+
 pub(super) fn check_page_text_contrast(
     children: &[Node],
     page_bg_rgb: Option<(u8, u8, u8)>,
@@ -259,13 +263,26 @@ fn check_text_node(
     let lc = apca_lc(fg_rgb, bg_rgb).abs();
 
     if lc < threshold {
+        let (code, detail) = if lc < INVISIBLE_LC_FLOOR {
+            (
+                "contrast.invisible",
+                format!(
+                    "is effectively invisible against {} (Lc below {:.0})",
+                    bg_source, INVISIBLE_LC_FLOOR
+                ),
+            )
+        } else {
+            (
+                "contrast.low",
+                format!(
+                    "of fill on {} is below the WCAG 3 draft threshold (Lc {:.0})",
+                    bg_source, threshold
+                ),
+            )
+        };
         diagnostics.push(Diagnostic::warning(
-            "contrast.low",
-            format!(
-                "text '{}': APCA contrast Lc {:.1} of fill on {} \
-                 is below the WCAG 3 minimum (Lc {:.0})",
-                text.id, lc, bg_source, threshold
-            ),
+            code,
+            format!("text '{}': APCA contrast Lc {:.1} {}", text.id, lc, detail),
             text.source_span,
             Some(text.id.clone()),
         ));
