@@ -142,8 +142,10 @@ fn divided_anchor(
     count: usize,
 ) -> ((f64, f64), AnchorSide) {
     match kind {
-        ConnectorTargetKind::Ellipse => divided_ellipse_anchor(boxr, index, count),
         ConnectorTargetKind::BoxLike => divided_box_anchor(boxr, index, count),
+        ConnectorTargetKind::Capsule => divided_capsule_anchor(boxr, index, count),
+        ConnectorTargetKind::Diamond => divided_diamond_anchor(boxr, index, count),
+        ConnectorTargetKind::Ellipse => divided_ellipse_anchor(boxr, index, count),
     }
 }
 
@@ -200,24 +202,123 @@ fn divided_box_anchor(
     ((x + distance, y), AnchorSide::Vertical)
 }
 
+fn divided_diamond_anchor(
+    boxr: (f64, f64, f64, f64),
+    index: usize,
+    count: usize,
+) -> ((f64, f64), AnchorSide) {
+    let (x, y, w, h) = boxr;
+    let cx = x + w / 2.0;
+    let cy = y + h / 2.0;
+    let vertices = [(cx, y), (x + w, cy), (cx, y + h), (x, cy), (cx, y)];
+    let segment_len = ((w / 2.0) * (w / 2.0) + (h / 2.0) * (h / 2.0)).sqrt();
+    if segment_len <= 0.0 {
+        return ((cx, y), AnchorSide::Vertical);
+    }
+    let mut distance = 4.0 * segment_len * (index as f64 / count as f64);
+    for segment in vertices.windows(2) {
+        if distance <= segment_len {
+            let t = distance / segment_len;
+            let px = segment[0].0 + (segment[1].0 - segment[0].0) * t;
+            let py = segment[0].1 + (segment[1].1 - segment[0].1) * t;
+            return ((px, py), anchor_side_from_center((px, py), (cx, cy)));
+        }
+        distance -= segment_len;
+    }
+    ((cx, y), AnchorSide::Vertical)
+}
+
+fn divided_capsule_anchor(
+    boxr: (f64, f64, f64, f64),
+    index: usize,
+    count: usize,
+) -> ((f64, f64), AnchorSide) {
+    let (x, y, w, h) = boxr;
+    if w <= h {
+        return divided_ellipse_anchor(boxr, index, count);
+    }
+
+    let cx = x + w / 2.0;
+    let cy = y + h / 2.0;
+    let radius = h / 2.0;
+    if radius <= 0.0 {
+        return ((cx, y), AnchorSide::Vertical);
+    }
+
+    let straight = w - 2.0 * radius;
+    let top_half = straight / 2.0;
+    let arc_len = std::f64::consts::PI * radius;
+    let perimeter = 2.0 * straight + 2.0 * arc_len;
+    let mut distance = perimeter * (index as f64 / count as f64);
+
+    if distance <= top_half {
+        return ((cx + distance, y), AnchorSide::Vertical);
+    }
+    distance -= top_half;
+
+    if distance <= arc_len {
+        let angle = -std::f64::consts::FRAC_PI_2 + distance / radius;
+        let px = x + w - radius + radius * angle.cos();
+        let py = cy + radius * angle.sin();
+        return ((px, py), anchor_side_from_center((px, py), (cx, cy)));
+    }
+    distance -= arc_len;
+
+    if distance <= straight {
+        return ((x + w - radius - distance, y + h), AnchorSide::Vertical);
+    }
+    distance -= straight;
+
+    if distance <= arc_len {
+        let angle = std::f64::consts::FRAC_PI_2 + distance / radius;
+        let px = x + radius + radius * angle.cos();
+        let py = cy + radius * angle.sin();
+        return ((px, py), anchor_side_from_center((px, py), (cx, cy)));
+    }
+    distance -= arc_len;
+
+    ((x + radius + distance, y), AnchorSide::Vertical)
+}
+
+fn anchor_side_from_center(pt: (f64, f64), center: (f64, f64)) -> AnchorSide {
+    if (pt.0 - center.0).abs() >= (pt.1 - center.1).abs() {
+        AnchorSide::Horizontal
+    } else {
+        AnchorSide::Vertical
+    }
+}
+
 /// Resolve a nine-point grid anchor string (e.g. `top-left`, `bottom-center`,
 /// `center`) to its point and leave/enter orientation. Returns `None` when the
 /// string names no grid position (e.g. `auto`), so the caller falls back to
 /// dominant-axis resolution. `mid`/`middle` are synonyms for `center`.
 fn grid_anchor(anchor: &str, boxr: (f64, f64, f64, f64)) -> Option<((f64, f64), AnchorSide)> {
     let (x, y, w, h) = boxr;
-    let (mut top, mut bottom, mut left, mut right, mut center, mut recognized) =
-        (false, false, false, false, false, false);
+    let (mut top, mut bottom, mut left, mut right, mut recognized) =
+        (false, false, false, false, false);
     for part in anchor.split('-') {
         match part {
-            "top" => top = true,
-            "bottom" => bottom = true,
-            "left" => left = true,
-            "right" => right = true,
-            "center" | "centre" | "mid" | "middle" => center = true,
+            "top" => {
+                top = true;
+                recognized = true;
+            }
+            "bottom" => {
+                bottom = true;
+                recognized = true;
+            }
+            "left" => {
+                left = true;
+                recognized = true;
+            }
+            "right" => {
+                right = true;
+                recognized = true;
+            }
+            "center" | "centre" | "mid" | "middle" => {
+                recognized = true;
+            }
             _ => continue,
         }
-        recognized = true;
     }
     if !recognized {
         return None;
@@ -245,7 +346,6 @@ fn grid_anchor(anchor: &str, boxr: (f64, f64, f64, f64)) -> Option<((f64, f64), 
     } else {
         AnchorSide::Horizontal
     };
-    let _ = center; // `center` only affects which band is unspecified.
     Some(((px, py), side))
 }
 

@@ -123,6 +123,8 @@ pub(in crate::compile) fn build_port_map(
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(in crate::compile) enum ConnectorTargetKind {
     BoxLike,
+    Capsule,
+    Diamond,
     Ellipse,
 }
 
@@ -193,6 +195,8 @@ fn collect_connector_target_kinds(
 fn connector_target_kind(node: &Node) -> ConnectorTargetKind {
     match node {
         Node::Ellipse(_) => ConnectorTargetKind::Ellipse,
+        Node::Shape(n) if n.kind.as_deref() == Some("decision") => ConnectorTargetKind::Diamond,
+        Node::Shape(n) if n.kind.as_deref() == Some("terminator") => ConnectorTargetKind::Capsule,
         Node::Shape(n) if n.kind.as_deref() == Some("ellipse") => ConnectorTargetKind::Ellipse,
         Node::Rect(_)
         | Node::Text(_)

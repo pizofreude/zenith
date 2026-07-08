@@ -198,6 +198,54 @@ page id="page.cn" w=(px)640 h=(px)360 {
 }
 
 #[test]
+fn connector_divided_decision_anchor_uses_diamond_perimeter() {
+    let src = r##"zenith version=1 {
+  project id="proj.cn" name="CN"
+  tokens format="zenith-token-v1" {
+token id="color.line" type="color" value="#1e3a8a"
+  }
+  styles {}
+  document id="doc.cn" title="CN" {
+page id="page.cn" w=(px)640 h=(px)360 {
+  rect id="a" x=(px)40 y=(px)40 w=(px)100 h=(px)80
+  shape id="b" kind="decision" x=(px)300 y=(px)60 w=(px)100 h=(px)80
+  connector id="c1" from="a" to="b" from-anchor="0/4" to-anchor="1/8" stroke=(token)"color.line"
+}
+  }
+}
+"##;
+    let doc = parse(src);
+    let result = compile(&doc, &default_provider());
+    let pts = first_stroke_polyline_points(&result.scene.commands);
+
+    assert_eq!(pts, vec![90.0, 40.0, 375.0, 80.0]);
+}
+
+#[test]
+fn connector_divided_terminator_anchor_uses_capsule_perimeter() {
+    let src = r##"zenith version=1 {
+  project id="proj.cn" name="CN"
+  tokens format="zenith-token-v1" {
+token id="color.line" type="color" value="#1e3a8a"
+  }
+  styles {}
+  document id="doc.cn" title="CN" {
+page id="page.cn" w=(px)640 h=(px)360 {
+  rect id="a" x=(px)40 y=(px)40 w=(px)100 h=(px)80
+  shape id="b" kind="terminator" x=(px)300 y=(px)60 w=(px)140 h=(px)80
+  connector id="c1" from="a" to="b" from-anchor="0/4" to-anchor="1/4" stroke=(token)"color.line"
+}
+  }
+}
+"##;
+    let doc = parse(src);
+    let result = compile(&doc, &default_provider());
+    let pts = first_stroke_polyline_points(&result.scene.commands);
+
+    assert_eq!(pts, vec![90.0, 40.0, 440.0, 100.0]);
+}
+
+#[test]
 fn connector_port_endpoints_resolve_to_declared_anchors() {
     let src = r##"zenith version=1 {
   project id="proj.cn" name="CN"
