@@ -9,6 +9,7 @@ pub mod collision;
 pub mod compound_path;
 pub mod contour;
 pub mod error;
+pub mod fill_topology;
 pub mod fit;
 pub mod guide;
 pub mod intersection;
@@ -46,6 +47,10 @@ pub use contour::{
     collect_raw_closed_polyline_intersections,
 };
 pub use error::GeometryError;
+pub use fill_topology::{
+    CompoundFillRule, CompoundFillTopology, FilledContourBoundaryRole, FilledContourTopology,
+    classify_closed_polyline_fill_topology, classify_compound_path_fill_topology,
+};
 pub use fit::{
     PolylineCubicFit, PolylineEndpointTangentDirections, chord_length_parameters,
     estimate_endpoint_tangent_directions, fit_cubic_bezier_to_points, fit_cubic_beziers_to_points,
