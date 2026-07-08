@@ -8,6 +8,7 @@ use std::collections::BTreeMap;
 use zenith_core::{ComponentDef, Node, Page, PropertyValue, ResolvedToken, dim_to_px};
 
 use super::super::container::prefix_ids_in_children;
+use super::super::imports::{ImportScopes, ImportSource, ImportedScope, parse_import_source};
 use super::super::util::resolve_geometry_px;
 
 /// Build the document-wide `node id → 1-based page index` map for `page-ref`
@@ -84,9 +85,18 @@ pub(in crate::compile) fn build_node_boxes(
     page: &Page,
     resolved: &BTreeMap<String, ResolvedToken>,
     components: &BTreeMap<&str, &ComponentDef>,
+    imports: &ImportScopes<'_>,
 ) -> BTreeMap<String, (f64, f64, f64, f64)> {
     let mut map: BTreeMap<String, (f64, f64, f64, f64)> = BTreeMap::new();
-    collect_node_boxes(&page.children, 0.0, 0.0, resolved, components, &mut map);
+    collect_node_boxes(
+        &page.children,
+        0.0,
+        0.0,
+        resolved,
+        components,
+        imports,
+        &mut map,
+    );
     map
 }
 
@@ -99,12 +109,13 @@ pub(in crate::compile) struct PortTarget {
 pub(in crate::compile) fn build_port_map(
     page: &Page,
     components: &BTreeMap<&str, &ComponentDef>,
+    imports: &ImportScopes<'_>,
 ) -> BTreeMap<String, BTreeMap<String, PortTarget>> {
     let mut map: BTreeMap<String, BTreeMap<String, PortTarget>> = BTreeMap::new();
     for port in &page.ports {
         insert_port(&mut map, &port.node, &port.id, &port.node, &port.anchor);
     }
-    collect_component_ports(&page.children, components, "", &mut map);
+    collect_component_ports(&page.children, components, imports, "", &mut map);
     map
 }
 
@@ -123,15 +134,19 @@ pub(in crate::compile) enum ConnectorTargetKind {
 pub(in crate::compile) fn build_connector_target_kinds(
     page: &zenith_core::Page,
     node_boxes: &BTreeMap<String, (f64, f64, f64, f64)>,
+    components: &BTreeMap<&str, &ComponentDef>,
+    imports: &ImportScopes<'_>,
 ) -> BTreeMap<String, ConnectorTargetKind> {
     let mut map: BTreeMap<String, ConnectorTargetKind> = BTreeMap::new();
-    collect_connector_target_kinds(&page.children, node_boxes, &mut map);
+    collect_connector_target_kinds(&page.children, node_boxes, components, imports, &mut map);
     map
 }
 
 fn collect_connector_target_kinds(
     children: &[Node],
     node_boxes: &BTreeMap<String, (f64, f64, f64, f64)>,
+    components: &BTreeMap<&str, &ComponentDef>,
+    imports: &ImportScopes<'_>,
     map: &mut BTreeMap<String, ConnectorTargetKind>,
 ) {
     for child in children {
@@ -142,8 +157,15 @@ fn collect_connector_target_kinds(
                 .or_insert(connector_target_kind(child));
         }
         match child {
-            Node::Frame(f) => collect_connector_target_kinds(&f.children, node_boxes, map),
-            Node::Group(g) => collect_connector_target_kinds(&g.children, node_boxes, map),
+            Node::Frame(f) => {
+                collect_connector_target_kinds(&f.children, node_boxes, components, imports, map);
+            }
+            Node::Group(g) => {
+                collect_connector_target_kinds(&g.children, node_boxes, components, imports, map);
+            }
+            Node::Instance(i) => {
+                collect_instance_connector_target_kinds(i, node_boxes, components, imports, map);
+            }
             Node::Table(_)
             | Node::Rect(_)
             | Node::Ellipse(_)
@@ -154,7 +176,6 @@ fn collect_connector_target_kinds(
             | Node::Polygon(_)
             | Node::Polyline(_)
             | Node::Path(_)
-            | Node::Instance(_)
             | Node::Field(_)
             | Node::Toc(_)
             | Node::Footnote(_)
@@ -206,6 +227,7 @@ fn collect_node_boxes(
     dy: f64,
     resolved: &BTreeMap<String, ResolvedToken>,
     components: &BTreeMap<&str, &ComponentDef>,
+    imports: &ImportScopes<'_>,
     map: &mut BTreeMap<String, (f64, f64, f64, f64)>,
 ) {
     for child in children {
@@ -216,7 +238,9 @@ fn collect_node_boxes(
         }
         match child {
             // A frame is clip-only: its children are NOT translated by its origin.
-            Node::Frame(f) => collect_node_boxes(&f.children, dx, dy, resolved, components, map),
+            Node::Frame(f) => {
+                collect_node_boxes(&f.children, dx, dy, resolved, components, imports, map);
+            }
             // A group translates its children by its own x/y (absent/bad-unit → 0).
             Node::Group(g) => {
                 let gx = resolve_geometry_px(g.x.as_ref(), resolved);
@@ -227,10 +251,15 @@ fn collect_node_boxes(
                     dy + gy.unwrap_or(0.0),
                     resolved,
                     components,
+                    imports,
                     map,
                 );
             }
             Node::Instance(i) => {
+                if let Some(source) = i.source.as_deref() {
+                    collect_imported_instance_node_boxes(i, source, dx, dy, imports, map);
+                    continue;
+                }
                 if let Some(component_id) = i.component.as_deref()
                     && let Some(component) = components.get(component_id)
                 {
@@ -247,7 +276,15 @@ fn collect_node_boxes(
                         .as_ref()
                         .and_then(|d| dim_to_px(d.value, &d.unit))
                         .unwrap_or(0.0);
-                    collect_node_boxes(&children, dx + ix, dy + iy, resolved, components, map);
+                    collect_node_boxes(
+                        &children,
+                        dx + ix,
+                        dy + iy,
+                        resolved,
+                        components,
+                        imports,
+                        map,
+                    );
                 }
             }
             // A table records its OWN box (above); its cell content is
@@ -298,6 +335,7 @@ fn insert_port(
 fn collect_component_ports(
     children: &[Node],
     components: &BTreeMap<&str, &ComponentDef>,
+    imports: &ImportScopes<'_>,
     prefix: &str,
     map: &mut BTreeMap<String, BTreeMap<String, PortTarget>>,
 ) {
@@ -305,6 +343,10 @@ fn collect_component_ports(
         match child {
             Node::Instance(i) => {
                 let instance_id = format!("{prefix}{}", i.id);
+                if let Some(source) = i.source.as_deref() {
+                    collect_imported_component_ports(source, imports, &instance_id, map);
+                    continue;
+                }
                 if let Some(component_id) = i.component.as_deref()
                     && let Some(component) = components.get(component_id)
                 {
@@ -313,15 +355,25 @@ fn collect_component_ports(
                         let target_node = format!("{child_prefix}{}", port.node);
                         insert_port(map, &instance_id, &port.id, &target_node, &port.anchor);
                     }
-                    collect_component_ports(&component.children, components, &child_prefix, map);
+                    collect_component_ports(
+                        &component.children,
+                        components,
+                        imports,
+                        &child_prefix,
+                        map,
+                    );
                 }
             }
-            Node::Frame(f) => collect_component_ports(&f.children, components, prefix, map),
-            Node::Group(g) => collect_component_ports(&g.children, components, prefix, map),
+            Node::Frame(f) => {
+                collect_component_ports(&f.children, components, imports, prefix, map)
+            }
+            Node::Group(g) => {
+                collect_component_ports(&g.children, components, imports, prefix, map)
+            }
             Node::Table(t) => {
                 for row in &t.rows {
                     for cell in &row.cells {
-                        collect_component_ports(&cell.children, components, prefix, map);
+                        collect_component_ports(&cell.children, components, imports, prefix, map);
                     }
                 }
             }
@@ -346,6 +398,115 @@ fn collect_component_ports(
             | Node::Unknown(_) => {}
         }
     }
+}
+
+fn collect_imported_instance_node_boxes(
+    instance: &zenith_core::InstanceNode,
+    source: &str,
+    dx: f64,
+    dy: f64,
+    imports: &ImportScopes<'_>,
+    map: &mut BTreeMap<String, (f64, f64, f64, f64)>,
+) {
+    let Some((imported, component)) = resolve_imported_component(source, imports) else {
+        return;
+    };
+
+    let mut children = component.children.clone();
+    let prefix = format!("{}/", instance.id);
+    prefix_ids_in_children(&mut children, &prefix);
+    let ix = instance
+        .x
+        .as_ref()
+        .and_then(|d| dim_to_px(d.value, &d.unit))
+        .unwrap_or(0.0);
+    let iy = instance
+        .y
+        .as_ref()
+        .and_then(|d| dim_to_px(d.value, &d.unit))
+        .unwrap_or(0.0);
+    collect_node_boxes(
+        &children,
+        dx + ix,
+        dy + iy,
+        &imported.resolved,
+        &imported.components,
+        imports,
+        map,
+    );
+}
+
+fn collect_imported_component_ports(
+    source: &str,
+    imports: &ImportScopes<'_>,
+    instance_id: &str,
+    map: &mut BTreeMap<String, BTreeMap<String, PortTarget>>,
+) {
+    let Some((imported, component)) = resolve_imported_component(source, imports) else {
+        return;
+    };
+
+    let child_prefix = format!("{instance_id}/");
+    for port in &component.ports {
+        let target_node = format!("{child_prefix}{}", port.node);
+        insert_port(map, instance_id, &port.id, &target_node, &port.anchor);
+    }
+    collect_component_ports(
+        &component.children,
+        &imported.components,
+        imports,
+        &child_prefix,
+        map,
+    );
+}
+
+fn collect_instance_connector_target_kinds(
+    instance: &zenith_core::InstanceNode,
+    node_boxes: &BTreeMap<String, (f64, f64, f64, f64)>,
+    components: &BTreeMap<&str, &ComponentDef>,
+    imports: &ImportScopes<'_>,
+    map: &mut BTreeMap<String, ConnectorTargetKind>,
+) {
+    if let Some(source) = instance.source.as_deref() {
+        let Some((imported, component)) = resolve_imported_component(source, imports) else {
+            return;
+        };
+        let mut children = component.children.clone();
+        let prefix = format!("{}/", instance.id);
+        prefix_ids_in_children(&mut children, &prefix);
+        collect_connector_target_kinds(&children, node_boxes, &imported.components, imports, map);
+        return;
+    }
+
+    let Some(component_id) = instance.component.as_deref() else {
+        return;
+    };
+    let Some(component) = components.get(component_id) else {
+        return;
+    };
+    let mut children = component.children.clone();
+    let prefix = format!("{}/", instance.id);
+    prefix_ids_in_children(&mut children, &prefix);
+    collect_connector_target_kinds(&children, node_boxes, components, imports, map);
+}
+
+fn resolve_imported_component<'a>(
+    source: &str,
+    imports: &'a ImportScopes<'a>,
+) -> Option<(&'a ImportedScope<'a>, &'a ComponentDef)> {
+    if !imports.is_enabled() {
+        return None;
+    }
+    let ImportSource::Component {
+        import_id,
+        component_id,
+    } = parse_import_source(source)
+    else {
+        return None;
+    };
+    let imported = imports.get(import_id)?;
+    let component = imported.components.get(component_id)?;
+    Some((imported, component))
 }
 
 /// A node's LOCAL `(x, y, w, h)` rectangle in pixels, when all four resolve.

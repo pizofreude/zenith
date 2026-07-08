@@ -12,6 +12,8 @@ fn imported_doc() -> common::Document {
   tokens format="zenith-token-v1" {
     token id="color.brand" type="color" value="#0000ff"
     token id="color.alt" type="color" value="#00ff00"
+    token id="size.core.w" type="dimension" value=(px)100
+    token id="size.core.h" type="dimension" value=(px)80
   }
   styles {}
   assets {
@@ -26,6 +28,12 @@ fn imported_doc() -> common::Document {
     }
     component id="component.image" {
       image id="img" asset="logo" x=(px)0 y=(px)0 w=(px)10 h=(px)10
+    }
+    component id="component.agent.node" {
+      ports {
+        port node="core" id="out" anchor="1/4"
+      }
+      rect id="core" x=(px)0 y=(px)0 w=(token)"size.core.w" h=(token)"size.core.h" fill=(token)"color.brand"
     }
   }
   document id="doc.imported" title="Imported" {
@@ -159,6 +167,18 @@ fn image_asset_ids(result: &zenith_scene::CompileResult) -> Vec<&str> {
         .collect()
 }
 
+fn first_stroke_polyline_points(result: &zenith_scene::CompileResult) -> Vec<f64> {
+    result
+        .scene
+        .commands
+        .iter()
+        .find_map(|command| match command {
+            SceneCommand::StrokePolyline { points, .. } => Some(points.clone()),
+            _ => None,
+        })
+        .expect("expected imported connector to emit a StrokePolyline")
+}
+
 #[test]
 fn imported_instance_expands_component_from_in_memory_graph() {
     let host = host_doc("library#component.component.card");
@@ -227,6 +247,25 @@ fn imported_component_override_fill_uses_host_token_scope() {
     assert_eq!(
         fill_rects(&result),
         vec![(5.0, 7.0, 40.0, 20.0, (255, 255, 0))]
+    );
+}
+
+#[test]
+fn connector_port_projects_through_imported_instance() {
+    let host = host_doc_with_instance_body(
+        r##"instance id="agent" source="library#component.component.agent.node" x=(px)40 y=(px)40
+      rect id="store" x=(px)300 y=(px)60 w=(px)100 h=(px)80 fill=(token)"color.brand"
+      connector id="c1" from="agent#out" to="store" to-anchor="left" stroke=(token)"color.brand""##,
+    );
+    let imported = imported_doc();
+    let imports = ImportGraph::new().with_document("library", &imported);
+
+    let result = compile_page_with_imports(&host, &default_provider(), 0, None, &imports);
+
+    assert_eq!(diagnostic_codes(&result), Vec::<&str>::new());
+    assert_eq!(
+        first_stroke_polyline_points(&result),
+        vec![140.0, 80.0, 300.0, 100.0]
     );
 }
 
