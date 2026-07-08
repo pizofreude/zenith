@@ -8,7 +8,9 @@ use std::collections::BTreeMap;
 use std::path::{Component, Path, PathBuf};
 
 use sha2::{Digest, Sha256};
-use zenith_core::{Diagnostic, Document, ImportDecl, KdlAdapter, KdlSource};
+use zenith_core::{
+    Diagnostic, Dimension, Document, ImportDecl, KdlAdapter, KdlSource, Node, Page, dim_to_px,
+};
 use zenith_scene::ImportGraph as SceneImportGraph;
 
 /// Parsed import graph plus diagnostics collected while traversing it.
@@ -55,6 +57,7 @@ pub(crate) fn load_import_graph(root: &Document, root_dir: Option<&Path>) -> Loa
         Some(dir) => loader.load_document_imports(root, dir),
         None => loader.report_unresolvable_root(root),
     }
+    loader.validate_root_targets(root);
     loader.finish()
 }
 
@@ -169,6 +172,185 @@ impl ImportGraphLoader {
         self.documents.insert(import.id.clone(), doc);
     }
 
+    fn validate_root_targets(&mut self, root: &Document) {
+        let declared_imports: BTreeMap<&str, &ImportDecl> = root
+            .imports
+            .iter()
+            .map(|import| (import.id.as_str(), import))
+            .collect();
+        for page in &root.body.pages {
+            self.validate_page_source(page, &declared_imports);
+            self.validate_node_sources(&page.children, &declared_imports);
+        }
+        for component in &root.components {
+            self.validate_node_sources(&component.children, &declared_imports);
+        }
+        for master in &root.masters {
+            self.validate_node_sources(&master.children, &declared_imports);
+        }
+    }
+
+    fn validate_page_source(
+        &mut self,
+        page: &Page,
+        declared_imports: &BTreeMap<&str, &ImportDecl>,
+    ) {
+        let Some(source) = page.source.as_deref() else {
+            return;
+        };
+        match parse_import_source(source) {
+            ImportSource::Page { import_id, page_id } => {
+                let Some(imported) = self.imported_document_for_reference(
+                    import_id,
+                    declared_imports,
+                    page.source_span,
+                ) else {
+                    return;
+                };
+                let Some(imported_page) = imported
+                    .body
+                    .pages
+                    .iter()
+                    .find(|candidate| candidate.id == page_id)
+                else {
+                    self.push_unknown_reference(
+                        format!(
+                            "page '{}' source references unknown page '{}' in import '{}'",
+                            page.id, page_id, import_id
+                        ),
+                        page.source_span,
+                        Some(page.id.clone()),
+                    );
+                    return;
+                };
+                if page.fit.is_none() && !same_page_size(page, imported_page) {
+                    self.diagnostics.push(Diagnostic::error(
+                        "import.page_size_mismatch",
+                        format!(
+                            "page '{}' source '{}' has different dimensions and no explicit fit",
+                            page.id, source
+                        ),
+                        page.source_span,
+                        Some(page.id.clone()),
+                    ));
+                }
+            }
+            ImportSource::Component { .. }
+            | ImportSource::UnsupportedTarget
+            | ImportSource::Invalid => self.push_unsupported_target(
+                format!(
+                    "page '{}' source '{}' is not a supported page target",
+                    page.id, source
+                ),
+                page.source_span,
+                Some(page.id.clone()),
+            ),
+        }
+    }
+
+    fn validate_node_sources(
+        &mut self,
+        nodes: &[Node],
+        declared_imports: &BTreeMap<&str, &ImportDecl>,
+    ) {
+        for node in nodes {
+            match node {
+                Node::Frame(frame) => self.validate_node_sources(&frame.children, declared_imports),
+                Node::Group(group) => self.validate_node_sources(&group.children, declared_imports),
+                Node::Table(table) => {
+                    for row in &table.rows {
+                        for cell in &row.cells {
+                            self.validate_node_sources(&cell.children, declared_imports);
+                        }
+                    }
+                }
+                Node::Instance(instance) => {
+                    if let Some(source) = instance.source.as_deref() {
+                        match parse_import_source(source) {
+                            ImportSource::Component {
+                                import_id,
+                                component_id,
+                            } => {
+                                let Some(imported) = self.imported_document_for_reference(
+                                    import_id,
+                                    declared_imports,
+                                    instance.source_span,
+                                ) else {
+                                    continue;
+                                };
+                                if !imported
+                                    .components
+                                    .iter()
+                                    .any(|component| component.id == component_id)
+                                {
+                                    self.push_unknown_reference(
+                                        format!(
+                                            "instance '{}' source references unknown component '{}' in import '{}'",
+                                            instance.id, component_id, import_id
+                                        ),
+                                        instance.source_span,
+                                        Some(instance.id.clone()),
+                                    );
+                                }
+                            }
+                            ImportSource::Page { .. }
+                            | ImportSource::UnsupportedTarget
+                            | ImportSource::Invalid => self.push_unsupported_target(
+                                format!(
+                                    "instance '{}' source '{}' is not a supported component target",
+                                    instance.id, source
+                                ),
+                                instance.source_span,
+                                Some(instance.id.clone()),
+                            ),
+                        }
+                    }
+                }
+                Node::Unknown(unknown) => {
+                    self.validate_node_sources(&unknown.children, declared_imports);
+                }
+                Node::Rect(_)
+                | Node::Ellipse(_)
+                | Node::Line(_)
+                | Node::Text(_)
+                | Node::Code(_)
+                | Node::Image(_)
+                | Node::Polygon(_)
+                | Node::Polyline(_)
+                | Node::Path(_)
+                | Node::Field(_)
+                | Node::Footnote(_)
+                | Node::Toc(_)
+                | Node::Shape(_)
+                | Node::Connector(_)
+                | Node::Pattern(_)
+                | Node::Chart(_)
+                | Node::Light(_)
+                | Node::Mesh(_) => {}
+            }
+        }
+    }
+
+    fn imported_document_for_reference(
+        &mut self,
+        import_id: &str,
+        declared_imports: &BTreeMap<&str, &ImportDecl>,
+        span: Option<zenith_core::Span>,
+    ) -> Option<&Document> {
+        if self.documents.contains_key(import_id) {
+            return self.documents.get(import_id);
+        }
+        if declared_imports.contains_key(import_id) {
+            return None;
+        }
+        self.push_unknown_reference(
+            format!("source references undeclared import '{}'", import_id),
+            span,
+            Some(import_id.to_owned()),
+        );
+        None
+    }
+
     fn verify_hash(&mut self, import: &ImportDecl, actual: &str) {
         let Some(declared) = import.sha256.as_deref() else {
             return;
@@ -196,11 +378,8 @@ impl ImportGraphLoader {
     }
 
     fn push_cycle(&mut self, import: &ImportDecl, repeated: &Path) {
-        let mut chain: Vec<String> = self
-            .stack
-            .iter()
-            .map(|path| path.display().to_string())
-            .collect();
+        let mut chain = Vec::with_capacity(self.stack.len() + 1);
+        chain.extend(self.stack.iter().map(|path| path.display().to_string()));
         chain.push(repeated.display().to_string());
         self.diagnostics.push(Diagnostic::error(
             "import.cycle",
@@ -212,6 +391,89 @@ impl ImportGraphLoader {
             import.source_span,
             Some(import.id.clone()),
         ));
+    }
+
+    fn push_unknown_reference(
+        &mut self,
+        message: String,
+        span: Option<zenith_core::Span>,
+        subject_id: Option<String>,
+    ) {
+        self.diagnostics.push(Diagnostic::error(
+            "import.unknown_reference",
+            message,
+            span,
+            subject_id,
+        ));
+    }
+
+    fn push_unsupported_target(
+        &mut self,
+        message: String,
+        span: Option<zenith_core::Span>,
+        subject_id: Option<String>,
+    ) {
+        self.diagnostics.push(Diagnostic::error(
+            "import.unsupported_target",
+            message,
+            span,
+            subject_id,
+        ));
+    }
+}
+
+enum ImportSource<'a> {
+    Component {
+        import_id: &'a str,
+        component_id: &'a str,
+    },
+    Page {
+        import_id: &'a str,
+        page_id: &'a str,
+    },
+    UnsupportedTarget,
+    Invalid,
+}
+
+fn parse_import_source(source: &str) -> ImportSource<'_> {
+    let Some((import_id, target)) = source.split_once('#') else {
+        return ImportSource::Invalid;
+    };
+    if import_id.is_empty() || target.is_empty() || target.contains('#') {
+        return ImportSource::Invalid;
+    }
+
+    if let Some(component_id) = target.strip_prefix("component.") {
+        if component_id.is_empty() {
+            return ImportSource::Invalid;
+        }
+        return ImportSource::Component {
+            import_id,
+            component_id,
+        };
+    }
+
+    if let Some(page_id) = target.strip_prefix("page.") {
+        if page_id.is_empty() {
+            return ImportSource::Invalid;
+        }
+        return ImportSource::Page { import_id, page_id };
+    }
+
+    ImportSource::UnsupportedTarget
+}
+
+fn same_page_size(host: &Page, imported: &Page) -> bool {
+    same_dimension(&host.width, &imported.width) && same_dimension(&host.height, &imported.height)
+}
+
+fn same_dimension(left: &Dimension, right: &Dimension) -> bool {
+    match (
+        dim_to_px(left.value, &left.unit),
+        dim_to_px(right.value, &right.unit),
+    ) {
+        (Some(left_px), Some(right_px)) => (left_px - right_px).abs() <= f64::EPSILON,
+        _ => left == right,
     }
 }
 
@@ -301,6 +563,43 @@ mod tests {
 }}
 "#
         ))
+    }
+
+    fn root_with_import_and_body(src: &str, body: &str) -> Document {
+        parse(&format!(
+            r#"zenith version=1 {{
+  project id="proj.root" name="Root"
+  imports {{
+    import id="child" kind="zen" src="{src}"
+  }}
+  document id="doc.root" title="Root" {{
+{body}
+  }}
+}}
+"#
+        ))
+    }
+
+    fn imported_with_component_and_page(
+        component_id: &str,
+        page_id: &str,
+        w: f64,
+        h: f64,
+    ) -> String {
+        format!(
+            r#"zenith version=1 {{
+  project id="proj.child" name="Child"
+  document id="doc.child" title="Child" {{
+    page id="{page_id}" w=(px){w} h=(px){h}
+  }}
+  components {{
+    component id="{component_id}" {{
+      rect id="mark" x=(px)0 y=(px)0 w=(px)10 h=(px)10
+    }}
+  }}
+}}
+"#
+        )
     }
 
     #[test]
@@ -420,5 +719,89 @@ mod tests {
 
         assert_eq!(diagnostics.len(), 1);
         assert_eq!(diagnostics[0].code, "import.cycle");
+    }
+
+    #[test]
+    fn load_import_graph_reports_unknown_component_target() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        fs::write(
+            dir.path().join("child.zen"),
+            imported_with_component_and_page("component.card", "cover", 100.0, 100.0),
+        )
+        .expect("write child");
+        let root = root_with_import_and_body(
+            "child.zen",
+            r#"    page id="page.root" w=(px)100 h=(px)100 {
+      instance id="inst.missing" source="child#component.missing" x=(px)0 y=(px)0
+    }"#,
+        );
+
+        let diagnostics = load_import_graph(&root, Some(dir.path())).into_diagnostics();
+
+        assert_eq!(diagnostics.len(), 1);
+        assert_eq!(diagnostics[0].code, "import.unknown_reference");
+        assert_eq!(diagnostics[0].subject_id.as_deref(), Some("inst.missing"));
+    }
+
+    #[test]
+    fn load_import_graph_reports_unsupported_instance_page_target() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        fs::write(
+            dir.path().join("child.zen"),
+            imported_with_component_and_page("component.card", "cover", 100.0, 100.0),
+        )
+        .expect("write child");
+        let root = root_with_import_and_body(
+            "child.zen",
+            r#"    page id="page.root" w=(px)100 h=(px)100 {
+      instance id="inst.page" source="child#page.cover" x=(px)0 y=(px)0
+    }"#,
+        );
+
+        let diagnostics = load_import_graph(&root, Some(dir.path())).into_diagnostics();
+
+        assert_eq!(diagnostics.len(), 1);
+        assert_eq!(diagnostics[0].code, "import.unsupported_target");
+        assert_eq!(diagnostics[0].subject_id.as_deref(), Some("inst.page"));
+    }
+
+    #[test]
+    fn load_import_graph_reports_unknown_page_target() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        fs::write(
+            dir.path().join("child.zen"),
+            imported_with_component_and_page("component.card", "cover", 100.0, 100.0),
+        )
+        .expect("write child");
+        let root = root_with_import_and_body(
+            "child.zen",
+            r#"    page id="page.root" source="child#page.missing" w=(px)100 h=(px)100"#,
+        );
+
+        let diagnostics = load_import_graph(&root, Some(dir.path())).into_diagnostics();
+
+        assert_eq!(diagnostics.len(), 1);
+        assert_eq!(diagnostics[0].code, "import.unknown_reference");
+        assert_eq!(diagnostics[0].subject_id.as_deref(), Some("page.root"));
+    }
+
+    #[test]
+    fn load_import_graph_reports_page_size_mismatch() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        fs::write(
+            dir.path().join("child.zen"),
+            imported_with_component_and_page("component.card", "cover", 200.0, 100.0),
+        )
+        .expect("write child");
+        let root = root_with_import_and_body(
+            "child.zen",
+            r#"    page id="page.root" source="child#page.cover" w=(px)100 h=(px)100"#,
+        );
+
+        let diagnostics = load_import_graph(&root, Some(dir.path())).into_diagnostics();
+
+        assert_eq!(diagnostics.len(), 1);
+        assert_eq!(diagnostics[0].code, "import.page_size_mismatch");
+        assert_eq!(diagnostics[0].subject_id.as_deref(), Some("page.root"));
     }
 }

@@ -209,9 +209,24 @@ pub const DIAGNOSTIC_CODES: &[DiagnosticCodeInfo] = &[
         "Imported `.zen` source could not be read.",
     ),
     info(
+        "import.page_size_mismatch",
+        Severity::Error,
+        "Imported page target dimensions differ from the host page without an explicit fit.",
+    ),
+    info(
         "import.parse_error",
         Severity::Error,
         "Imported `.zen` source could not be parsed.",
+    ),
+    info(
+        "import.unknown_reference",
+        Severity::Error,
+        "Composition source references an undeclared import or missing imported target.",
+    ),
+    info(
+        "import.unsupported_target",
+        Severity::Error,
+        "Composition source target is malformed or unsupported in this context.",
     ),
     info(
         "instance.missing_reference",
@@ -1116,6 +1131,28 @@ mod tests {
             ("text.fit_failed", Severity::Error),
             ("text.forced_break", Severity::Warning),
             ("text.overflow", Severity::Warning),
+        ];
+        for (code, expected_severity) in cases {
+            let entry =
+                lookup(code).unwrap_or_else(|| panic!("{code} must be in the diagnostic catalog"));
+            assert_eq!(
+                entry.severity, *expected_severity,
+                "{code} catalog severity mismatch"
+            );
+        }
+    }
+
+    #[test]
+    fn import_diagnostics_are_catalogued() {
+        let cases: &[(&str, Severity)] = &[
+            ("import.cycle", Severity::Error),
+            ("import.hash_mismatch", Severity::Error),
+            ("import.invalid_kind", Severity::Error),
+            ("import.missing", Severity::Error),
+            ("import.page_size_mismatch", Severity::Error),
+            ("import.parse_error", Severity::Error),
+            ("import.unknown_reference", Severity::Error),
+            ("import.unsupported_target", Severity::Error),
         ];
         for (code, expected_severity) in cases {
             let entry =
