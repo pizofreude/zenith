@@ -1,6 +1,7 @@
 use crate::{
-    GeometryError, PathGeometry, Point2, PolylineIntersection, PolylineProjection,
-    SegmentIntersection, collect_open_polyline_intersections, validation::validate_tolerance,
+    CompoundPathGeometry, GeometryError, PathGeometry, Point2, PolylineIntersection,
+    PolylineProjection, SegmentIntersection, collect_open_polyline_intersections,
+    validation::validate_tolerance,
 };
 
 #[derive(Debug, Clone, PartialEq)]
@@ -8,6 +9,18 @@ pub struct PathGeometryIntersections {
     pub first_points: Vec<Point2>,
     pub second_points: Vec<Point2>,
     pub intersections: Vec<PolylineIntersection>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct CompoundPathGeometryIntersections {
+    pub intersections: Vec<CompoundPathGeometryIntersection>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct CompoundPathGeometryIntersection {
+    pub first_contour_index: usize,
+    pub second_contour_index: usize,
+    pub intersection: PolylineIntersection,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -19,6 +32,13 @@ pub struct PathGeometryNearestPoints {
     pub first_segment_t: f64,
     pub second_segment_t: f64,
     pub distance_squared: f64,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct CompoundPathGeometryNearestPoints {
+    pub first_contour_index: usize,
+    pub second_contour_index: usize,
+    pub nearest: PathGeometryNearestPoints,
 }
 
 pub fn collect_path_geometry_intersections(
@@ -88,6 +108,59 @@ pub fn nearest_path_geometry_points(
                     distance_squared: projection.distance_squared,
                 },
             );
+        }
+    }
+
+    Ok(nearest)
+}
+
+pub fn collect_compound_path_geometry_intersections(
+    first: &CompoundPathGeometry,
+    second: &CompoundPathGeometry,
+    tolerance: f64,
+) -> Result<CompoundPathGeometryIntersections, GeometryError> {
+    validate_tolerance(tolerance)?;
+    let mut intersections = Vec::new();
+
+    for (first_contour_index, first_contour) in first.contours().iter().enumerate() {
+        for (second_contour_index, second_contour) in second.contours().iter().enumerate() {
+            let report =
+                collect_path_geometry_intersections(first_contour, second_contour, tolerance)?;
+            intersections.extend(report.intersections.into_iter().map(|intersection| {
+                CompoundPathGeometryIntersection {
+                    first_contour_index,
+                    second_contour_index,
+                    intersection,
+                }
+            }));
+        }
+    }
+
+    Ok(CompoundPathGeometryIntersections { intersections })
+}
+
+pub fn nearest_compound_path_geometry_points(
+    first: &CompoundPathGeometry,
+    second: &CompoundPathGeometry,
+    tolerance: f64,
+) -> Result<Option<CompoundPathGeometryNearestPoints>, GeometryError> {
+    validate_tolerance(tolerance)?;
+    let mut nearest = None;
+
+    for (first_contour_index, first_contour) in first.contours().iter().enumerate() {
+        for (second_contour_index, second_contour) in second.contours().iter().enumerate() {
+            if let Some(candidate) =
+                nearest_path_geometry_points(first_contour, second_contour, tolerance)?
+            {
+                update_nearest_compound(
+                    &mut nearest,
+                    CompoundPathGeometryNearestPoints {
+                        first_contour_index,
+                        second_contour_index,
+                        nearest: candidate,
+                    },
+                );
+            }
         }
     }
 
@@ -167,6 +240,17 @@ fn update_nearest(
     }
 }
 
+fn update_nearest_compound(
+    nearest: &mut Option<CompoundPathGeometryNearestPoints>,
+    candidate: CompoundPathGeometryNearestPoints,
+) {
+    match nearest {
+        Some(current) if candidate.nearest.distance_squared >= current.nearest.distance_squared => {
+        }
+        Some(_) | None => *nearest = Some(candidate),
+    }
+}
+
 fn vertex_segment_index(points: &[Point2], point_index: usize) -> usize {
     if point_index == 0 {
         0
@@ -188,7 +272,9 @@ fn vertex_segment_t(points: &[Point2], point_index: usize) -> f64 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{CubicBezier, PathAnchor, PathSegment, Point2, SegmentIntersection};
+    use crate::{
+        CompoundPathGeometry, CubicBezier, PathAnchor, PathSegment, Point2, SegmentIntersection,
+    };
 
     fn point(x: f64, y: f64) -> Point2 {
         Point2::new_unchecked(x, y)
@@ -196,6 +282,14 @@ mod tests {
 
     fn anchor(x: f64, y: f64) -> PathAnchor {
         PathAnchor::new(point(x, y), None, None).expect("valid anchor")
+    }
+
+    fn path(points: &[(f64, f64)], closed: bool) -> PathGeometry {
+        let anchors = points
+            .iter()
+            .map(|(x, y)| anchor(*x, *y))
+            .collect::<Vec<_>>();
+        PathGeometry::new(anchors, closed).expect("path")
     }
 
     #[test]
@@ -365,5 +459,45 @@ mod tests {
                 distance_squared: 13.0,
             }))
         );
+    }
+
+    #[test]
+    fn compound_intersections_preserve_contour_indices() {
+        let first = CompoundPathGeometry::new(vec![
+            path(&[(0.0, 10.0), (10.0, 10.0)], false),
+            path(&[(0.0, 0.0), (10.0, 0.0)], false),
+        ]);
+        let second = CompoundPathGeometry::new(vec![
+            path(&[(20.0, 20.0), (30.0, 20.0)], false),
+            path(&[(5.0, -5.0), (5.0, 5.0)], false),
+        ]);
+
+        let report =
+            collect_compound_path_geometry_intersections(&first, &second, 0.1).expect("report");
+
+        assert_eq!(report.intersections.len(), 1);
+        assert_eq!(report.intersections[0].first_contour_index, 1);
+        assert_eq!(report.intersections[0].second_contour_index, 1);
+        assert_eq!(report.intersections[0].intersection.first_segment_index, 0);
+        assert_eq!(report.intersections[0].intersection.second_segment_index, 0);
+    }
+
+    #[test]
+    fn compound_nearest_reports_contour_indices_with_earliest_tie() {
+        let first = CompoundPathGeometry::new(vec![
+            path(&[(0.0, 0.0), (10.0, 0.0)], false),
+            path(&[(0.0, 4.0), (10.0, 4.0)], false),
+        ]);
+        let second = CompoundPathGeometry::new(vec![path(&[(5.0, 2.0), (15.0, 2.0)], false)]);
+
+        let nearest = nearest_compound_path_geometry_points(&first, &second, 0.1)
+            .expect("nearest")
+            .expect("measurement");
+
+        assert_eq!(nearest.first_contour_index, 0);
+        assert_eq!(nearest.second_contour_index, 0);
+        assert_eq!(nearest.nearest.distance_squared, 4.0);
+        assert_eq!(nearest.nearest.first_segment_index, 0);
+        assert_eq!(nearest.nearest.second_segment_index, 0);
     }
 }

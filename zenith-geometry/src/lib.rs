@@ -32,8 +32,10 @@ pub use boolean_piece::{ContourBooleanPiece, materialize_contour_boolean_pieces}
 pub use boolean_reconstruct::reconstruct_contour_boolean_result;
 pub use bounds::RectBounds;
 pub use collision::{
-    PathGeometryIntersections, PathGeometryNearestPoints, collect_path_geometry_intersections,
-    nearest_path_geometry_points,
+    CompoundPathGeometryIntersection, CompoundPathGeometryIntersections,
+    CompoundPathGeometryNearestPoints, PathGeometryIntersections, PathGeometryNearestPoints,
+    collect_compound_path_geometry_intersections, collect_path_geometry_intersections,
+    nearest_compound_path_geometry_points, nearest_path_geometry_points,
 };
 pub use compound_path::{
     CompoundPathGeometry, CompoundPathProjection, FlattenedPathContour, PathContourSpec,
