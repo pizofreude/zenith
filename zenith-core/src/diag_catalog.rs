@@ -264,6 +264,11 @@ pub const DIAGNOSTIC_CODES: &[DiagnosticCodeInfo] = &[
         "Text/background APCA Lc contrast is near zero, so the text is effectively invisible.",
     ),
     info(
+        "contrast.indeterminate_backdrop",
+        Severity::Advisory,
+        "Text sits on an image or other backdrop that cannot be sampled during validation.",
+    ),
+    info(
         "contrast.low",
         Severity::Warning,
         "Text/background APCA Lc contrast is below the WCAG 3 draft threshold.",

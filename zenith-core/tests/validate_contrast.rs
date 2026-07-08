@@ -9,6 +9,7 @@ use std::collections::BTreeMap;
 mod common;
 
 use common::*;
+use zenith_core::{GradientKind, GradientLiteral, GradientStopRef};
 
 // ══════════════════════════════════════════════════════════════════════
 // WCAG 3 (APCA) contrast advisory tests
@@ -34,6 +35,29 @@ fn fw_token(id: &str, weight: f64) -> Token {
         id: id.to_owned(),
         token_type: TokenType::FontWeight,
         value: TokenValue::Literal(TokenLiteral::Number(weight)),
+        set: None,
+        source_span: None,
+    }
+}
+
+fn linear_gradient_token(id: &str, stops: Vec<(f64, &str)>) -> Token {
+    Token {
+        id: id.to_owned(),
+        token_type: TokenType::Gradient,
+        value: TokenValue::Literal(TokenLiteral::Gradient(GradientLiteral {
+            kind: GradientKind::Linear,
+            angle_deg: 0.0,
+            center_x: None,
+            center_y: None,
+            radius: None,
+            stops: stops
+                .into_iter()
+                .map(|(offset, color)| GradientStopRef {
+                    offset,
+                    color_token: color.to_owned(),
+                })
+                .collect(),
+        })),
         set: None,
         source_span: None,
     }
@@ -66,6 +90,40 @@ fn page_with_bg(id: &str, bg_token_id: &str, children: Vec<Node>) -> Page {
         children,
         source_span: None,
     }
+}
+
+fn backdrop_image_asset(id: &str) -> AssetDecl {
+    AssetDecl {
+        id: id.to_owned(),
+        kind: AssetKind::Image,
+        src: "assets/backdrop.png".to_owned(),
+        sha256: None,
+        producer_kind: None,
+        producer_source: None,
+        ai_prompt: None,
+        ai_model: None,
+        ai_provider: None,
+        ai_seed: None,
+        ai_generation_date: None,
+        ai_license: None,
+        ai_source_rights: None,
+        ai_safety_status: None,
+        ai_reuse_policy: None,
+        source_span: None,
+        unknown_props: BTreeMap::new(),
+    }
+}
+
+fn doc_with_backdrop_image(tokens: Vec<Token>, children: Vec<Node>) -> Document {
+    let mut doc = doc_with(
+        tokens,
+        vec![page_with_bg("page.one", "color.page", children)],
+    );
+    doc.assets = AssetBlock {
+        assets: vec![backdrop_image_asset("asset.backdrop")],
+        source_span: None,
+    };
+    doc
 }
 
 /// Build a text node with explicit fill and optional font-size / font-weight.
@@ -283,6 +341,49 @@ fn shape_backdrop_at(
         source_span: None,
         unknown_props: BTreeMap::new(),
     }))
+}
+
+fn image_backdrop_at(id: &str, x: f64, y: f64, w: f64, h: f64) -> Node {
+    Node::Image(ImageNode {
+        shadow: None,
+        filter: None,
+        mask: None,
+        id: id.to_owned(),
+        name: None,
+        role: None,
+        asset: "asset.backdrop".to_owned(),
+        x: Some(pxv(x)),
+        y: Some(pxv(y)),
+        w: Some(pxv(w)),
+        h: Some(pxv(h)),
+        src_x: None,
+        src_y: None,
+        src_w: None,
+        src_h: None,
+        fit: None,
+        svg_stroke: None,
+        svg_fill: None,
+        svg_stroke_width: None,
+        clip: None,
+        clip_radius: None,
+        object_position_x: None,
+        object_position_y: None,
+        opacity: None,
+        visible: None,
+        locked: None,
+        rotate: None,
+        blend_mode: None,
+        blur: None,
+        style: None,
+        anchor: None,
+        anchor_zone: None,
+        anchor_sibling: None,
+        anchor_edge: None,
+        anchor_gap: None,
+        anchor_parent: None,
+        source_span: None,
+        unknown_props: BTreeMap::new(),
+    })
 }
 
 /// Build a text node with explicit dimensions and page-relative anchor.
@@ -628,6 +729,36 @@ fn text_straddling_backdrop_uses_worst_sample() {
     );
 }
 
+#[test]
+fn gradient_backdrop_uses_worst_stop() {
+    let doc = doc_with(
+        vec![
+            color_token_hex("color.page", "#ffffff"),
+            color_token_hex("color.light", "#ffffff"),
+            color_token_hex("color.dark", "#003087"),
+            color_token_hex("color.text", "#000000"),
+            linear_gradient_token(
+                "gradient.backdrop",
+                vec![(0.0, "color.light"), (1.0, "color.dark")],
+            ),
+        ],
+        vec![page_with_bg(
+            "page.one",
+            "color.page",
+            vec![
+                rect_backdrop_at("backdrop", "gradient.backdrop", 100.0, 100.0, 220.0, 100.0),
+                text_at("headline", "color.text", 130.0, 130.0, 80.0, 30.0),
+            ],
+        )],
+    );
+    let report = validate(&doc);
+    assert!(
+        has_code(&report, "contrast.invisible"),
+        "gradient backdrop should use its worst-contrast stop; codes: {:?}",
+        codes(&report)
+    );
+}
+
 /// Text node with no fill → no contrast check → no warning.
 #[test]
 fn text_without_fill_skips_contrast_check() {
@@ -799,6 +930,47 @@ fn contrast_bg_hint_used_as_background() {
     assert!(
         !has_code(&report, "contrast.invisible"),
         "dark fill on a light contrast-bg hint must NOT warn contrast.invisible; codes: {:?}",
+        codes(&report)
+    );
+}
+
+#[test]
+fn image_backdrop_without_hint_is_indeterminate() {
+    let doc = doc_with_backdrop_image(
+        vec![
+            color_token_hex("color.page", "#ffffff"),
+            color_token_hex("color.text", "#000000"),
+        ],
+        vec![
+            image_backdrop_at("image.backdrop", 0.0, 0.0, 220.0, 100.0),
+            text_at("headline", "color.text", 40.0, 30.0, 80.0, 30.0),
+        ],
+    );
+    let report = validate(&doc);
+    assert!(
+        has_code(&report, "contrast.indeterminate_backdrop"),
+        "text over image without contrast-bg should request a contrast hint; codes: {:?}",
+        codes(&report)
+    );
+}
+
+#[test]
+fn contrast_bg_hint_suppresses_image_indeterminate() {
+    let doc = doc_with_backdrop_image(
+        vec![
+            color_token_hex("color.page", "#ffffff"),
+            color_token_hex("color.text", "#000000"),
+            color_token_hex("color.photo.light", "#ffffff"),
+        ],
+        vec![
+            image_backdrop_at("image.backdrop", 0.0, 0.0, 220.0, 100.0),
+            text_with_fill_and_contrast_bg("headline", "color.text", "color.photo.light"),
+        ],
+    );
+    let report = validate(&doc);
+    assert!(
+        !has_code(&report, "contrast.indeterminate_backdrop"),
+        "contrast-bg hint should suppress image indeterminate advisory; codes: {:?}",
         codes(&report)
     );
 }

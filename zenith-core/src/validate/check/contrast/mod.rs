@@ -9,7 +9,7 @@ mod geometry;
 
 use std::collections::BTreeMap;
 
-use crate::ast::node::{Node, ShapeNode, TableNode, TextNode};
+use crate::ast::node::{ImageNode, Node, ShapeNode, TableNode, TextNode};
 use crate::ast::style::Style;
 use crate::ast::value::{PropertyValue, dim_to_px};
 use crate::color::{apca_lc, parse_rgb};
@@ -59,11 +59,17 @@ struct PaintCtx {
     page_size: (f64, f64),
 }
 
-#[derive(Clone, Copy)]
 struct BackdropCandidate {
-    rgb: (u8, u8, u8),
+    paint: BackdropPaint,
     bounds: RectPx,
     shape: CoverageShape,
+}
+
+#[derive(Debug)]
+enum BackdropPaint {
+    Solid((u8, u8, u8)),
+    Gradient(Vec<(u8, u8, u8)>),
+    Indeterminate,
 }
 
 #[derive(Clone, Copy)]
@@ -112,6 +118,7 @@ fn walk_paint(
                 env,
             ),
             Node::Shape(s) => push_shape_backdrop(node, s, ctx, candidates, env),
+            Node::Image(img) => push_image_backdrop(node, img, ctx, candidates, env),
             Node::Frame(f) => {
                 let frame_box = absolute_box(node, ctx, env.resolved_tokens);
                 let frame_clip = frame_box.and_then(|b| match ctx.clip {
@@ -154,7 +161,6 @@ fn walk_paint(
             }
             Node::Line(_)
             | Node::Code(_)
-            | Node::Image(_)
             | Node::Polygon(_)
             | Node::Polyline(_)
             | Node::Path(_)
@@ -206,14 +212,11 @@ fn push_backdrop(
     candidates: &mut Vec<BackdropCandidate>,
     env: ContrastEnv<'_>,
 ) {
-    let Some((r, g, b, a)) =
-        resolve_fill_rgba(fill, style.as_deref(), env.style_map, env.resolved_tokens)
+    let Some(paint) =
+        resolve_fill_paint(fill, style.as_deref(), env.style_map, env.resolved_tokens)
     else {
         return;
     };
-    if a < BACKDROP_OPAQUE_ALPHA {
-        return;
-    }
     let Some(bounds) = absolute_box(node, ctx, env.resolved_tokens) else {
         return;
     };
@@ -223,9 +226,32 @@ fn push_backdrop(
     };
     if let Some(bounds) = clipped_bounds {
         candidates.push(BackdropCandidate {
-            rgb: (r, g, b),
+            paint,
             bounds,
             shape,
+        });
+    }
+}
+
+fn push_image_backdrop(
+    node: &Node,
+    _image: &ImageNode,
+    ctx: PaintCtx,
+    candidates: &mut Vec<BackdropCandidate>,
+    env: ContrastEnv<'_>,
+) {
+    let Some(bounds) = absolute_box(node, ctx, env.resolved_tokens) else {
+        return;
+    };
+    let clipped_bounds = match ctx.clip {
+        Some(clip) => clip.intersect(bounds),
+        None => Some(bounds),
+    };
+    if let Some(bounds) = clipped_bounds {
+        candidates.push(BackdropCandidate {
+            paint: BackdropPaint::Indeterminate,
+            bounds,
+            shape: CoverageShape::Rect,
         });
     }
 }
@@ -260,14 +286,26 @@ fn check_text_node(
     let threshold = if is_large { 45.0_f64 } else { 60.0_f64 };
 
     let hint_rgb = resolve_color_property(text.contrast_bg.as_ref(), env.resolved_tokens);
-    let backdrop_samples = if hint_rgb.is_some() {
-        Vec::new()
+    let (backdrop_samples, indeterminate_backdrop) = if hint_rgb.is_some() {
+        (Vec::new(), false)
     } else {
         text_box(text, ctx.page_size, env.resolved_tokens)
             .map(|bbox| collect_backdrop_samples(bbox, ctx.clip, candidates, ctx.page_bg_rgb))
             .unwrap_or_default()
     };
     let best = select_contrast_sample(fg_rgb, hint_rgb, &backdrop_samples, ctx.page_bg_rgb);
+
+    if hint_rgb.is_none() && indeterminate_backdrop {
+        diagnostics.push(Diagnostic::advisory(
+            "contrast.indeterminate_backdrop",
+            format!(
+                "text '{}': backdrop includes an image and cannot be sampled during validation; add a contrast-bg hint",
+                text.id
+            ),
+            text.source_span,
+            Some(text.id.clone()),
+        ));
+    }
 
     if let Some(sample) = best
         && sample.lc < threshold
@@ -284,7 +322,7 @@ fn check_text_node(
             (
                 "contrast.low",
                 format!(
-                    "of fill on {} is below the WCAG 3 draft threshold (Lc {:.0})",
+                    "against {} is below the WCAG 3 draft threshold (Lc {:.0})",
                     sample.source, threshold
                 ),
             )
@@ -306,39 +344,70 @@ fn collect_backdrop_samples(
     clip: Option<RectPx>,
     candidates: &[BackdropCandidate],
     page_bg_rgb: Option<(u8, u8, u8)>,
-) -> Vec<SampledBackdrop> {
+) -> (Vec<SampledBackdrop>, bool) {
     let mut backdrops = Vec::with_capacity(5);
+    let mut indeterminate = false;
     if let Some(clip) = clip
         && !clip.contains_rect(text_box)
     {
-        return backdrops;
+        return (backdrops, indeterminate);
     }
     for (x, y) in text_box.sample_points() {
-        let mut sampled = None;
+        let mut sampled_any = false;
         for candidate in candidates.iter().rev() {
             if candidate.shape.contains_point(candidate.bounds, x, y) {
-                sampled = Some(SampledBackdrop {
-                    rgb: candidate.rgb,
-                    source: "backdrop",
-                });
+                match &candidate.paint {
+                    BackdropPaint::Solid(rgb) => {
+                        push_unique_sample(
+                            &mut backdrops,
+                            SampledBackdrop {
+                                rgb: *rgb,
+                                source: "backdrop",
+                            },
+                        );
+                        sampled_any = true;
+                    }
+                    BackdropPaint::Gradient(stops) => {
+                        for rgb in stops.iter().copied() {
+                            push_unique_sample(
+                                &mut backdrops,
+                                SampledBackdrop {
+                                    rgb,
+                                    source: "backdrop",
+                                },
+                            );
+                        }
+                        sampled_any = true;
+                    }
+                    BackdropPaint::Indeterminate => {
+                        indeterminate = true;
+                    }
+                }
                 break;
             }
         }
-        let sampled = sampled.or_else(|| {
-            page_bg_rgb.map(|rgb| SampledBackdrop {
-                rgb,
-                source: "page background",
-            })
-        });
-        if let Some(sampled) = sampled
-            && !backdrops
-                .iter()
-                .any(|backdrop| backdrop.rgb == sampled.rgb && backdrop.source == sampled.source)
-        {
-            backdrops.push(sampled);
+        if !sampled_any {
+            for rgb in page_bg_rgb {
+                push_unique_sample(
+                    &mut backdrops,
+                    SampledBackdrop {
+                        rgb,
+                        source: "page background",
+                    },
+                );
+            }
         }
     }
-    backdrops
+    (backdrops, indeterminate)
+}
+
+fn push_unique_sample(backdrops: &mut Vec<SampledBackdrop>, sample: SampledBackdrop) {
+    if !backdrops
+        .iter()
+        .any(|backdrop| backdrop.rgb == sample.rgb && backdrop.source == sample.source)
+    {
+        backdrops.push(sample);
+    }
 }
 
 fn select_contrast_sample(
@@ -381,12 +450,7 @@ fn check_table_text_contrast(
 ) {
     let header_rows = table.header_rows.unwrap_or(0);
     let resolve_fill = |pv: &Option<PropertyValue>| -> Option<(u8, u8, u8)> {
-        let (r, g, b, a) = resolve_fill_rgba(pv, None, env.style_map, env.resolved_tokens)?;
-        if a >= BACKDROP_OPAQUE_ALPHA {
-            Some((r, g, b))
-        } else {
-            None
-        }
+        resolve_fill_paint(pv, None, env.style_map, env.resolved_tokens)?.as_solid_rgb()
     };
 
     for (row_idx, row) in table.rows.iter().enumerate() {
@@ -414,30 +478,82 @@ fn check_table_text_contrast(
     }
 }
 
-fn resolve_fill_rgba(
+fn resolve_fill_paint(
     fill: &Option<PropertyValue>,
     style: Option<&str>,
     style_map: &BTreeMap<&str, &Style>,
     resolved_tokens: &BTreeMap<String, ResolvedToken>,
-) -> Option<(u8, u8, u8, u8)> {
+) -> Option<BackdropPaint> {
     let pv = fill
         .as_ref()
         .or_else(|| style_property(style, "fill", style_map))?;
     let PropertyValue::TokenRef(id) = pv else {
         return None;
     };
-    let rt = resolved_tokens.get(id.as_str())?;
-    let ResolvedValue::Color(hex) = &rt.value else {
-        return None;
-    };
+    let token = resolved_tokens.get(id.as_str())?;
+    match &token.value {
+        ResolvedValue::Color(hex) => solid_paint_from_hex(hex),
+        ResolvedValue::CmykColor { hex, .. } => solid_paint_from_hex(hex),
+        ResolvedValue::Gradient(gradient) => {
+            let stops: Vec<(u8, u8, u8)> = gradient
+                .stops
+                .iter()
+                .filter_map(|(_, color_id)| {
+                    resolved_tokens
+                        .get(color_id.as_str())
+                        .and_then(resolved_color_rgb)
+                })
+                .collect();
+            if stops.is_empty() {
+                None
+            } else {
+                Some(BackdropPaint::Gradient(stops))
+            }
+        }
+        ResolvedValue::Dimension(_)
+        | ResolvedValue::Number(_)
+        | ResolvedValue::FontFamily(_)
+        | ResolvedValue::FontWeight(_)
+        | ResolvedValue::Shadow(_)
+        | ResolvedValue::Filter(_)
+        | ResolvedValue::Mask(_) => None,
+    }
+}
 
-    let (r, g, b) = parse_rgb(hex)?;
+impl BackdropPaint {
+    fn as_solid_rgb(&self) -> Option<(u8, u8, u8)> {
+        match self {
+            BackdropPaint::Solid(rgb) => Some(*rgb),
+            BackdropPaint::Gradient(_) | BackdropPaint::Indeterminate => None,
+        }
+    }
+}
+
+fn solid_paint_from_hex(hex: &str) -> Option<BackdropPaint> {
     let alpha = hex
         .strip_prefix('#')
         .filter(|h| h.len() == 8)
         .and_then(|h| u8::from_str_radix(&h[6..8], 16).ok())
         .unwrap_or(255);
-    Some((r, g, b, alpha))
+    if alpha < BACKDROP_OPAQUE_ALPHA {
+        return None;
+    }
+    parse_rgb(hex).map(BackdropPaint::Solid)
+}
+
+fn resolved_color_rgb(token: &ResolvedToken) -> Option<(u8, u8, u8)> {
+    match &token.value {
+        ResolvedValue::Color(hex) => parse_rgb(hex),
+        ResolvedValue::CmykColor { hex, .. } => parse_rgb(hex),
+        ResolvedValue::Dimension(_)
+        | ResolvedValue::Number(_)
+        | ResolvedValue::FontFamily(_)
+        | ResolvedValue::FontWeight(_)
+        | ResolvedValue::Gradient(_)
+        | ResolvedValue::Shadow(_)
+        | ResolvedValue::Filter(_)
+        | ResolvedValue::Mask(_) => None,
+    }
 }
 
 fn resolve_color_property(

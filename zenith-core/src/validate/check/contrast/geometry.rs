@@ -137,10 +137,16 @@ pub(super) fn local_box(
             h: n.h.as_ref(),
             anchor: n.anchor.as_deref(),
         },
+        Node::Image(n) => BoxFields {
+            x: n.x.as_ref(),
+            y: n.y.as_ref(),
+            w: n.w.as_ref(),
+            h: n.h.as_ref(),
+            anchor: n.anchor.as_deref(),
+        },
         Node::Line(_)
         | Node::Code(_)
         | Node::Group(_)
-        | Node::Image(_)
         | Node::Polygon(_)
         | Node::Polyline(_)
         | Node::Path(_)
