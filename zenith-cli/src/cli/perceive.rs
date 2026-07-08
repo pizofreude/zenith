@@ -24,5 +24,8 @@ pub enum PerceiveSub {
     Vector {
         /// `.zen` document to analyze.
         path: PathBuf,
+        /// Analyze only the named path id. Repeat to analyze a multi-path mark subset.
+        #[arg(long = "node")]
+        nodes: Vec<String>,
     },
 }

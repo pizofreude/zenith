@@ -1,5 +1,7 @@
 //! Pure logic for `zenith perceive`.
 
+use std::collections::BTreeSet;
+
 use serde::Serialize;
 use zenith_core::{KdlAdapter, KdlSource, Node, PathNode};
 use zenith_perception::{
@@ -97,7 +99,11 @@ struct PerceptionDiagnosticOutput {
     message: &'static str,
 }
 
-pub fn vector(src: &str, json: bool) -> Result<PerceiveOutcome, PerceiveCmdErr> {
+pub fn vector(
+    src: &str,
+    json: bool,
+    selected_nodes: &[String],
+) -> Result<PerceiveOutcome, PerceiveCmdErr> {
     let doc = KdlAdapter
         .parse(src.as_bytes())
         .map_err(|e| PerceiveCmdErr {
@@ -105,10 +111,11 @@ pub fn vector(src: &str, json: bool) -> Result<PerceiveOutcome, PerceiveCmdErr> 
             exit_code: 2,
         })?;
 
-    let mut paths = Vec::new();
+    let mut all_paths = Vec::new();
     for page in &doc.body.pages {
-        collect_paths(&page.children, &mut paths);
+        collect_paths(&page.children, &mut all_paths);
     }
+    let paths = selected_paths(&all_paths, selected_nodes)?;
 
     let analyses = paths
         .iter()
@@ -185,6 +192,47 @@ fn collect_paths<'a>(nodes: &'a [Node], paths: &mut Vec<&'a PathNode>) {
             | Node::Mesh(_) => {}
         }
     }
+}
+
+fn selected_paths<'a>(
+    paths: &[&'a PathNode],
+    selected_nodes: &[String],
+) -> Result<Vec<&'a PathNode>, PerceiveCmdErr> {
+    if selected_nodes.is_empty() {
+        return Ok(paths.to_vec());
+    }
+
+    let requested = selected_nodes
+        .iter()
+        .map(String::as_str)
+        .collect::<BTreeSet<_>>();
+    let mut found = BTreeSet::new();
+    let selected = paths
+        .iter()
+        .copied()
+        .filter(|path| {
+            if requested.contains(path.id.as_str()) {
+                found.insert(path.id.as_str());
+                true
+            } else {
+                false
+            }
+        })
+        .collect::<Vec<_>>();
+
+    if found.len() == requested.len() {
+        return Ok(selected);
+    }
+
+    let missing = requested
+        .difference(&found)
+        .copied()
+        .collect::<Vec<_>>()
+        .join(", ");
+    Err(PerceiveCmdErr {
+        message: format!("error[perceive.node_not_found]: path node not found: {missing}"),
+        exit_code: 2,
+    })
 }
 
 struct PathAnalysis<'a> {
@@ -426,7 +474,7 @@ mod tests {
 
     #[test]
     fn vector_json_reports_path_metrics() {
-        let outcome = vector(DOC, true).expect("perception should run");
+        let outcome = vector(DOC, true, &[]).expect("perception should run");
 
         assert_eq!(outcome.exit_code, 0, "stdout: {}", outcome.stdout);
         assert!(
@@ -459,7 +507,7 @@ mod tests {
     }
   }
 }"##;
-        let outcome = vector(doc, true).expect("perception should run");
+        let outcome = vector(doc, true, &[]).expect("perception should run");
 
         assert_eq!(outcome.exit_code, 0, "stdout: {}", outcome.stdout);
         assert!(outcome.stdout.contains("\"collision_pair_count\": 1"));
@@ -479,9 +527,47 @@ mod tests {
   }
 }"##;
 
-        let outcome = vector(doc, false).expect("perception should run");
+        let outcome = vector(doc, false, &[]).expect("perception should run");
 
         assert_eq!(outcome.exit_code, 0);
         assert_eq!(outcome.stdout, "vector perception: no path nodes");
+    }
+
+    #[test]
+    fn vector_filters_selected_nodes() {
+        let doc = r##"zenith version=1 {
+  project id="proj" name="Perceive"
+  tokens format="zenith-token-v1" { }
+  styles { }
+  document id="doc" title="Perceive" {
+    page id="pg" w=(px)200 h=(px)120 {
+      path id="one" closed=#true {
+        anchor x=(px)0 y=(px)0
+        anchor x=(px)10 y=(px)0
+        anchor x=(px)10 y=(px)10
+      }
+      path id="two" closed=#true {
+        anchor x=(px)20 y=(px)0
+        anchor x=(px)30 y=(px)0
+        anchor x=(px)30 y=(px)10
+      }
+    }
+  }
+}"##;
+        let outcome = vector(doc, true, &["two".to_owned()]).expect("perception should run");
+
+        assert_eq!(outcome.exit_code, 0, "stdout: {}", outcome.stdout);
+        assert!(outcome.stdout.contains("\"path_count\": 1"));
+        assert!(!outcome.stdout.contains("\"id\": \"one\""));
+        assert!(outcome.stdout.contains("\"id\": \"two\""));
+    }
+
+    #[test]
+    fn vector_rejects_missing_selected_node() {
+        let err = vector(DOC, true, &["missing".to_owned()]).expect_err("missing node rejects");
+
+        assert_eq!(err.exit_code, 2);
+        assert!(err.message.contains("perceive.node_not_found"));
+        assert!(err.message.contains("missing"));
     }
 }

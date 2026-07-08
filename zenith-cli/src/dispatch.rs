@@ -150,7 +150,7 @@ pub fn run() -> ExitCode {
         }
 
         Command::Perceive(args) => match args.command {
-            cli::PerceiveSub::Vector { path } => {
+            cli::PerceiveSub::Vector { path, nodes } => {
                 let src = match read_file(&path) {
                     Ok(s) => s,
                     Err(msg) => {
@@ -158,7 +158,7 @@ pub fn run() -> ExitCode {
                         return ExitCode::from(2);
                     }
                 };
-                match commands::perceive::vector(&src, args.json) {
+                match commands::perceive::vector(&src, args.json, &nodes) {
                     Ok(outcome) => {
                         println!("{}", outcome.stdout);
                         ExitCode::from(outcome.exit_code)

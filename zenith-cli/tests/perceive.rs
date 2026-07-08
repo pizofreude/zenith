@@ -39,3 +39,25 @@ fn perceive_vector_json_reports_path_metrics() {
     assert!(stdout.contains("\"path_count\": 1"));
     assert!(stdout.contains("\"id\": \"mark\""));
 }
+
+#[test]
+fn perceive_vector_node_filter_reports_selected_path() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let doc = tmp.path().join("logo.zen");
+    fs::write(&doc, vector_doc()).expect("write doc");
+
+    let output = Command::new(env!("CARGO_BIN_EXE_zenith"))
+        .arg("perceive")
+        .arg("vector")
+        .arg(&doc)
+        .arg("--node")
+        .arg("mark")
+        .arg("--json")
+        .output()
+        .expect("run zenith");
+
+    assert!(output.status.success());
+    let stdout = String::from_utf8(output.stdout).expect("stdout utf8");
+    assert!(stdout.contains("\"path_count\": 1"));
+    assert!(stdout.contains("\"id\": \"mark\""));
+}
