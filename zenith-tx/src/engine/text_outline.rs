@@ -1,10 +1,8 @@
-use zenith_core::{
-    Diagnostic, Document, FontProvider, Node, PathNode, PropertyValue,
-};
+use zenith_core::{Diagnostic, Document, FontProvider, Node, PathNode, PropertyValue};
 use zenith_scene::{compile_page, outline_source_glyph_run_commands};
 
 use super::{
-    finish_candidate, find_node_shared, format_source, node_id_of, node_kind_str, record_affected,
+    find_node_shared, finish_candidate, format_source, node_id_of, node_kind_str, record_affected,
 };
 use crate::result::{TxError, TxResult};
 

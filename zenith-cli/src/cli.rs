@@ -108,6 +108,12 @@ pub enum Command {
     /// diff), enforces id-uniqueness and referential integrity, and only writes with `--apply`.
     Tx(TxArgs),
 
+    /// Materialize a text/code node into editable path outlines.
+    ///
+    /// Compile the document with the same font provider used by rendering, then insert editable
+    /// `path` siblings after the target text/code node. Dry-run by default; write with `--apply`.
+    OutlineText(OutlineTextArgs),
+
     /// Print the node tree of a `.zen` document (read-only).
     ///
     /// Print the structure of a .zen document (read-only): the node tree plus
@@ -572,6 +578,35 @@ pub struct TxArgs {
 
     /// Path to the transaction JSON file.
     pub tx_file: PathBuf,
+
+    /// Apply the result back to disk (dry-run by default).
+    #[arg(long)]
+    pub apply: bool,
+
+    /// Emit machine-readable JSON instead of a human-readable summary.
+    #[arg(long)]
+    pub json: bool,
+}
+
+/// Arguments for `zenith outline-text`.
+#[derive(Debug, Args)]
+#[command(
+    after_help = "EXAMPLES:\n  zenith outline-text poster.zen headline --id-prefix headline.outline\n  zenith outline-text poster.zen headline --id-prefix headline.outline --apply"
+)]
+pub struct OutlineTextArgs {
+    /// Path to the `.zen` document.
+    pub path: PathBuf,
+
+    /// Text or code node id to materialize.
+    pub node: String,
+
+    /// Prefix for generated path ids.
+    #[arg(long)]
+    pub id_prefix: String,
+
+    /// Verify project font asset hashes while building the font provider.
+    #[arg(long)]
+    pub locked: bool,
 
     /// Apply the result back to disk (dry-run by default).
     #[arg(long)]

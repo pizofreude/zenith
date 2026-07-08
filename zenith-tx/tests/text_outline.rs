@@ -6,8 +6,13 @@ use zenith_tx::{TextOutlineRequest, TxStatus, materialize_text_outlines};
 
 fn assert_before(haystack: &str, first: &str, second: &str) {
     let first_index = haystack.find(first).expect("first substring should exist");
-    let second_index = haystack.find(second).expect("second substring should exist");
-    assert!(first_index < second_index, "{first:?} should appear before {second:?}");
+    let second_index = haystack
+        .find(second)
+        .expect("second substring should exist");
+    assert!(
+        first_index < second_index,
+        "{first:?} should appear before {second:?}"
+    );
 }
 
 const TEXT_DOC: &str = r##"zenith version=1 {
@@ -75,7 +80,11 @@ fn materializes_text_glyph_runs_as_path_siblings() {
     assert!(result.source_after.contains("path id=\"label.outline-0\""));
     assert!(result.source_after.contains("subpath closed=#true"));
     assert!(result.source_after.contains("fill=(token)\"color.ink\""));
-    assert_before(&result.source_after, "text id=\"label\"", "path id=\"label.outline-0\"");
+    assert_before(
+        &result.source_after,
+        "text id=\"label\"",
+        "path id=\"label.outline-0\"",
+    );
     assert_before(
         &result.source_after,
         "path id=\"label.outline-0\"",

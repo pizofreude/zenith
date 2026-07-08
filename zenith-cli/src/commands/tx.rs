@@ -4,8 +4,12 @@
 //! the caller is responsible for all filesystem I/O and for deciding whether to
 //! persist `source_after` (the `--apply` flag lives in `lib.rs`, not here).
 
+use std::path::Path;
 use zenith_core::{KdlAdapter, KdlSource};
-use zenith_tx::{Transaction, TxResult, TxStatus, run_transaction};
+
+use zenith_tx::{
+    TextOutlineRequest, Transaction, TxResult, TxStatus, materialize_text_outlines, run_transaction,
+};
 
 use crate::commands::serialize_pretty;
 use crate::json_types::{self, DiagnosticJson, TxOutputJson};
@@ -64,6 +68,51 @@ pub fn run(doc_src: &str, tx_json: &str) -> Result<TxOutcome, TxCmdErr> {
 
     // Run engine ─────────────────────────────────────────────────────────────
     let result = run_transaction(&doc, &tx).map_err(|e| TxCmdErr {
+        message: format!("error[tx.engine]: {}", e.message),
+        exit_code: 2,
+    })?;
+
+    let exit_code = status_exit_code(&result.status);
+    let human = render_human(&result);
+    let json_str = render_json(&result);
+
+    Ok(TxOutcome {
+        result,
+        human,
+        json_str,
+        exit_code,
+    })
+}
+
+/// Parse the document source, build the render-path font provider, materialize
+/// a text/code node into outlines, and return a standard tx outcome.
+pub fn run_outline_text(
+    doc_src: &str,
+    project_dir: Option<&Path>,
+    node: &str,
+    id_prefix: &str,
+    locked: bool,
+) -> Result<TxOutcome, TxCmdErr> {
+    let doc = KdlAdapter.parse(doc_src.as_bytes()).map_err(|e| TxCmdErr {
+        message: format!("error[parse.error]: {}", e.message),
+        exit_code: 2,
+    })?;
+
+    let fonts =
+        super::render::build_font_provider(&doc, project_dir, locked).map_err(|e| TxCmdErr {
+            message: e.message,
+            exit_code: e.exit_code,
+        })?;
+
+    let result = materialize_text_outlines(
+        &doc,
+        &fonts,
+        &TextOutlineRequest {
+            node: node.to_owned(),
+            id_prefix: id_prefix.to_owned(),
+        },
+    )
+    .map_err(|e| TxCmdErr {
         message: format!("error[tx.engine]: {}", e.message),
         exit_code: 2,
     })?;
@@ -269,6 +318,37 @@ mod tests {
             outcome.human.contains("status:"),
             "human output must contain 'status:'; got: {}",
             outcome.human
+        );
+    }
+
+    #[test]
+    fn outline_text_outputs_standard_tx_summary() {
+        let src = r##"zenith version=1 {
+  project id="proj.tx" name="Tx Test"
+  tokens format="zenith-token-v1" {
+    token id="color.ink" type="color" value="#112233"
+    token id="size.text" type="dimension" value=(px)32
+  }
+  styles { }
+  document id="doc.tx" title="Tx" {
+    page id="pg.tx" w=(px)400 h=(px)300 {
+      text id="lbl.tx" x=(px)10 y=(px)40 w=(px)200 h=(px)60 fill=(token)"color.ink" font-size=(token)"size.text" {
+        span "Hi"
+      }
+    }
+  }
+}"##;
+        let outcome = run_outline_text(src, None, "lbl.tx", "lbl.outline", false)
+            .expect("outline text should run");
+
+        assert_eq!(outcome.result.status, TxStatus::Accepted);
+        assert_eq!(outcome.exit_code, 0);
+        assert!(outcome.human.contains("affected: lbl.outline-0"));
+        assert!(
+            outcome
+                .result
+                .source_after
+                .contains("path id=\"lbl.outline-0\"")
         );
     }
 }

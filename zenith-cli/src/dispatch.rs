@@ -426,6 +426,53 @@ pub fn run() -> ExitCode {
             ExitCode::from(outcome.exit_code)
         }
 
+        Command::OutlineText(args) => {
+            let doc_src = match read_file(&args.path) {
+                Ok(s) => s,
+                Err(msg) => {
+                    eprintln!("{}", msg);
+                    return ExitCode::from(2);
+                }
+            };
+
+            let outcome = match commands::tx::run_outline_text(
+                &doc_src,
+                args.path.parent(),
+                &args.node,
+                &args.id_prefix,
+                args.locked,
+            ) {
+                Ok(o) => o,
+                Err(e) => {
+                    eprintln!("{}", e.message);
+                    return ExitCode::from(e.exit_code);
+                }
+            };
+
+            if args.json {
+                println!("{}", outcome.json_str);
+            } else {
+                println!("{}", outcome.human);
+            }
+
+            if args.apply && outcome.exit_code != 1 {
+                let recorded = history::record_edit(
+                    outcome.result.source_after.as_bytes(),
+                    &args.path,
+                    "text_outline.apply",
+                );
+                if let Some(w) = &recorded.warning {
+                    eprintln!("warning: {w}");
+                }
+                if let Err(e) = std::fs::write(&args.path, &recorded.bytes) {
+                    eprintln!("error writing '{}': {}", args.path.display(), e);
+                    return ExitCode::from(2);
+                }
+            }
+
+            ExitCode::from(outcome.exit_code)
+        }
+
         Command::Variant(args) => {
             let doc_src = match read_file(&args.doc) {
                 Ok(s) => s,
