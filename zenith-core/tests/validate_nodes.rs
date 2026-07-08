@@ -14,14 +14,29 @@ use common::*;
 
 #[test]
 fn clean_doc_no_errors() {
-    // A page with a rect and a text, both using a color token for fill.
+    // A page with a rect and text that use valid, contrasting fill tokens.
     let doc = doc_with(
-        vec![color_token("color.fill")],
+        vec![
+            Token {
+                id: "color.fill".to_owned(),
+                token_type: TokenType::Color,
+                value: TokenValue::Literal(TokenLiteral::String("#ffffff".to_owned())),
+                set: None,
+                source_span: None,
+            },
+            Token {
+                id: "color.text".to_owned(),
+                token_type: TokenType::Color,
+                value: TokenValue::Literal(TokenLiteral::String("#000000".to_owned())),
+                set: None,
+                source_span: None,
+            },
+        ],
         vec![minimal_page(
             "page.one",
             vec![
                 minimal_rect("rect.one", Some(token_ref("color.fill"))),
-                minimal_text("text.one", Some(token_ref("color.fill"))),
+                minimal_text("text.one", Some(token_ref("color.text"))),
             ],
         )],
     );
