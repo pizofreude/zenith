@@ -267,6 +267,84 @@ fn to_scene_json_expands_loaded_page_source_import() {
 }
 
 #[test]
+fn all_page_render_paths_expand_loaded_page_source_import() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    std::fs::write(
+        dir.path().join("slide.zen"),
+        r##"zenith version=1 {
+  project id="proj.slide" name="Slide"
+  tokens format="zenith-token-v1" {}
+  styles {}
+  document id="doc.slide" title="Slide" {
+    page id="page.main" w=(px)80 h=(px)60 {
+      rect id="mark" x=(px)0 y=(px)0 w=(px)80 h=(px)60 fill="#00ff00"
+    }
+  }
+}
+"##,
+    )
+    .expect("write imported document");
+    let src = r##"zenith version=1 {
+  project id="proj.host" name="Host"
+  imports {
+    import id="slide" kind="zen" src="slide.zen"
+  }
+  tokens format="zenith-token-v1" {}
+  styles {}
+  document id="doc.host" title="Host" {
+    page id="page.one" source="slide#page.page.main" fit="contain" w=(px)160 h=(px)120
+    page id="page.two" source="slide#page.page.main" fit="fill" w=(px)120 h=(px)120
+  }
+}
+"##;
+
+    let png_artifacts = to_png_all_pages(
+        src,
+        Some(dir.path()),
+        false,
+        &CliPolicyFlags::default(),
+        None,
+    )
+    .expect("all-pages PNG render must succeed");
+    assert_eq!(
+        png_artifacts.len(),
+        2,
+        "host document must yield one PNG artifact per page"
+    );
+    for artifact in &png_artifacts {
+        assert!(
+            artifact.diagnostics.is_empty(),
+            "imported page-source PNG render must be clean; got {:?}",
+            artifact.diagnostics
+        );
+        assert!(
+            artifact.png.starts_with(&[0x89, 0x50, 0x4E, 0x47]),
+            "imported page-source all-pages render must produce PNG bytes"
+        );
+    }
+
+    let pdf_artifact = to_pdf_all_pages_with_dir(
+        src,
+        Some(dir.path()),
+        false,
+        true,
+        &CliPolicyFlags::default(),
+        None,
+    )
+    .expect("all-pages PDF render must succeed");
+    assert!(
+        pdf_artifact.diagnostics.is_empty(),
+        "imported page-source PDF render must be clean; got {:?}",
+        pdf_artifact.diagnostics
+    );
+    let text = String::from_utf8_lossy(&pdf_artifact.pdf);
+    assert!(
+        text.contains("/Count 2"),
+        "imported page-source PDF must include both host pages"
+    );
+}
+
+#[test]
 fn construction_guides_do_not_affect_default_scene_json() {
     let artifact = to_scene_json(CONSTRUCTION_DOC, None, 1, &CliPolicyFlags::default(), None)
         .expect("scene render must succeed");

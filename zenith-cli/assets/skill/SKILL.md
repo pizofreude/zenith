@@ -202,7 +202,8 @@ Before authoring, check whether the project pins its own design system:
    `zenith library add @scope/pack#item --into <file> --page <id>`. A brand kit pack can also
    ship `actions` (typed `tx` bundles) that re-skin a document's tokens in one step. See
    `references/brand.md` and `references/themes.md`.
-3. **Bespoke palette** — only invent one when the user explicitly wants a look no embedded theme
+3. **Canonical design source** — when a project keeps brand, component, or layout source in a canonical `.zen` file, import it with root-level `imports { import id="..." kind="zen" src="..." }` and reference exported pages/components with `source="import-id#page.page-id"` or `source="import-id#component.component-id"` instead of copying geometry by hand. This keeps documents DRY while preserving editable native scene output.
+4. **Bespoke palette** — only invent one when the user explicitly wants a look no embedded theme
    or brand pack covers.
 
 Project config is loaded, not assumed: prefer the project's tokens/packs over inventing a new
