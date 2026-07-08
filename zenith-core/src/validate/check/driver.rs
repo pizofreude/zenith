@@ -21,7 +21,7 @@ use crate::tokens::{ResolvedToken, ResolvedValue};
 
 use super::brand::check_brand_contract;
 use super::construction::check_construction;
-use super::contrast::check_text_contrast;
+use super::contrast::check_page_text_contrast;
 use super::nodes::{WalkCtx, WalkPos, check_sibling_anchors, walk_node};
 use super::passes::{
     check_footnote_refs, collect_local_ids, register_id, validate_asset_decl, validate_import_decl,
@@ -893,7 +893,7 @@ pub fn validate_with_policy(
         // once, before the per-node walk.
         check_sibling_anchors(&page.children, &mut diagnostics);
 
-        for (i, node) in page.children.iter().enumerate() {
+        for node in &page.children {
             walk_node(
                 node,
                 ctx,
@@ -908,21 +908,20 @@ pub fn validate_with_policy(
                 },
                 &mut diagnostics,
             );
-            // Contrast check runs after the structural walk so that
-            // token-reference errors are already diagnosed and we can
-            // safely skip nodes whose tokens didn't resolve. The slice
-            // `page.children[..i]` is the set of siblings painted UNDER this
-            // node (lower z-order) — the candidate backdrops.
-            check_text_contrast(
-                node,
-                page_bg_rgb,
-                &page.children[..i],
-                (page_w, page_h),
-                resolved_tokens,
-                &style_map,
-                &mut diagnostics,
-            );
         }
+
+        // Contrast runs after the structural walk so token-reference errors are
+        // already diagnosed. It walks the page in paint order and resolves
+        // backdrops in page-absolute geometry so container boundaries do not
+        // hide the painted color under text.
+        check_page_text_contrast(
+            &page.children,
+            page_bg_rgb,
+            (page_w, page_h),
+            resolved_tokens,
+            &style_map,
+            &mut diagnostics,
+        );
 
         // ── Footnote-ref resolution (structural) ──────────────────────────
         // Collect this page's footnote ids (direct children only — footnotes are

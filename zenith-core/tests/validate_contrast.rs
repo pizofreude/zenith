@@ -175,6 +175,116 @@ fn ellipse_backdrop(id: &str, fill_token: &str) -> Node {
     })
 }
 
+fn rect_backdrop_at(id: &str, fill_token: &str, x: f64, y: f64, w: f64, h: f64) -> Node {
+    let Node::Rect(mut rect) =
+        minimal_rect(id, Some(PropertyValue::TokenRef(fill_token.to_owned())))
+    else {
+        unreachable!("minimal_rect returns Node::Rect");
+    };
+    rect.x = Some(pxv(x));
+    rect.y = Some(pxv(y));
+    rect.w = Some(pxv(w));
+    rect.h = Some(pxv(h));
+    Node::Rect(rect)
+}
+
+fn group_at(id: &str, x: f64, y: f64, children: Vec<Node>) -> Node {
+    Node::Group(GroupNode {
+        id: id.to_owned(),
+        name: None,
+        role: None,
+        x: Some(pxv(x)),
+        y: Some(pxv(y)),
+        w: None,
+        h: None,
+        opacity: None,
+        visible: None,
+        locked: None,
+        rotate: None,
+        blend_mode: None,
+        shadow: None,
+        filter: None,
+        mask: None,
+        blur: None,
+        style: None,
+        semantic_role: None,
+        intensity: None,
+        layer_priority: None,
+        symmetry_count: None,
+        symmetry_cx: None,
+        symmetry_cy: None,
+        symmetry_start_angle: None,
+        anchor: None,
+        anchor_zone: None,
+        anchor_sibling: None,
+        anchor_edge: None,
+        anchor_gap: None,
+        anchor_parent: None,
+        children,
+        protected_regions: Vec::new(),
+        editable_param_ids: Vec::new(),
+        source_span: None,
+        unknown_props: BTreeMap::new(),
+    })
+}
+
+fn text_at(id: &str, fill_token: &str, x: f64, y: f64, w: f64, h: f64) -> Node {
+    let Node::Text(mut text) =
+        minimal_text(id, Some(PropertyValue::TokenRef(fill_token.to_owned())))
+    else {
+        unreachable!("minimal_text returns Node::Text");
+    };
+    text.x = Some(pxv(x));
+    text.y = Some(pxv(y));
+    text.w = Some(pxv(w));
+    text.h = Some(pxv(h));
+    Node::Text(text)
+}
+
+fn shape_backdrop_at(
+    id: &str,
+    kind: &str,
+    fill_token: &str,
+    x: f64,
+    y: f64,
+    w: f64,
+    h: f64,
+) -> Node {
+    Node::Shape(Box::new(ShapeNode {
+        id: id.to_owned(),
+        name: None,
+        role: None,
+        x: Some(pxv(x)),
+        y: Some(pxv(y)),
+        w: Some(pxv(w)),
+        h: Some(pxv(h)),
+        kind: Some(kind.to_owned()),
+        fill: Some(PropertyValue::TokenRef(fill_token.to_owned())),
+        stroke: None,
+        stroke_width: None,
+        radius: None,
+        stroke_alignment: None,
+        padding: None,
+        h_align: None,
+        v_align: None,
+        text_style: None,
+        spans: Vec::new(),
+        style: None,
+        opacity: None,
+        visible: None,
+        locked: None,
+        rotate: None,
+        anchor: None,
+        anchor_zone: None,
+        anchor_sibling: None,
+        anchor_edge: None,
+        anchor_gap: None,
+        anchor_parent: None,
+        source_span: None,
+        unknown_props: BTreeMap::new(),
+    }))
+}
+
 /// Build a text node with explicit dimensions and page-relative anchor.
 fn anchored_text_with_fill_and_size(
     id: &str,
@@ -356,6 +466,106 @@ fn centered_anchor_text_uses_preceding_ellipse_backdrop() {
         diag.message.contains("backdrop"),
         "message must name the ellipse backdrop as the bg source; got: {}",
         diag.message
+    );
+}
+
+#[test]
+fn grouped_text_uses_outer_page_backdrop() {
+    let doc = doc_with(
+        vec![
+            color_token_hex("color.page", "#ffffff"),
+            color_token_hex("color.backdrop", "#003087"),
+            color_token_hex("color.text", "#000000"),
+        ],
+        vec![page_with_bg(
+            "page.one",
+            "color.page",
+            vec![
+                rect_backdrop_at("backdrop", "color.backdrop", 100.0, 100.0, 220.0, 100.0),
+                group_at(
+                    "group.label",
+                    0.0,
+                    0.0,
+                    vec![text_at("headline", "color.text", 130.0, 130.0, 80.0, 30.0)],
+                ),
+            ],
+        )],
+    );
+    let report = validate(&doc);
+    assert!(
+        has_code(&report, "contrast.low"),
+        "grouped text should use the earlier page-level backdrop; codes: {:?}",
+        codes(&report)
+    );
+}
+
+#[test]
+fn page_text_uses_backdrop_inside_translated_group() {
+    let doc = doc_with(
+        vec![
+            color_token_hex("color.page", "#ffffff"),
+            color_token_hex("color.backdrop", "#003087"),
+            color_token_hex("color.text", "#000000"),
+        ],
+        vec![page_with_bg(
+            "page.one",
+            "color.page",
+            vec![
+                group_at(
+                    "group.backdrop",
+                    100.0,
+                    100.0,
+                    vec![rect_backdrop_at(
+                        "backdrop",
+                        "color.backdrop",
+                        0.0,
+                        0.0,
+                        220.0,
+                        100.0,
+                    )],
+                ),
+                text_at("headline", "color.text", 130.0, 130.0, 80.0, 30.0),
+            ],
+        )],
+    );
+    let report = validate(&doc);
+    assert!(
+        has_code(&report, "contrast.low"),
+        "page text should use the absolute backdrop from the earlier translated group; codes: {:?}",
+        codes(&report)
+    );
+}
+
+#[test]
+fn decision_shape_can_be_text_backdrop() {
+    let doc = doc_with(
+        vec![
+            color_token_hex("color.page", "#ffffff"),
+            color_token_hex("color.backdrop", "#003087"),
+            color_token_hex("color.text", "#000000"),
+        ],
+        vec![page_with_bg(
+            "page.one",
+            "color.page",
+            vec![
+                shape_backdrop_at(
+                    "decision",
+                    "decision",
+                    "color.backdrop",
+                    100.0,
+                    100.0,
+                    220.0,
+                    140.0,
+                ),
+                text_at("headline", "color.text", 190.0, 155.0, 40.0, 20.0),
+            ],
+        )],
+    );
+    let report = validate(&doc);
+    assert!(
+        has_code(&report, "contrast.low"),
+        "text inside the decision shape interior should use the shape backdrop; codes: {:?}",
+        codes(&report)
     );
 }
 
