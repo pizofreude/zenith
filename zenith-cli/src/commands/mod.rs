@@ -7,6 +7,7 @@
 //! - `asset` — asset import transaction prep + result rendering.
 
 pub mod asset;
+pub(crate) mod composition_imports;
 pub mod fmt;
 pub mod fonts;
 pub mod inspect;

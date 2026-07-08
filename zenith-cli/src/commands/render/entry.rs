@@ -168,7 +168,7 @@ pub fn to_scene_json_with_options(
     page: usize,
     opts: RenderEntryOptions<'_>,
 ) -> Result<SceneArtifact, RenderCmdErr> {
-    let (mut doc, policy) = parse_validate(src, project_dir, opts.flags)?;
+    let (mut doc, policy, import_diagnostics) = parse_validate(src, project_dir, opts.flags)?;
     let mut text_src_diagnostics: Vec<Diagnostic> = Vec::new();
     resolve_text_sources(&mut doc, project_dir, &mut text_src_diagnostics);
     let fonts = build_font_provider(&doc, project_dir, false)?;
@@ -179,6 +179,7 @@ pub fn to_scene_json_with_options(
         .to_json()
         .map_err(|e| RenderCmdErr::new(format!("scene serialisation error: {e}"), 2))?;
     let mut diagnostics = text_src_diagnostics;
+    diagnostics.extend(import_diagnostics);
     diagnostics.extend(disk_diagnostics(&doc, project_dir));
     diagnostics.extend(govern_compile_diagnostics(
         compile_result.diagnostics,
@@ -253,7 +254,7 @@ pub fn to_png_with_dir_options(
     page: usize,
     opts: RenderEntryOptions<'_>,
 ) -> Result<PngArtifact, RenderCmdErr> {
-    let (mut doc, policy) = parse_validate(src, project_dir, opts.flags)?;
+    let (mut doc, policy, import_diagnostics) = parse_validate(src, project_dir, opts.flags)?;
     let mut text_src_diagnostics: Vec<Diagnostic> = Vec::new();
     resolve_text_sources(&mut doc, project_dir, &mut text_src_diagnostics);
     let fonts = build_font_provider(&doc, project_dir, opts.locked)?;
@@ -266,6 +267,7 @@ pub fn to_png_with_dir_options(
     let png = render_png(&compile_result.scene, &fonts, &assets)
         .map_err(|e| RenderCmdErr::new(format!("render error: {e}"), 2))?;
     let mut diagnostics = text_src_diagnostics;
+    diagnostics.extend(import_diagnostics);
     diagnostics.extend(disk_diagnostics(&doc, project_dir));
     diagnostics.extend(govern_compile_diagnostics(
         compile_result.diagnostics,
@@ -311,7 +313,7 @@ pub fn to_pdf_with_dir_options(
     page: usize,
     opts: RenderEntryOptions<'_>,
 ) -> Result<PdfArtifact, RenderCmdErr> {
-    let (mut doc, policy) = parse_validate(src, project_dir, opts.flags)?;
+    let (mut doc, policy, import_diagnostics) = parse_validate(src, project_dir, opts.flags)?;
     let mut text_src_diagnostics: Vec<Diagnostic> = Vec::new();
     resolve_text_sources(&mut doc, project_dir, &mut text_src_diagnostics);
     let fonts = build_font_provider(&doc, project_dir, opts.locked)?;
@@ -330,6 +332,7 @@ pub fn to_pdf_with_dir_options(
         },
     );
     let mut diagnostics = text_src_diagnostics;
+    diagnostics.extend(import_diagnostics);
     diagnostics.extend(disk_diagnostics(&doc, project_dir));
     diagnostics.extend(govern_compile_diagnostics(
         compile_result.diagnostics,
@@ -378,9 +381,10 @@ pub fn to_pdf_all_pages_with_dir_options(
     project_dir: Option<&Path>,
     opts: RenderEntryOptions<'_>,
 ) -> Result<PdfArtifact, RenderCmdErr> {
-    let (mut doc, policy) = parse_validate(src, project_dir, opts.flags)?;
+    let (mut doc, policy, import_diagnostics) = parse_validate(src, project_dir, opts.flags)?;
     let mut diagnostics: Vec<Diagnostic> = Vec::new();
     resolve_text_sources(&mut doc, project_dir, &mut diagnostics);
+    diagnostics.extend(import_diagnostics);
     let fonts = build_font_provider(&doc, project_dir, opts.locked)?;
     let page_count = doc.body.pages.len();
     if page_count == 0 {
@@ -446,7 +450,7 @@ pub fn to_png_all_pages_options(
     project_dir: Option<&Path>,
     opts: RenderEntryOptions<'_>,
 ) -> Result<Vec<PngArtifact>, RenderCmdErr> {
-    let (mut doc, policy) = parse_validate(src, project_dir, opts.flags)?;
+    let (mut doc, policy, import_diagnostics) = parse_validate(src, project_dir, opts.flags)?;
     let mut text_src_diagnostics: Vec<Diagnostic> = Vec::new();
     resolve_text_sources(&mut doc, project_dir, &mut text_src_diagnostics);
     let fonts = build_font_provider(&doc, project_dir, opts.locked)?;
@@ -460,6 +464,7 @@ pub fn to_png_all_pages_options(
     };
     let base_diagnostics: Vec<Diagnostic> = text_src_diagnostics
         .into_iter()
+        .chain(import_diagnostics)
         .chain(disk_diagnostics(&doc, project_dir))
         .collect();
     let mut artifacts = Vec::with_capacity(page_count);
@@ -531,7 +536,7 @@ pub fn to_png_spread(
         data,
         construction_overlay,
     } = opts;
-    let (mut doc, policy) = parse_validate(src, project_dir, flags)?;
+    let (mut doc, policy, import_diagnostics) = parse_validate(src, project_dir, flags)?;
     let mut text_src_diagnostics: Vec<Diagnostic> = Vec::new();
     resolve_text_sources(&mut doc, project_dir, &mut text_src_diagnostics);
     let fonts = build_font_provider(&doc, project_dir, locked)?;
@@ -564,6 +569,7 @@ pub fn to_png_spread(
     let mut compile_diagnostics = compile_a.diagnostics;
     compile_diagnostics.extend(compile_b.diagnostics);
     let mut diagnostics = text_src_diagnostics;
+    diagnostics.extend(import_diagnostics);
     diagnostics.extend(disk_diagnostics(&doc, project_dir));
     diagnostics.extend(govern_compile_diagnostics(compile_diagnostics, &policy));
     Ok(PngArtifact { png, diagnostics })

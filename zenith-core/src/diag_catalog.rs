@@ -189,9 +189,29 @@ pub const DIAGNOSTIC_CODES: &[DiagnosticCodeInfo] = &[
         "Connector is missing a `from` or `to` target.",
     ),
     info(
+        "import.cycle",
+        Severity::Error,
+        "Composition import graph contains a cycle.",
+    ),
+    info(
+        "import.hash_mismatch",
+        Severity::Error,
+        "Imported source bytes do not match the declared sha256.",
+    ),
+    info(
         "import.invalid_kind",
         Severity::Error,
         "Import declaration uses an unsupported kind.",
+    ),
+    info(
+        "import.missing",
+        Severity::Error,
+        "Imported `.zen` source could not be read.",
+    ),
+    info(
+        "import.parse_error",
+        Severity::Error,
+        "Imported `.zen` source could not be parsed.",
     ),
     info(
         "instance.missing_reference",

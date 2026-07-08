@@ -11,6 +11,8 @@ use zenith_core::{
 
 use crate::config::{CliPolicyFlags, load_global_and_local, merge_policy};
 
+use crate::commands::composition_imports::load_import_graph;
+
 use super::entry::RenderCmdErr;
 
 /// Verify that `bytes` match the `sha256` field declared on an asset.
@@ -68,7 +70,7 @@ pub(super) fn parse_validate(
     src: &str,
     start_dir: Option<&Path>,
     flags: &CliPolicyFlags,
-) -> Result<(Document, DiagnosticPolicy), RenderCmdErr> {
+) -> Result<(Document, DiagnosticPolicy, Vec<Diagnostic>), RenderCmdErr> {
     // Resolve config policy and brand contract ───────────────────────────────
     let (global, local, global_brand, local_brand) = load_global_and_local(start_dir)
         .map_err(|msg| RenderCmdErr::new(format!("error[config.error]: {msg}"), 2))?;
@@ -95,7 +97,9 @@ pub(super) fn parse_validate(
         return Err(RenderCmdErr::new(msgs.join("\n"), 1));
     }
 
-    Ok((doc, merged))
+    let import_diagnostics = load_import_graph(&doc, start_dir).into_diagnostics();
+
+    Ok((doc, merged, import_diagnostics))
 }
 
 /// Apply the merged diagnostic `policy` to a list of compile-stage diagnostics

@@ -7,6 +7,7 @@ use std::path::Path;
 
 use zenith_core::{KdlAdapter, KdlSource, Severity, merge_brand_contract, validate_with_policy};
 
+use crate::commands::composition_imports::load_import_graph;
 use crate::commands::render::{
     collect_image_dimension_diagnostics, collect_missing_asset_diagnostics,
 };
@@ -93,6 +94,7 @@ pub fn run(src: &str, project_dir: Option<&Path>, json: bool, flags: &CliPolicyF
         diagnostics.extend(collect_missing_asset_diagnostics(&doc, dir));
         diagnostics.extend(collect_image_dimension_diagnostics(&doc, dir));
     }
+    diagnostics.extend(load_import_graph(&doc, project_dir).into_diagnostics());
     let has_errors = diagnostics.iter().any(|d| d.severity == Severity::Error);
 
     let stdout = if json {
@@ -236,6 +238,35 @@ mod tests {
         assert!(
             out.stdout.contains(r#""valid": true"#),
             "valid doc JSON must have valid=true; got: {}",
+            out.stdout
+        );
+    }
+
+    #[test]
+    fn import_missing_json_marks_document_invalid() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let src = r#"zenith version=1 {
+  project id="proj.import" name="Import"
+  imports {
+    import id="brand" kind="zen" src="missing.zen"
+  }
+  document id="doc.import" title="Import" {
+    page id="page.import" w=(px)100 h=(px)100
+  }
+}
+"#;
+
+        let out = run(src, Some(dir.path()), true, &CliPolicyFlags::default());
+
+        assert_eq!(out.exit_code, 1, "stdout: {}", out.stdout);
+        assert!(
+            out.stdout.contains(r#""valid": false"#),
+            "JSON must mark document invalid; got: {}",
+            out.stdout
+        );
+        assert!(
+            out.stdout.contains(r#""code": "import.missing""#),
+            "JSON must contain import.missing; got: {}",
             out.stdout
         );
     }

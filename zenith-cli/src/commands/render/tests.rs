@@ -112,6 +112,44 @@ fn to_png_surfaces_compile_diagnostics() {
 }
 
 #[test]
+fn to_png_with_dir_surfaces_import_diagnostics() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let src = r#"zenith version=1 {
+  project id="proj.import" name="Import"
+  imports {
+    import id="brand" kind="zen" src="missing.zen"
+  }
+  document id="doc.import" title="Import" {
+    page id="page.import" w=(px)100 h=(px)100
+  }
+}
+"#;
+
+    let artifact = to_png_with_dir(
+        src,
+        Some(dir.path()),
+        1,
+        false,
+        &CliPolicyFlags::default(),
+        None,
+    )
+    .expect("render artifact should carry import diagnostics");
+
+    assert!(
+        artifact
+            .diagnostics
+            .iter()
+            .any(|d| d.code == "import.missing"),
+        "render must surface import diagnostics; got {:?}",
+        artifact
+            .diagnostics
+            .iter()
+            .map(|d| d.code.as_str())
+            .collect::<Vec<_>>()
+    );
+}
+
+#[test]
 fn construction_guides_do_not_affect_default_scene_json() {
     let artifact = to_scene_json(CONSTRUCTION_DOC, None, 1, &CliPolicyFlags::default(), None)
         .expect("scene render must succeed");
