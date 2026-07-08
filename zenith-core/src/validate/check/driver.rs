@@ -10,7 +10,8 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use crate::ast::brand::BrandContract;
-use crate::ast::document::Document;
+use crate::ast::document::{Document, PortDef};
+use crate::ast::node::{ConnectorAnchorParseError, parse_connector_anchor};
 use crate::ast::policy::DiagnosticPolicy;
 use crate::ast::style::Style;
 use crate::ast::value::{PropertyValue, Unit, dim_to_px};
@@ -32,6 +33,76 @@ use super::report::ValidationReport;
 use super::variants::check_variants;
 use super::visual::{VisualExpect, check_block_styles, check_visual_prop};
 use super::{fold, margin, safezone};
+
+fn build_ports_by_node(
+    ports: &[PortDef],
+    local_node_ids: &BTreeSet<String>,
+    diagnostics: &mut Vec<Diagnostic>,
+) -> BTreeMap<String, BTreeSet<String>> {
+    let mut ports_by_node: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
+    for port in ports {
+        if !local_node_ids.contains(&port.node) {
+            diagnostics.push(Diagnostic::warning(
+                "connector.port_invalid_target",
+                format!(
+                    "port '{}#{}' targets unknown node '{}'",
+                    port.node, port.id, port.node
+                ),
+                port.source_span,
+                Some(port.node.clone()),
+            ));
+        }
+        let ids = ports_by_node.entry(port.node.clone()).or_default();
+        if !ids.insert(port.id.clone()) {
+            diagnostics.push(Diagnostic::warning(
+                "connector.port_duplicate",
+                format!(
+                    "port '{}#{}' is declared more than once for node '{}'",
+                    port.node, port.id, port.node
+                ),
+                port.source_span,
+                Some(port.node.clone()),
+            ));
+        }
+        match parse_connector_anchor(&port.anchor) {
+            Ok(_) => {}
+            Err(ConnectorAnchorParseError::ZeroCount) => {
+                diagnostics.push(Diagnostic::warning(
+                    "connector.invalid_anchor",
+                    format!(
+                        "port '{}#{}': anchor '{}' has a divided anchor count of 0",
+                        port.node, port.id, port.anchor
+                    ),
+                    port.source_span,
+                    Some(port.node.clone()),
+                ));
+            }
+            Err(ConnectorAnchorParseError::IndexOutOfRange { index, count }) => {
+                diagnostics.push(Diagnostic::warning(
+                    "connector.invalid_anchor",
+                    format!(
+                        "port '{}#{}': anchor '{}' has index {index} outside divided anchor count {count}",
+                        port.node, port.id, port.anchor
+                    ),
+                    port.source_span,
+                    Some(port.node.clone()),
+                ));
+            }
+            Err(ConnectorAnchorParseError::InvalidSyntax) => {
+                diagnostics.push(Diagnostic::warning(
+                    "connector.invalid_anchor",
+                    format!(
+                        "port '{}#{}': anchor '{}' is not 'auto', a divided anchor like '4/16', or a nine-point anchor (top/center/bottom × left/center/right, e.g. bottom-right)",
+                        port.node, port.id, port.anchor
+                    ),
+                    port.source_span,
+                    Some(port.node.clone()),
+                ));
+            }
+        }
+    }
+    ports_by_node
+}
 
 /// Run the full document validation pass against the document's own in-file
 /// diagnostic policy and in-file brand contract.
@@ -299,6 +370,11 @@ pub fn validate_with_policy(
         register_id(&comp.id, &mut seen_ids, &mut diagnostics);
 
         let mut local_seen: BTreeSet<String> = BTreeSet::new();
+        let local_node_ids = component_local_ids
+            .get(&comp.id)
+            .cloned()
+            .unwrap_or_default();
+        let ports_by_node = build_ports_by_node(&comp.ports, &local_node_ids, &mut diagnostics);
         // Components are not page-children: no safe-zones apply.
         let no_zones: BTreeSet<&str> = BTreeSet::new();
         let ctx = WalkCtx {
@@ -308,6 +384,8 @@ pub fn validate_with_policy(
             declared_component_ids: &declared_component_ids,
             component_local_ids: &component_local_ids,
             all_node_ids: &all_node_ids,
+            local_node_ids: &local_node_ids,
+            ports_by_node: &ports_by_node,
             zone_ids: &no_zones,
         };
         for child in &comp.children {
@@ -339,6 +417,8 @@ pub fn validate_with_policy(
         register_id(&master.id, &mut seen_ids, &mut diagnostics);
 
         let mut local_seen: BTreeSet<String> = BTreeSet::new();
+        let empty_local_ids: BTreeSet<String> = BTreeSet::new();
+        let empty_ports: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
         // Masters are not page-children: no safe-zones apply.
         let no_zones: BTreeSet<&str> = BTreeSet::new();
         let ctx = WalkCtx {
@@ -348,6 +428,8 @@ pub fn validate_with_policy(
             declared_component_ids: &declared_component_ids,
             component_local_ids: &component_local_ids,
             all_node_ids: &all_node_ids,
+            local_node_ids: &empty_local_ids,
+            ports_by_node: &empty_ports,
             zone_ids: &no_zones,
         };
         for child in &master.children {
@@ -716,6 +798,11 @@ pub fn validate_with_policy(
         // Build the set of safe-zone ids for this page so that check_anchor
         // can validate anchor-zone references.
         let zone_ids: BTreeSet<&str> = page.safe_zones.iter().map(|z| z.id.as_str()).collect();
+        let local_node_ids = page_node_ids
+            .get(page.id.as_str())
+            .cloned()
+            .unwrap_or_default();
+        let ports_by_node = build_ports_by_node(&page.ports, &local_node_ids, &mut diagnostics);
 
         let ctx = WalkCtx {
             resolved_tokens,
@@ -724,6 +811,8 @@ pub fn validate_with_policy(
             declared_component_ids: &declared_component_ids,
             component_local_ids: &component_local_ids,
             all_node_ids: &all_node_ids,
+            local_node_ids: &local_node_ids,
+            ports_by_node: &ports_by_node,
             zone_ids: &zone_ids,
         };
 

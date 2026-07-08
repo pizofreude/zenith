@@ -32,7 +32,7 @@ use super::helpers::{
     required_string_prop_aliased, required_u32_prop,
 };
 use super::node::transform_node;
-use super::page::transform_page;
+use super::page::{transform_page, transform_ports};
 use super::tokens::{transform_styles, transform_tokens};
 
 /// Canonical set of property names recognised on the document-level surface.
@@ -983,9 +983,19 @@ fn transform_components(node: &KdlNode) -> Result<Vec<ComponentDef>, ParseError>
 
 fn transform_component_def(node: &KdlNode) -> Result<ComponentDef, ParseError> {
     let id = required_string_prop(node, "id")?.to_owned();
-    let children = transform_children(node)?;
+    let mut ports = Vec::new();
+    let mut children = Vec::new();
+    if let Some(doc) = node.children() {
+        for child in doc.nodes() {
+            match child.name().value() {
+                "ports" => ports.extend(transform_ports(child)?),
+                _ => children.push(transform_node(child)?),
+            }
+        }
+    }
     Ok(ComponentDef {
         id,
+        ports,
         children,
         source_span: node_span(node),
     })

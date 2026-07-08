@@ -589,6 +589,99 @@ fn connector_divided_anchor_out_of_range_warns() {
     );
 }
 
+fn validate_source(src: &str) -> ValidationReport {
+    let adapter = KdlAdapter;
+    let doc = adapter.parse(src.as_bytes()).expect("parse must succeed");
+    validate(&doc)
+}
+
+#[test]
+fn connector_port_endpoints_are_valid() {
+    let report = validate_source(
+        r##"zenith version=1 {
+  project id="proj.ports" name="Ports"
+  tokens format="zenith-token-v1" {}
+  styles {}
+  document id="doc.ports" title="Ports" {
+page id="page.ports" w=(px)640 h=(px)360 {
+  ports {
+    port node="agent" id="out" anchor="1/4"
+    port node="store" id="in" anchor="3/4"
+  }
+  rect id="agent" x=(px)40 y=(px)40 w=(px)100 h=(px)80
+  rect id="store" x=(px)300 y=(px)60 w=(px)100 h=(px)80
+  connector id="c1" from="agent#out" to="store#in"
+}
+  }
+}
+"##,
+    );
+    assert!(
+        !has_code(&report, "connector.unknown_port")
+            && !has_code(&report, "connector.port_invalid_target")
+            && !has_code(&report, "connector.port_duplicate")
+            && !has_code(&report, "connector.invalid_anchor"),
+        "codes: {:?}",
+        codes(&report)
+    );
+}
+
+#[test]
+fn connector_unknown_port_warns() {
+    let report = validate_source(
+        r##"zenith version=1 {
+  project id="proj.ports" name="Ports"
+  tokens format="zenith-token-v1" {}
+  styles {}
+  document id="doc.ports" title="Ports" {
+page id="page.ports" w=(px)640 h=(px)360 {
+  ports {
+    port node="agent" id="out" anchor="1/4"
+  }
+  rect id="agent" x=(px)40 y=(px)40 w=(px)100 h=(px)80
+  rect id="store" x=(px)300 y=(px)60 w=(px)100 h=(px)80
+  connector id="c1" from="agent#missing" to="store"
+}
+  }
+}
+"##,
+    );
+    assert!(
+        has_code(&report, "connector.unknown_port"),
+        "codes: {:?}",
+        codes(&report)
+    );
+}
+
+#[test]
+fn duplicate_and_invalid_port_declarations_warn() {
+    let report = validate_source(
+        r##"zenith version=1 {
+  project id="proj.ports" name="Ports"
+  tokens format="zenith-token-v1" {}
+  styles {}
+  document id="doc.ports" title="Ports" {
+page id="page.ports" w=(px)640 h=(px)360 {
+  ports {
+    port node="agent" id="out" anchor="1/4"
+    port node="agent" id="out" anchor="4/4"
+    port node="ghost" id="in" anchor="0/4"
+  }
+  rect id="agent" x=(px)40 y=(px)40 w=(px)100 h=(px)80
+}
+  }
+}
+"##,
+    );
+    assert!(
+        has_code(&report, "connector.port_duplicate")
+            && has_code(&report, "connector.port_invalid_target")
+            && has_code(&report, "connector.invalid_anchor"),
+        "codes: {:?}",
+        codes(&report)
+    );
+}
+
 // ── polygon: point with missing y → node.missing_geometry ─────────────
 
 #[test]

@@ -16,7 +16,7 @@ mod leaf;
 mod special;
 
 // Re-exported for `format::writer::mod` (the component-block + document writers).
-pub(in crate::format::writer) use document::write_document_body;
+pub(in crate::format::writer) use document::{write_document_body, write_ports_block};
 
 use container::{write_frame, write_group, write_table};
 use effect::{write_light, write_mesh};

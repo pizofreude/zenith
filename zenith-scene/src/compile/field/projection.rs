@@ -5,7 +5,7 @@
 
 use std::collections::BTreeMap;
 
-use zenith_core::{Node, PropertyValue, ResolvedToken};
+use zenith_core::{Node, Page, PropertyValue, ResolvedToken};
 
 use super::super::util::resolve_geometry_px;
 
@@ -80,11 +80,21 @@ fn index_nodes(children: &[Node], page_index_1based: usize, map: &mut BTreeMap<S
 /// exclusion). Deterministic: source-order walk; the FIRST occurrence of an id
 /// wins.
 pub(in crate::compile) fn build_node_boxes(
-    page: &zenith_core::Page,
+    page: &Page,
     resolved: &BTreeMap<String, ResolvedToken>,
 ) -> BTreeMap<String, (f64, f64, f64, f64)> {
     let mut map: BTreeMap<String, (f64, f64, f64, f64)> = BTreeMap::new();
     collect_node_boxes(&page.children, 0.0, 0.0, resolved, &mut map);
+    map
+}
+
+pub(in crate::compile) fn build_port_map(
+    page: &Page,
+) -> BTreeMap<String, BTreeMap<String, String>> {
+    let mut map: BTreeMap<String, BTreeMap<String, String>> = BTreeMap::new();
+    for port in &page.ports {
+        insert_port(&mut map, &port.node, &port.id, &port.anchor);
+    }
     map
 }
 
@@ -236,6 +246,18 @@ fn collect_node_boxes(
             | Node::Unknown(_) => {}
         }
     }
+}
+
+fn insert_port(
+    map: &mut BTreeMap<String, BTreeMap<String, String>>,
+    node: &str,
+    port: &str,
+    anchor: &str,
+) {
+    map.entry(node.to_owned())
+        .or_default()
+        .entry(port.to_owned())
+        .or_insert_with(|| anchor.to_owned());
 }
 
 /// A node's LOCAL `(x, y, w, h)` rectangle in pixels, when all four resolve.
@@ -401,6 +423,7 @@ mod tests {
             safe_zones: Vec::new(),
             folds: Vec::new(),
             construction: zenith_core::ConstructionBlock::default(),
+            ports: Vec::new(),
             block_styles: Vec::new(),
             children: Vec::new(),
             source_span: None,

@@ -45,7 +45,7 @@ mod tokens;
 #[cfg(test)]
 mod tests;
 
-use nodes::{write_component_children, write_document_body};
+use nodes::{write_component_children, write_document_body, write_ports_block};
 use styles::write_style_block;
 use tokens::write_token_block;
 
@@ -502,6 +502,7 @@ fn write_component_block(components: &[ComponentDef], out: &mut String, depth: u
         out.push_str("component id=\"");
         out.push_str(&def.id);
         out.push_str("\" {\n");
+        write_ports_block(&def.ports, out, depth + 2);
         write_component_children(&def.children, out, depth + 1);
         indent(out, depth + 1);
         out.push_str("}\n");

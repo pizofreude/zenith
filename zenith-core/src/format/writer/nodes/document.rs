@@ -2,7 +2,8 @@
 //! (`safe-zone`, `fold`, `block`).
 
 use crate::ast::{
-    ConstructionBlock, ConstructionGuideDef, DocumentBody, Fold, Page, SafeZone, SafeZoneType,
+    ConstructionBlock, ConstructionGuideDef, DocumentBody, Fold, Page, PortDef, SafeZone,
+    SafeZoneType,
 };
 
 use crate::format::writer::{
@@ -73,8 +74,8 @@ fn write_page(page: &Page, out: &mut String, depth: usize) {
     write_opt_str(out, "master", &page.master);
 
     out.push_str(" {\n");
-    // Safe-zones, folds, and construction guides are page metadata, emitted
-    // before block decls and renderable children.
+    // Safe-zones, folds, construction guides, and ports are page metadata,
+    // emitted before block decls and renderable children.
     for zone in &page.safe_zones {
         write_safe_zone(zone, out, depth + 1);
     }
@@ -82,11 +83,37 @@ fn write_page(page: &Page, out: &mut String, depth: usize) {
         write_fold(fold, out, depth + 1);
     }
     write_construction_block(&page.construction, out, depth + 1);
+    write_ports_block(&page.ports, out, depth + 1);
     // Block style decls at page scope emitted after safe-zones/folds, before children.
     for bs in &page.block_styles {
         write_block_style(bs, out, depth + 1);
     }
     write_children_block(&page.children, out, depth);
+    indent(out, depth);
+    out.push_str("}\n");
+}
+
+pub(in crate::format::writer) fn write_ports_block(
+    ports: &[PortDef],
+    out: &mut String,
+    depth: usize,
+) {
+    if ports.is_empty() {
+        return;
+    }
+
+    indent(out, depth);
+    out.push_str("ports {\n");
+    for port in ports {
+        indent(out, depth + 1);
+        out.push_str("port node=\"");
+        out.push_str(&port.node);
+        out.push_str("\" id=\"");
+        out.push_str(&port.id);
+        out.push_str("\" anchor=\"");
+        out.push_str(&port.anchor);
+        out.push_str("\"\n");
+    }
     indent(out, depth);
     out.push_str("}\n");
 }

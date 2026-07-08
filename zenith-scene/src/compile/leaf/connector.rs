@@ -48,6 +48,7 @@ pub(in crate::compile) struct ConnectorEnv<'a> {
     pub(in crate::compile) footnote_markers: &'a BTreeMap<String, String>,
     pub(in crate::compile) node_boxes: &'a BTreeMap<String, (f64, f64, f64, f64)>,
     pub(in crate::compile) connector_target_kinds: &'a BTreeMap<String, ConnectorTargetKind>,
+    pub(in crate::compile) port_map: &'a BTreeMap<String, BTreeMap<String, String>>,
     pub(in crate::compile) anchors: &'a AnchorMap,
     pub(in crate::compile) ctx: RenderCtx,
 }
@@ -109,6 +110,24 @@ fn resolve_anchor(
     } else {
         ((cx, y), AnchorSide::Vertical)
     }
+}
+
+fn split_endpoint(endpoint: &str) -> (&str, Option<&str>) {
+    match endpoint.split_once('#') {
+        Some((node, port)) if !node.is_empty() && !port.is_empty() => (node, Some(port)),
+        _ => (endpoint, None),
+    }
+}
+
+fn endpoint_anchor<'a>(
+    node_id: &str,
+    port_id: Option<&str>,
+    explicit_anchor: &'a str,
+    port_map: &'a BTreeMap<String, BTreeMap<String, String>>,
+) -> &'a str {
+    port_id
+        .and_then(|id| port_map.get(node_id).and_then(|ports| ports.get(id)))
+        .map_or(explicit_anchor, String::as_str)
 }
 
 fn divided_anchor(
@@ -450,6 +469,7 @@ fn emit_connector_label(
         footnote_markers,
         node_boxes,
         connector_target_kinds: _,
+        port_map: _,
         anchors,
         ctx,
     } = env;
@@ -601,6 +621,7 @@ pub(in crate::compile) fn compile_connector(
         style_map,
         node_boxes,
         connector_target_kinds,
+        port_map,
         ctx,
         ..
     } = env;
@@ -611,9 +632,13 @@ pub(in crate::compile) fn compile_connector(
 
     // Both endpoints are required to route; absent → emit nothing (validation
     // already warned via `connector.missing_target`).
-    let (Some(from_id), Some(to_id)) = (connector.from.as_deref(), connector.to.as_deref()) else {
+    let (Some(from_endpoint), Some(to_endpoint)) =
+        (connector.from.as_deref(), connector.to.as_deref())
+    else {
         return;
     };
+    let (from_id, from_port) = split_endpoint(from_endpoint);
+    let (to_id, to_port) = split_endpoint(to_endpoint);
 
     // Look up the resolved page-absolute boxes of both targets. A missing box
     // (unresolved id, or a target with no authored geometry) → emit nothing.
@@ -635,8 +660,18 @@ pub(in crate::compile) fn compile_connector(
         .unwrap_or(ConnectorTargetKind::BoxLike);
 
     // Resolve anchors: each end aims toward the OTHER box's center for "auto".
-    let from_anchor = connector.from_anchor.as_deref().unwrap_or("auto");
-    let to_anchor = connector.to_anchor.as_deref().unwrap_or("auto");
+    let from_anchor = endpoint_anchor(
+        from_id,
+        from_port,
+        connector.from_anchor.as_deref().unwrap_or("auto"),
+        port_map,
+    );
+    let to_anchor = endpoint_anchor(
+        to_id,
+        to_port,
+        connector.to_anchor.as_deref().unwrap_or("auto"),
+        port_map,
+    );
     let (f_pt, f_side) = resolve_anchor(from_box, from_kind, from_anchor, to_center);
     let (t_pt, t_side) = resolve_anchor(to_box, to_kind, to_anchor, from_center);
 

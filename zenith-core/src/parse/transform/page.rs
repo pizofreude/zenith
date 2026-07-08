@@ -42,7 +42,7 @@ pub(crate) const PAGE_KNOWN_PROPS: &[&str] = &[
 ];
 
 use crate::ast::construction::{ConstructionBlock, ConstructionGuideDef};
-use crate::ast::document::{Fold, Page, SafeZone, SafeZoneType};
+use crate::ast::document::{Fold, Page, PortDef, SafeZone, SafeZoneType};
 use crate::ast::node::Node;
 use crate::error::{ParseError, ParseErrorCode};
 
@@ -128,15 +128,16 @@ pub(super) fn transform_page(node: &KdlNode) -> Result<Page, ParseError> {
 
     let source_span = node_span(node);
 
-    // A page's children block mixes `safe-zone`, `fold`, `construction`, and
-    // `block` declarations
+    // A page's children block mixes `safe-zone`, `fold`, `construction`,
+    // `ports`, and `block` declarations
     // (page metadata, not rendering nodes) with renderable nodes. Split them here:
     // safe-zones go to `page.safe_zones`; folds to `page.folds`; construction
-    // guides to `page.construction`; block style decls to `page.block_styles`;
-    // everything else through `transform_node`.
+    // guides to `page.construction`; ports to `page.ports`; block style decls to
+    // `page.block_styles`; everything else through `transform_node`.
     let mut safe_zones: Vec<SafeZone> = Vec::new();
     let mut folds: Vec<Fold> = Vec::new();
     let mut construction = ConstructionBlock::default();
+    let mut ports: Vec<PortDef> = Vec::new();
     let mut block_styles: Vec<BlockStyle> = Vec::new();
     let mut children: Vec<Node> = Vec::new();
     if let Some(doc) = node.children() {
@@ -145,6 +146,7 @@ pub(super) fn transform_page(node: &KdlNode) -> Result<Page, ParseError> {
                 "safe-zone" => safe_zones.push(transform_safe_zone(child)?),
                 "fold" => folds.push(transform_fold(child)?),
                 "construction" => construction = transform_construction(child)?,
+                "ports" => ports.extend(transform_ports(child)?),
                 "block" => block_styles.push(transform_block_style(child)?),
                 _ => children.push(transform_node(child)?),
             }
@@ -171,9 +173,31 @@ pub(super) fn transform_page(node: &KdlNode) -> Result<Page, ParseError> {
         safe_zones,
         folds,
         construction,
+        ports,
         block_styles,
         children,
         source_span,
+    })
+}
+
+pub(super) fn transform_ports(node: &KdlNode) -> Result<Vec<PortDef>, ParseError> {
+    let mut ports = Vec::new();
+    if let Some(children) = node.children() {
+        for child in children.nodes() {
+            if child.name().value() == "port" {
+                ports.push(transform_port_def(child)?);
+            }
+        }
+    }
+    Ok(ports)
+}
+
+fn transform_port_def(node: &KdlNode) -> Result<PortDef, ParseError> {
+    Ok(PortDef {
+        node: required_string_prop(node, "node")?.to_owned(),
+        id: required_string_prop(node, "id")?.to_owned(),
+        anchor: required_string_prop(node, "anchor")?.to_owned(),
+        source_span: node_span(node),
     })
 }
 

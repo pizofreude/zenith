@@ -99,6 +99,10 @@ pub struct Page {
     /// non-printing metadata and do not affect canonical rendering unless a
     /// caller explicitly requests a construction overlay.
     pub construction: ConstructionBlock,
+    /// Semantic connector ports declared in a page-local `ports` sidecar block.
+    /// Ports are metadata only: they are not render nodes and never draw by
+    /// themselves. Connectors can reference them as `node#port`.
+    pub ports: Vec<PortDef>,
     /// Per-role markdown block style declarations at page scope. Empty when no
     /// `block role="…"` children are declared on this page. Cascade precedence:
     /// page < text (the text node's own decls override these). `block` decls are
@@ -168,6 +172,20 @@ pub struct Fold {
     pub source_span: Option<Span>,
 }
 
+/// A semantic connector attachment point on a render node.
+///
+/// Declared as `port node="..." id="..." anchor="..."` inside a page- or
+/// component-level `ports { ... }` sidecar block. The `node` value names the
+/// local target node, `id` is local to that node, and `anchor` uses the same
+/// grammar as connector `from-anchor` / `to-anchor`.
+#[derive(Debug, Clone, PartialEq)]
+pub struct PortDef {
+    pub node: String,
+    pub id: String,
+    pub anchor: String,
+    pub source_span: Option<Span>,
+}
+
 /// The `document` child of the root `zenith` node.
 ///
 /// Named `DocumentBody` to avoid clashing with the root `Document` type.
@@ -194,6 +212,9 @@ pub struct DocumentBody {
 #[derive(Debug, Clone, PartialEq)]
 pub struct ComponentDef {
     pub id: String,
+    /// Semantic connector ports declared in a component-local `ports` sidecar
+    /// block. These are metadata only and remain local to the component.
+    pub ports: Vec<PortDef>,
     /// The component's child nodes in source order (the reusable subtree).
     pub children: Vec<super::node::Node>,
     /// Source declaration span, when available.
@@ -504,6 +525,7 @@ mod parity_tests {
             safe_zones: Vec::new(),
             folds: Vec::new(),
             construction: ConstructionBlock::default(),
+            ports: Vec::new(),
             block_styles: Vec::new(),
             children: Vec::new(),
             source_span: None,

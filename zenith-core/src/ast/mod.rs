@@ -25,8 +25,8 @@ pub use block_style::{BLOCK_ROLE_VOCAB, BlockStyle};
 pub use brand::BrandContract;
 pub use construction::{ConstructionBlock, ConstructionGuideDef};
 pub use document::{
-    ComponentDef, Document, DocumentBody, Fold, ImportDecl, MasterDef, Page, Project, SafeZone,
-    SafeZoneType, SectionDef, TokenMapDecl,
+    ComponentDef, Document, DocumentBody, Fold, ImportDecl, MasterDef, Page, PortDef, Project,
+    SafeZone, SafeZoneType, SectionDef, TokenMapDecl,
 };
 pub use kerning::KerningPair;
 pub use library::LibraryDef;

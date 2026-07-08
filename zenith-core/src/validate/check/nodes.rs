@@ -30,6 +30,8 @@ pub(super) struct WalkCtx<'a> {
     pub(super) declared_component_ids: &'a BTreeSet<String>,
     pub(super) component_local_ids: &'a BTreeMap<String, BTreeSet<String>>,
     pub(super) all_node_ids: &'a BTreeSet<String>,
+    pub(super) local_node_ids: &'a BTreeSet<String>,
+    pub(super) ports_by_node: &'a BTreeMap<String, BTreeSet<String>>,
     pub(super) zone_ids: &'a BTreeSet<&'a str>,
 }
 

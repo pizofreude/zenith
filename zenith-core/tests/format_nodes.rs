@@ -12,6 +12,52 @@ mod common;
 use common::*;
 use zenith_core::format::format_document;
 
+#[test]
+fn page_ports_parse_format_round_trip() {
+    let src = r##"zenith version=1 {
+  project id="proj.ports" name="Ports"
+  tokens format="zenith-token-v1" {
+  }
+  styles {
+  }
+  document id="doc.ports" title="Ports" {
+    page id="page.ports" w=(px)640 h=(px)360 {
+      ports {
+        port node="agent" id="memory.vector" anchor="38/60"
+        port node="store" id="in" anchor="4/16"
+      }
+      rect id="agent" x=(px)40 y=(px)40 w=(px)120 h=(px)80
+      rect id="store" x=(px)300 y=(px)60 w=(px)120 h=(px)80
+      connector id="c1" from="agent#memory.vector" to="store#in"
+    }
+  }
+}
+"##;
+
+    let adapter = KdlAdapter;
+    let doc = adapter.parse(src.as_bytes()).expect("parse must succeed");
+    let page = &doc.body.pages[0];
+    assert_eq!(page.ports.len(), 2);
+    assert_eq!(page.ports[0].node, "agent");
+    assert_eq!(page.ports[0].id, "memory.vector");
+    assert_eq!(page.ports[0].anchor, "38/60");
+
+    let formatted = format_document(&doc).expect("format must succeed");
+    let formatted_str = String::from_utf8(formatted.clone()).expect("formatted must be utf8");
+    assert!(
+        formatted_str.contains("ports {\n        port node=\"agent\" id=\"memory.vector\" anchor=\"38/60\"\n        port node=\"store\" id=\"in\" anchor=\"4/16\"\n      }"),
+        "formatter must emit canonical page ports block; got:\n{formatted_str}"
+    );
+
+    let reparsed = adapter
+        .parse(&formatted)
+        .expect("re-parse after format must succeed");
+    assert_eq!(reparsed.body.pages[0].ports.len(), 2);
+    assert_eq!(reparsed.body.pages[0].ports[0].node, page.ports[0].node);
+    assert_eq!(reparsed.body.pages[0].ports[0].id, page.ports[0].id);
+    assert_eq!(reparsed.body.pages[0].ports[0].anchor, page.ports[0].anchor);
+}
+
 /// **Image clip round-trip**: `clip="rounded"` + `clip-radius=(token)"..."`
 /// must parse onto the `ImageNode`, be re-emitted by the formatter, and survive
 /// a format → re-parse round-trip.

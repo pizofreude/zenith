@@ -726,6 +726,7 @@ fn page_unknown_unit_produces_invalid_geometry() {
             safe_zones: Vec::new(),
             folds: Vec::new(),
             construction: zenith_core::ConstructionBlock::default(),
+            ports: Vec::new(),
             block_styles: Vec::new(),
             children: vec![],
             source_span: None,

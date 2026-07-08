@@ -4,7 +4,7 @@
 //! id; the dispatcher in [`super::super::nodes::walk_node`] performs the child
 //! recursion so traversal order is unchanged.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 
 use crate::ast::node::{
     ConnectorAnchorParseError, ConnectorNode, ShapeNode, UnknownNode, parse_connector_anchor,
@@ -242,6 +242,8 @@ pub(in crate::validate::check) fn check_connector(
         resolved_tokens,
         declared_style_ids,
         all_node_ids,
+        local_node_ids,
+        ports_by_node,
         ..
     } = ctx;
     register_id(&c.id, seen_ids, diagnostics);
@@ -273,36 +275,24 @@ pub(in crate::validate::check) fn check_connector(
         diagnostics,
     );
 
-    // Target existence: `from`/`to`, when present, must name an id in the
-    // document. A reference to a missing id is advisory (the connector
-    // simply renders nothing at compile time). Mirrors
-    // `text-exclusion.unresolved_ref`.
-    if let Some(target) = &c.from
-        && !all_node_ids.contains(target)
-    {
-        diagnostics.push(Diagnostic::warning(
-            "connector.unknown_target",
-            format!(
-                "connector '{}': from '{}' matches no node id in the document",
-                c.id, target
-            ),
-            c.source_span,
-            Some(c.id.clone()),
-        ));
-    }
-    if let Some(target) = &c.to
-        && !all_node_ids.contains(target)
-    {
-        diagnostics.push(Diagnostic::warning(
-            "connector.unknown_target",
-            format!(
-                "connector '{}': to '{}' matches no node id in the document",
-                c.id, target
-            ),
-            c.source_span,
-            Some(c.id.clone()),
-        ));
-    }
+    check_connector_endpoint(
+        c,
+        "from",
+        c.from.as_deref(),
+        all_node_ids,
+        local_node_ids,
+        ports_by_node,
+        diagnostics,
+    );
+    check_connector_endpoint(
+        c,
+        "to",
+        c.to.as_deref(),
+        all_node_ids,
+        local_node_ids,
+        ports_by_node,
+        diagnostics,
+    );
 
     // Missing endpoints: a connector with no `from`/`to` can't route.
     if c.from.is_none() || c.to.is_none() {
@@ -401,6 +391,63 @@ pub(in crate::validate::check) fn check_connector(
         c.source_span,
         diagnostics,
     );
+}
+
+fn check_connector_endpoint(
+    c: &ConnectorNode,
+    label: &str,
+    endpoint: Option<&str>,
+    all_node_ids: &BTreeSet<String>,
+    local_node_ids: &BTreeSet<String>,
+    ports_by_node: &BTreeMap<String, BTreeSet<String>>,
+    diagnostics: &mut Vec<Diagnostic>,
+) {
+    let Some(target) = endpoint else {
+        return;
+    };
+    let Some((node_id, port_id)) = target.split_once('#') else {
+        if !all_node_ids.contains(target) {
+            diagnostics.push(Diagnostic::warning(
+                "connector.unknown_target",
+                format!(
+                    "connector '{}': {label} '{}' matches no node id in the document",
+                    c.id, target
+                ),
+                c.source_span,
+                Some(c.id.clone()),
+            ));
+        }
+        return;
+    };
+
+    if node_id.is_empty() || !local_node_ids.contains(node_id) {
+        diagnostics.push(Diagnostic::warning(
+            "connector.port_invalid_target",
+            format!(
+                "connector '{}': {label} '{}' targets unknown node '{}'",
+                c.id, target, node_id
+            ),
+            c.source_span,
+            Some(c.id.clone()),
+        ));
+        return;
+    }
+
+    if port_id.is_empty()
+        || !ports_by_node
+            .get(node_id)
+            .is_some_and(|ports| ports.contains(port_id))
+    {
+        diagnostics.push(Diagnostic::warning(
+            "connector.unknown_port",
+            format!(
+                "connector '{}': {label} '{}' references unknown port '{}' on node '{}'",
+                c.id, target, port_id, node_id
+            ),
+            c.source_span,
+            Some(c.id.clone()),
+        ));
+    }
 }
 
 /// Emit the forward-compat `node.unknown_kind` warning and register the

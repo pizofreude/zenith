@@ -189,6 +189,26 @@ pub const DIAGNOSTIC_CODES: &[DiagnosticCodeInfo] = &[
         "Connector is missing a `from` or `to` target.",
     ),
     info(
+        "connector.port_duplicate",
+        Severity::Warning,
+        "A node declares the same connector port id more than once.",
+    ),
+    info(
+        "connector.port_invalid_target",
+        Severity::Warning,
+        "Connector port metadata references an unknown target node.",
+    ),
+    info(
+        "connector.unknown_port",
+        Severity::Warning,
+        "Connector endpoint references an unknown port on a target node.",
+    ),
+    info(
+        "connector.unknown_target",
+        Severity::Warning,
+        "Connector `from`/`to` references an unknown node.",
+    ),
+    info(
         "import.cycle",
         Severity::Error,
         "Composition import graph contains a cycle.",
@@ -237,11 +257,6 @@ pub const DIAGNOSTIC_CODES: &[DiagnosticCodeInfo] = &[
         "instance.multiple_references",
         Severity::Error,
         "Instance declares both component and source references.",
-    ),
-    info(
-        "connector.unknown_target",
-        Severity::Warning,
-        "Connector `from`/`to` references an unknown node.",
     ),
     info(
         "contrast.low",

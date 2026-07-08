@@ -365,6 +365,7 @@ mod tests {
             safe_zones: Vec::new(),
             folds: Vec::new(),
             construction: zenith_core::ConstructionBlock::default(),
+            ports: Vec::new(),
             block_styles: Vec::new(),
             children,
             source_span: None,
