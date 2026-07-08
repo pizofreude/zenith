@@ -2,7 +2,10 @@ use std::path::Path;
 
 use crate::config::CliPolicyFlags;
 
-use super::{to_pdf_all_pages_with_dir, to_png, to_png_all_pages, to_png_with_dir, to_scene_json};
+use super::{
+    RenderEntryOptions, to_pdf_all_pages_with_dir, to_png, to_png_all_pages, to_png_with_dir,
+    to_scene_json, to_scene_json_with_options,
+};
 
 const VALID_DOC: &str = r##"zenith version=1 {
   project id="proj.r" name="Render Test"
@@ -51,6 +54,24 @@ const UNKNOWN_NODE_DOC: &str = r##"zenith version=1 {
 }
 "##;
 
+const CONSTRUCTION_DOC: &str = r##"zenith version=1 {
+  project id="proj.guides" name="Guides"
+  tokens format="zenith-token-v1" {
+    token id="color.bg" type="color" value="#ffffff"
+  }
+  styles {}
+  document id="doc.guides" title="Guides" {
+    page id="page.guides" w=(px)320 h=(px)200 {
+      rect id="bg" x=(px)0 y=(px)0 w=(px)320 h=(px)200 fill=(token)"color.bg"
+      construction {
+        guide id="axis" type="segment" x1=(px)0 y1=(px)100 x2=(px)320 y2=(px)100
+        guide id="ring" type="circle" cx=(px)160 cy=(px)100 r=(px)40
+      }
+    }
+  }
+}
+"##;
+
 #[test]
 fn to_png_returns_png_magic_bytes() {
     let artifact = to_png(VALID_DOC, 1).expect("render must succeed");
@@ -88,6 +109,32 @@ fn to_png_surfaces_compile_diagnostics() {
             .map(|d| d.code.as_str())
             .collect::<Vec<_>>()
     );
+}
+
+#[test]
+fn construction_guides_do_not_affect_default_scene_json() {
+    let artifact = to_scene_json(CONSTRUCTION_DOC, None, 1, &CliPolicyFlags::default(), None)
+        .expect("scene render must succeed");
+
+    assert!(!artifact.json.contains("\"op\": \"StrokeLine\""));
+    assert!(!artifact.json.contains("\"op\": \"StrokeEllipse\""));
+}
+
+#[test]
+fn construction_overlay_appends_guide_commands_to_scene_json() {
+    let opts = RenderEntryOptions {
+        locked: false,
+        subset: true,
+        flags: &CliPolicyFlags::default(),
+        data: None,
+        construction_overlay: true,
+    };
+    let artifact = to_scene_json_with_options(CONSTRUCTION_DOC, None, 1, opts)
+        .expect("scene render must succeed");
+
+    assert!(artifact.json.contains("\"op\": \"StrokeLine\""));
+    assert!(artifact.json.contains("\"op\": \"StrokeEllipse\""));
+    assert!(artifact.json.contains("\"stroke_dash\": 6.0"));
 }
 
 #[test]

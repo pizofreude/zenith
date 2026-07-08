@@ -57,6 +57,10 @@ pub struct RenderArgs {
     #[arg(long, value_name = "PX")]
     pub gutter: Option<u32>,
 
+    /// Overlay non-printing page construction guides on the rendered output.
+    #[arg(long)]
+    pub construction_overlay: bool,
+
     /// Verify each image asset's bytes against its declared `sha256` and fail on mismatch.
     #[arg(long)]
     pub locked: bool,

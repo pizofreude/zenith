@@ -6,7 +6,7 @@ use zenith_core::{BytesAssetProvider, DataContext, Diagnostic, dim_to_px};
 use zenith_render::{
     PdfOptions, render_pdf_multi_with, render_pdf_with, render_png, render_spread_png,
 };
-use zenith_scene::{Scene, compile_page};
+use zenith_scene::{Scene, append_construction_overlay, compile_page};
 
 use crate::config::CliPolicyFlags;
 
@@ -64,6 +64,64 @@ pub struct PdfArtifact {
     pub diagnostics: Vec<Diagnostic>,
 }
 
+/// Shared options for render entry points.
+#[derive(Clone, Copy)]
+pub struct RenderEntryOptions<'a> {
+    /// Verify asset/font sha256 and fail on mismatch.
+    pub locked: bool,
+    /// Subset PDF fonts to used glyphs.
+    pub subset: bool,
+    /// Diagnostic-policy CLI flags.
+    pub flags: &'a CliPolicyFlags,
+    /// Optional data context for `(data)` references.
+    pub data: Option<&'a DataContext>,
+    /// Append page construction guides to the scene after canonical compile.
+    pub construction_overlay: bool,
+}
+
+impl<'a> RenderEntryOptions<'a> {
+    fn png(flags: &'a CliPolicyFlags, locked: bool, data: Option<&'a DataContext>) -> Self {
+        Self {
+            locked,
+            subset: true,
+            flags,
+            data,
+            construction_overlay: false,
+        }
+    }
+
+    fn scene(flags: &'a CliPolicyFlags, data: Option<&'a DataContext>) -> Self {
+        Self {
+            locked: false,
+            subset: true,
+            flags,
+            data,
+            construction_overlay: false,
+        }
+    }
+
+    fn pdf(
+        flags: &'a CliPolicyFlags,
+        locked: bool,
+        subset: bool,
+        data: Option<&'a DataContext>,
+    ) -> Self {
+        Self {
+            locked,
+            subset,
+            flags,
+            data,
+            construction_overlay: false,
+        }
+    }
+
+    /// Return a copy with construction overlay enabled or disabled.
+    pub fn with_construction_overlay(mut self, construction_overlay: bool) -> Self {
+        self.construction_overlay = construction_overlay;
+        self
+    }
+}
+
 // ── Entry points ──────────────────────────────────────────────────────────────
 
 /// Parse `src`, validate it with the merged diagnostic policy, compile the
@@ -96,12 +154,26 @@ pub fn to_scene_json(
     flags: &CliPolicyFlags,
     data: Option<&DataContext>,
 ) -> Result<SceneArtifact, RenderCmdErr> {
-    let (mut doc, policy) = parse_validate(src, project_dir, flags)?;
+    to_scene_json_with_options(
+        src,
+        project_dir,
+        page,
+        RenderEntryOptions::scene(flags, data),
+    )
+}
+
+pub fn to_scene_json_with_options(
+    src: &str,
+    project_dir: Option<&Path>,
+    page: usize,
+    opts: RenderEntryOptions<'_>,
+) -> Result<SceneArtifact, RenderCmdErr> {
+    let (mut doc, policy) = parse_validate(src, project_dir, opts.flags)?;
     let mut text_src_diagnostics: Vec<Diagnostic> = Vec::new();
     resolve_text_sources(&mut doc, project_dir, &mut text_src_diagnostics);
     let fonts = build_font_provider(&doc, project_dir, false)?;
     let page_index = resolve_page_index(&doc, page)?;
-    let compile_result = compile_page(&doc, &fonts, page_index, data);
+    let compile_result = compile_page_for_render(&doc, &fonts, page_index, opts);
     let json = compile_result
         .scene
         .to_json()
@@ -167,16 +239,30 @@ pub fn to_png_with_dir(
     flags: &CliPolicyFlags,
     data: Option<&DataContext>,
 ) -> Result<PngArtifact, RenderCmdErr> {
-    let (mut doc, policy) = parse_validate(src, project_dir, flags)?;
+    to_png_with_dir_options(
+        src,
+        project_dir,
+        page,
+        RenderEntryOptions::png(flags, locked, data),
+    )
+}
+
+pub fn to_png_with_dir_options(
+    src: &str,
+    project_dir: Option<&Path>,
+    page: usize,
+    opts: RenderEntryOptions<'_>,
+) -> Result<PngArtifact, RenderCmdErr> {
+    let (mut doc, policy) = parse_validate(src, project_dir, opts.flags)?;
     let mut text_src_diagnostics: Vec<Diagnostic> = Vec::new();
     resolve_text_sources(&mut doc, project_dir, &mut text_src_diagnostics);
-    let fonts = build_font_provider(&doc, project_dir, locked)?;
+    let fonts = build_font_provider(&doc, project_dir, opts.locked)?;
     let page_index = resolve_page_index(&doc, page)?;
     let assets = match project_dir {
-        Some(dir) => build_asset_provider(&doc, dir, locked)?,
+        Some(dir) => build_asset_provider(&doc, dir, opts.locked)?,
         None => BytesAssetProvider::new(),
     };
-    let compile_result = compile_page(&doc, &fonts, page_index, data);
+    let compile_result = compile_page_for_render(&doc, &fonts, page_index, opts);
     let png = render_png(&compile_result.scene, &fonts, &assets)
         .map_err(|e| RenderCmdErr::new(format!("render error: {e}"), 2))?;
     let mut diagnostics = text_src_diagnostics;
@@ -211,21 +297,37 @@ pub fn to_pdf_with_dir(
     flags: &CliPolicyFlags,
     data: Option<&DataContext>,
 ) -> Result<PdfArtifact, RenderCmdErr> {
-    let (mut doc, policy) = parse_validate(src, project_dir, flags)?;
+    to_pdf_with_dir_options(
+        src,
+        project_dir,
+        page,
+        RenderEntryOptions::pdf(flags, locked, subset, data),
+    )
+}
+
+pub fn to_pdf_with_dir_options(
+    src: &str,
+    project_dir: Option<&Path>,
+    page: usize,
+    opts: RenderEntryOptions<'_>,
+) -> Result<PdfArtifact, RenderCmdErr> {
+    let (mut doc, policy) = parse_validate(src, project_dir, opts.flags)?;
     let mut text_src_diagnostics: Vec<Diagnostic> = Vec::new();
     resolve_text_sources(&mut doc, project_dir, &mut text_src_diagnostics);
-    let fonts = build_font_provider(&doc, project_dir, locked)?;
+    let fonts = build_font_provider(&doc, project_dir, opts.locked)?;
     let page_index = resolve_page_index(&doc, page)?;
     let assets = match project_dir {
-        Some(dir) => build_asset_provider(&doc, dir, locked)?,
+        Some(dir) => build_asset_provider(&doc, dir, opts.locked)?,
         None => BytesAssetProvider::new(),
     };
-    let compile_result = compile_page(&doc, &fonts, page_index, data);
+    let compile_result = compile_page_for_render(&doc, &fonts, page_index, opts);
     let pdf = render_pdf_with(
         &compile_result.scene,
         &fonts,
         &assets,
-        PdfOptions { subset },
+        PdfOptions {
+            subset: opts.subset,
+        },
     );
     let mut diagnostics = text_src_diagnostics;
     diagnostics.extend(disk_diagnostics(&doc, project_dir));
@@ -264,29 +366,48 @@ pub fn to_pdf_all_pages_with_dir(
     flags: &CliPolicyFlags,
     data: Option<&DataContext>,
 ) -> Result<PdfArtifact, RenderCmdErr> {
-    let (mut doc, policy) = parse_validate(src, project_dir, flags)?;
+    to_pdf_all_pages_with_dir_options(
+        src,
+        project_dir,
+        RenderEntryOptions::pdf(flags, locked, subset, data),
+    )
+}
+
+pub fn to_pdf_all_pages_with_dir_options(
+    src: &str,
+    project_dir: Option<&Path>,
+    opts: RenderEntryOptions<'_>,
+) -> Result<PdfArtifact, RenderCmdErr> {
+    let (mut doc, policy) = parse_validate(src, project_dir, opts.flags)?;
     let mut diagnostics: Vec<Diagnostic> = Vec::new();
     resolve_text_sources(&mut doc, project_dir, &mut diagnostics);
-    let fonts = build_font_provider(&doc, project_dir, locked)?;
+    let fonts = build_font_provider(&doc, project_dir, opts.locked)?;
     let page_count = doc.body.pages.len();
     if page_count == 0 {
         return Err(RenderCmdErr::new("document has no pages to render", 2));
     }
     let assets = match project_dir {
-        Some(dir) => build_asset_provider(&doc, dir, locked)?,
+        Some(dir) => build_asset_provider(&doc, dir, opts.locked)?,
         None => BytesAssetProvider::new(),
     };
     let mut scenes: Vec<Scene> = Vec::with_capacity(page_count);
     diagnostics.extend(disk_diagnostics(&doc, project_dir));
     for page_index in 0..page_count {
-        let compile_result = compile_page(&doc, &fonts, page_index, data);
+        let compile_result = compile_page_for_render(&doc, &fonts, page_index, opts);
         scenes.push(compile_result.scene);
         diagnostics.extend(govern_compile_diagnostics(
             compile_result.diagnostics,
             &policy,
         ));
     }
-    let pdf = render_pdf_multi_with(&scenes, &fonts, &assets, PdfOptions { subset });
+    let pdf = render_pdf_multi_with(
+        &scenes,
+        &fonts,
+        &assets,
+        PdfOptions {
+            subset: opts.subset,
+        },
+    );
     Ok(PdfArtifact { pdf, diagnostics })
 }
 
@@ -313,16 +434,28 @@ pub fn to_png_all_pages(
     flags: &CliPolicyFlags,
     data: Option<&DataContext>,
 ) -> Result<Vec<PngArtifact>, RenderCmdErr> {
-    let (mut doc, policy) = parse_validate(src, project_dir, flags)?;
+    to_png_all_pages_options(
+        src,
+        project_dir,
+        RenderEntryOptions::png(flags, locked, data),
+    )
+}
+
+pub fn to_png_all_pages_options(
+    src: &str,
+    project_dir: Option<&Path>,
+    opts: RenderEntryOptions<'_>,
+) -> Result<Vec<PngArtifact>, RenderCmdErr> {
+    let (mut doc, policy) = parse_validate(src, project_dir, opts.flags)?;
     let mut text_src_diagnostics: Vec<Diagnostic> = Vec::new();
     resolve_text_sources(&mut doc, project_dir, &mut text_src_diagnostics);
-    let fonts = build_font_provider(&doc, project_dir, locked)?;
+    let fonts = build_font_provider(&doc, project_dir, opts.locked)?;
     let page_count = doc.body.pages.len();
     if page_count == 0 {
         return Err(RenderCmdErr::new("document has no pages to render", 2));
     }
     let assets = match project_dir {
-        Some(dir) => build_asset_provider(&doc, dir, locked)?,
+        Some(dir) => build_asset_provider(&doc, dir, opts.locked)?,
         None => BytesAssetProvider::new(),
     };
     let base_diagnostics: Vec<Diagnostic> = text_src_diagnostics
@@ -331,7 +464,7 @@ pub fn to_png_all_pages(
         .collect();
     let mut artifacts = Vec::with_capacity(page_count);
     for page_index in 0..page_count {
-        let compile_result = compile_page(&doc, &fonts, page_index, data);
+        let compile_result = compile_page_for_render(&doc, &fonts, page_index, opts);
         let png = render_png(&compile_result.scene, &fonts, &assets)
             .map_err(|e| RenderCmdErr::new(format!("render error on page {page_index}: {e}"), 2))?;
         let mut diagnostics = base_diagnostics.clone();
@@ -355,6 +488,8 @@ pub struct SpreadRenderOpts<'a> {
     pub flags: &'a CliPolicyFlags,
     /// Optional data context for `(data)` references.
     pub data: Option<&'a DataContext>,
+    /// Append page construction guides to both compiled scenes.
+    pub construction_overlay: bool,
 }
 
 /// Parse `src`, validate it with the merged diagnostic policy, compile pages
@@ -394,6 +529,7 @@ pub fn to_png_spread(
         locked,
         flags,
         data,
+        construction_overlay,
     } = opts;
     let (mut doc, policy) = parse_validate(src, project_dir, flags)?;
     let mut text_src_diagnostics: Vec<Diagnostic> = Vec::new();
@@ -413,8 +549,10 @@ pub fn to_png_spread(
             .map(|px| px.max(0.0) as u32)
             .unwrap_or(0)
     });
-    let compile_a = compile_page(&doc, &fonts, index_a, data);
-    let compile_b = compile_page(&doc, &fonts, index_b, data);
+    let render_opts = RenderEntryOptions::png(flags, locked, data)
+        .with_construction_overlay(construction_overlay);
+    let compile_a = compile_page_for_render(&doc, &fonts, index_a, render_opts);
+    let compile_b = compile_page_for_render(&doc, &fonts, index_b, render_opts);
     let png = render_spread_png(
         &compile_a.scene,
         &compile_b.scene,
@@ -429,4 +567,19 @@ pub fn to_png_spread(
     diagnostics.extend(disk_diagnostics(&doc, project_dir));
     diagnostics.extend(govern_compile_diagnostics(compile_diagnostics, &policy));
     Ok(PngArtifact { png, diagnostics })
+}
+
+fn compile_page_for_render(
+    doc: &zenith_core::Document,
+    fonts: &dyn zenith_core::FontProvider,
+    page_index: usize,
+    opts: RenderEntryOptions<'_>,
+) -> zenith_scene::CompileResult {
+    let mut compile_result = compile_page(doc, fonts, page_index, opts.data);
+    if opts.construction_overlay
+        && let Some(page) = doc.body.pages.get(page_index)
+    {
+        append_construction_overlay(&mut compile_result.scene, page);
+    }
+    compile_result
 }

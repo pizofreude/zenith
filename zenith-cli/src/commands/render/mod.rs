@@ -33,8 +33,9 @@ pub(crate) use assets::{
 };
 pub use data_input::{DataInputError, load_data_context};
 pub use entry::{
-    PdfArtifact, PngArtifact, RenderCmdErr, SceneArtifact, SpreadRenderOpts,
-    to_pdf_all_pages_with_dir, to_pdf_with_dir, to_png, to_png_all_pages, to_png_spread,
-    to_png_with_dir, to_scene_json,
+    PdfArtifact, PngArtifact, RenderCmdErr, RenderEntryOptions, SceneArtifact, SpreadRenderOpts,
+    to_pdf_all_pages_with_dir, to_pdf_all_pages_with_dir_options, to_pdf_with_dir,
+    to_pdf_with_dir_options, to_png, to_png_all_pages, to_png_all_pages_options, to_png_spread,
+    to_png_with_dir, to_png_with_dir_options, to_scene_json, to_scene_json_with_options,
 };
 pub(crate) use text_source::resolve_text_sources;

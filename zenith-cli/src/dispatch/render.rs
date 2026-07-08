@@ -86,6 +86,7 @@ pub(super) fn dispatch_render(args: RenderArgs) -> ExitCode {
                 locked: args.locked,
                 flags: &flags,
                 data,
+                construction_overlay: args.construction_overlay,
             },
         ) {
             Ok(artifact) => {
@@ -119,12 +120,17 @@ pub(super) fn dispatch_render(args: RenderArgs) -> ExitCode {
 
     // --scene ─────────────────────────────────────────────────────────
     if let Some(scene_out) = &args.scene {
-        match commands::render::to_scene_json(
+        match commands::render::to_scene_json_with_options(
             &src,
             args.path.parent(),
             args.page.unwrap_or(1),
-            &flags,
-            data,
+            commands::render::RenderEntryOptions {
+                locked: args.locked,
+                subset: !args.embed_full_fonts,
+                flags: &flags,
+                data,
+                construction_overlay: args.construction_overlay,
+            },
         ) {
             Ok(artifact) => {
                 // Block on hard (Error-severity) compile diagnostics.
@@ -162,13 +168,17 @@ pub(super) fn dispatch_render(args: RenderArgs) -> ExitCode {
     if let (Some(png_out), None) = (&args.png, &args.spread) {
         // Source image asset bytes relative to the .zen file's parent
         // directory so `image` nodes render their raster.
-        match commands::render::to_png_with_dir(
+        match commands::render::to_png_with_dir_options(
             &src,
             args.path.parent(),
             args.page.unwrap_or(1),
-            args.locked,
-            &flags,
-            data,
+            commands::render::RenderEntryOptions {
+                locked: args.locked,
+                subset: !args.embed_full_fonts,
+                flags: &flags,
+                data,
+                construction_overlay: args.construction_overlay,
+            },
         ) {
             Ok(artifact) => {
                 // Block on hard (Error-severity) compile diagnostics.
@@ -205,22 +215,28 @@ pub(super) fn dispatch_render(args: RenderArgs) -> ExitCode {
         // An explicit `--page N` selects one page (single-page PDF); without it
         // every page is rendered into one multi-page PDF.
         let result = match args.page {
-            Some(n) => commands::render::to_pdf_with_dir(
+            Some(n) => commands::render::to_pdf_with_dir_options(
                 &src,
                 args.path.parent(),
                 n,
-                args.locked,
-                !args.embed_full_fonts,
-                &flags,
-                data,
+                commands::render::RenderEntryOptions {
+                    locked: args.locked,
+                    subset: !args.embed_full_fonts,
+                    flags: &flags,
+                    data,
+                    construction_overlay: args.construction_overlay,
+                },
             ),
-            None => commands::render::to_pdf_all_pages_with_dir(
+            None => commands::render::to_pdf_all_pages_with_dir_options(
                 &src,
                 args.path.parent(),
-                args.locked,
-                !args.embed_full_fonts,
-                &flags,
-                data,
+                commands::render::RenderEntryOptions {
+                    locked: args.locked,
+                    subset: !args.embed_full_fonts,
+                    flags: &flags,
+                    data,
+                    construction_overlay: args.construction_overlay,
+                },
             ),
         };
         match result {
@@ -260,12 +276,16 @@ pub(super) fn dispatch_render(args: RenderArgs) -> ExitCode {
             eprintln!("error creating directory '{}': {}", dir.display(), e);
             return ExitCode::from(2);
         }
-        match commands::render::to_png_all_pages(
+        match commands::render::to_png_all_pages_options(
             &src,
             args.path.parent(),
-            args.locked,
-            &flags,
-            data,
+            commands::render::RenderEntryOptions {
+                locked: args.locked,
+                subset: !args.embed_full_fonts,
+                flags: &flags,
+                data,
+                construction_overlay: args.construction_overlay,
+            },
         ) {
             Ok(artifacts) => {
                 // Collect all diagnostics first; block if any are hard errors
