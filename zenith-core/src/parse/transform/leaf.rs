@@ -499,6 +499,8 @@ pub(crate) const TEXT_KNOWN_PROPS: &[&str] = &[
     "font_weight",
     "font-features",
     "font_features",
+    "font-alternates",
+    "font_alternates",
     "letter-spacing",
     "letter_spacing",
     "tracking",
@@ -562,6 +564,8 @@ pub(super) fn transform_text(node: &KdlNode) -> Result<TextNode, ParseError> {
     let font_weight = optional_property_value_aliased(node, "font-weight", "font_weight");
     let font_features =
         optional_string_prop_aliased(node, "font-features", "font_features").map(str::to_owned);
+    let font_alternates =
+        optional_string_prop_aliased(node, "font-alternates", "font_alternates").map(str::to_owned);
     let letter_spacing = optional_property_value_aliased(node, "letter-spacing", "letter_spacing")
         .or_else(|| optional_property_value(node, "tracking"));
     let drop_cap_lines = optional_u32_prop(node, "drop-cap-lines")
@@ -634,6 +638,7 @@ pub(super) fn transform_text(node: &KdlNode) -> Result<TextNode, ParseError> {
         font_size_min,
         font_weight,
         font_features,
+        font_alternates,
         letter_spacing,
         kerning_pairs,
         shadow: optional_property_value(node, "shadow"),
@@ -704,6 +709,8 @@ pub(crate) const CODE_KNOWN_PROPS: &[&str] = &[
     "font_weight",
     "font-features",
     "font_features",
+    "font-alternates",
+    "font_alternates",
     "letter-spacing",
     "letter_spacing",
     "tracking",
@@ -735,6 +742,8 @@ pub(super) fn transform_code(node: &KdlNode) -> Result<CodeNode, ParseError> {
     let font_weight = optional_property_value_aliased(node, "font-weight", "font_weight");
     let font_features =
         optional_string_prop_aliased(node, "font-features", "font_features").map(str::to_owned);
+    let font_alternates =
+        optional_string_prop_aliased(node, "font-alternates", "font_alternates").map(str::to_owned);
     let letter_spacing = optional_property_value_aliased(node, "letter-spacing", "letter_spacing")
         .or_else(|| optional_property_value(node, "tracking"));
     let line_numbers = optional_bool_prop(node, "line-numbers")
@@ -791,6 +800,7 @@ pub(super) fn transform_code(node: &KdlNode) -> Result<CodeNode, ParseError> {
         font_size,
         font_weight,
         font_features,
+        font_alternates,
         letter_spacing,
         kerning_pairs,
         syntax_theme,
@@ -1080,6 +1090,8 @@ pub(super) fn transform_span(node: &KdlNode) -> Result<TextSpan, ParseError> {
     let font_weight = optional_property_value_aliased(node, "font-weight", "font_weight");
     let font_features =
         optional_string_prop_aliased(node, "font-features", "font_features").map(str::to_owned);
+    let font_alternates =
+        optional_string_prop_aliased(node, "font-alternates", "font_alternates").map(str::to_owned);
     let letter_spacing = optional_property_value_aliased(node, "letter-spacing", "letter_spacing")
         .or_else(|| optional_property_value(node, "tracking"));
     let italic = optional_bool_prop(node, "italic");
@@ -1116,6 +1128,7 @@ pub(super) fn transform_span(node: &KdlNode) -> Result<TextSpan, ParseError> {
         fill,
         font_weight,
         font_features,
+        font_alternates,
         letter_spacing,
         italic,
         underline,

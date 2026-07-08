@@ -629,6 +629,12 @@ pub(in crate::validate::check) fn check_code(
         c.source_span,
         diagnostics,
     );
+    super::shared::check_font_alternates(
+        &c.id,
+        c.font_alternates.as_deref(),
+        c.source_span,
+        diagnostics,
+    );
     check_visual_prop(
         &c.id,
         "letter-spacing",

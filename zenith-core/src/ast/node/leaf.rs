@@ -362,6 +362,9 @@ pub struct TextNode {
     /// Comma-separated OpenType feature requests applied to this text node's
     /// spans unless a span overrides them. Examples: `"liga=0,kern=1,ss01"`.
     pub font_features: Option<String>,
+    /// Comma-separated alternate-selection aliases applied to this text node's
+    /// spans unless a span overrides them. Examples: `"styleset(1),stylistic"`.
+    pub font_alternates: Option<String>,
     /// Additional letter spacing inserted between adjacent shaped glyphs. Token or
     /// dimension, resolved to pixels by scene compilation. `None` keeps natural
     /// font spacing.
@@ -581,6 +584,8 @@ pub struct CodeNode {
     pub font_weight: Option<PropertyValue>,
     /// Comma-separated OpenType feature requests applied to code shaping.
     pub font_features: Option<String>,
+    /// Comma-separated alternate-selection aliases applied to code shaping.
+    pub font_alternates: Option<String>,
     /// Additional letter spacing inserted between adjacent shaped glyphs. Token or
     /// dimension, resolved to pixels by scene compilation. `None` keeps natural
     /// monospace spacing.

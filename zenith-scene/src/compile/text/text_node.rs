@@ -29,8 +29,9 @@ use super::measure::{
 };
 use super::resolve_kerning_pairs;
 use super::shape::{
-    CODE_BG, CODE_MONO_FAMILY, LINK_COLOR, ResolvedSpan, emit_glyph_missing, resolve_font_features,
-    resolve_font_weight, resolve_letter_spacing, resolve_vertical_align, run_to_scene_glyphs,
+    CODE_BG, CODE_MONO_FAMILY, LINK_COLOR, ResolvedSpan, emit_glyph_missing,
+    resolve_font_feature_set, resolve_font_weight, resolve_letter_spacing,
+    resolve_span_font_feature_set, resolve_vertical_align, run_to_scene_glyphs,
 };
 use super::tableader::compile_tab_leader;
 use super::wrap::{WrapEnv, WrapGeom, emit_wrap_path};
@@ -356,6 +357,7 @@ pub(in crate::compile) fn compile_text_sized(
                         fill: span.fill.clone(),
                         font_weight: None,
                         font_features: span.font_features.clone(),
+                        font_alternates: span.font_alternates.clone(),
                         letter_spacing: span.letter_spacing.clone(),
                         italic: None,
                         underline: None,
@@ -459,8 +461,9 @@ pub(in crate::compile) fn compile_text_sized(
         .font_weight
         .as_ref()
         .or_else(|| style_prop(&text.style, style_map, "font-weight"));
-    let node_features = resolve_font_features(
+    let node_features = resolve_font_feature_set(
         text.font_features.as_deref(),
+        text.font_alternates.as_deref(),
         diagnostics,
         &text.id,
         text.source_span,
@@ -658,9 +661,19 @@ pub(in crate::compile) fn compile_text_sized(
         let (span_font_size, baseline_dy) =
             resolve_vertical_align(span.vertical_align.as_deref(), font_size);
         let is_vertical_align = baseline_dy != 0.0;
-        let span_features = match span.font_features.as_deref() {
-            Some(raw) => resolve_font_features(Some(raw), diagnostics, &text.id, text.source_span),
-            None => node_features.clone(),
+        let span_features = match (
+            span.font_features.as_deref(),
+            span.font_alternates.as_deref(),
+        ) {
+            (None, None) => node_features.clone(),
+            (span_features, span_alternates) => resolve_span_font_feature_set(
+                &node_features,
+                span_features,
+                span_alternates,
+                diagnostics,
+                &text.id,
+                text.source_span,
+            ),
         };
         let span_letter_spacing_px = resolve_letter_spacing(
             span.letter_spacing.as_ref().or(node_letter_spacing_prop),

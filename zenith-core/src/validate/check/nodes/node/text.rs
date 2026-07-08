@@ -196,6 +196,12 @@ pub(in crate::validate::check) fn check_text(
         t.source_span,
         diagnostics,
     );
+    super::shared::check_font_alternates(
+        &t.id,
+        t.font_alternates.as_deref(),
+        t.source_span,
+        diagnostics,
+    );
     check_visual_prop(
         &t.id,
         "letter-spacing",

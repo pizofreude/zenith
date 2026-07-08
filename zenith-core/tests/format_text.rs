@@ -516,8 +516,8 @@ fn test_span_vertical_align_round_trip() {
     );
 }
 
-/// **OpenType font-features round-trip**: node, code, and span feature lists
-/// parse, format canonically, and survive parse -> format -> parse.
+/// **OpenType font controls round-trip**: node, code, and span feature and
+/// alternate lists parse, format canonically, and survive parse -> format -> parse.
 #[test]
 fn test_font_features_round_trip() {
     use zenith_core::Node;
@@ -530,10 +530,10 @@ fn test_font_features_round_trip() {
   }
   document id="doc.features" title="Features" {
     page id="page.one" w=(px)400 h=(px)400 {
-      text id="body" x=(px)10 y=(px)10 w=(px)300 h=(px)100 font-features="liga=0,kern=1" {
-        span "Serif" font-features="ss01=1"
+      text id="body" x=(px)10 y=(px)10 w=(px)300 h=(px)100 font-features="liga=0,kern=1" font-alternates="styleset(1),stylistic" {
+        span "Serif" font-features="ss01=1" font-alternates="character-variant(2)=3"
       }
-      code id="code" x=(px)10 y=(px)140 w=(px)300 h=(px)100 font-features="calt=0" {
+      code id="code" x=(px)10 y=(px)140 w=(px)300 h=(px)100 font-features="calt=0" font-alternates="swash" {
         content "let x = 1;"
       }
     }
@@ -548,17 +548,30 @@ fn test_font_features_round_trip() {
         panic!("expected text node");
     };
     assert_eq!(text_node.font_features.as_deref(), Some("liga=0,kern=1"));
+    assert_eq!(
+        text_node.font_alternates.as_deref(),
+        Some("styleset(1),stylistic")
+    );
     assert_eq!(text_node.spans[0].font_features.as_deref(), Some("ss01=1"));
+    assert_eq!(
+        text_node.spans[0].font_alternates.as_deref(),
+        Some("character-variant(2)=3")
+    );
     let Node::Code(code_node) = &page.children[1] else {
         panic!("expected code node");
     };
     assert_eq!(code_node.font_features.as_deref(), Some("calt=0"));
+    assert_eq!(code_node.font_alternates.as_deref(), Some("swash"));
 
     let formatted = format_document(&doc).expect("format");
     let text = String::from_utf8(formatted).expect("utf8");
     assert!(text.contains("font-features=\"liga=0,kern=1\""));
-    assert!(text.contains("span \"Serif\" font-features=\"ss01=1\""));
+    assert!(text.contains("font-alternates=\"styleset(1),stylistic\""));
+    assert!(text.contains(
+        "span \"Serif\" font-features=\"ss01=1\" font-alternates=\"character-variant(2)=3\""
+    ));
     assert!(text.contains("font-features=\"calt=0\""));
+    assert!(text.contains("font-alternates=\"swash\""));
 
     let reparsed = adapter.parse(text.as_bytes()).expect("reparse");
     assert_eq!(strip_spans(doc), strip_spans(reparsed));

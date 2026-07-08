@@ -59,6 +59,10 @@ pub struct TextSpan {
     /// bare `kern` for value 1). Scene compilation validates each feature tag
     /// before passing it to the layout engine. `None` keeps default shaping.
     pub font_features: Option<String>,
+    /// Comma-separated alternate-selection aliases lowered to OpenType features
+    /// (`styleset(1)`, `character-variant(2)=3`, `stylistic`, `swash`).
+    /// `None` keeps default shaping.
+    pub font_alternates: Option<String>,
     /// Additional letter spacing inserted between adjacent shaped glyphs. Token or
     /// dimension, resolved to pixels by scene compilation. `None` keeps the
     /// font's natural spacing.

@@ -331,6 +331,7 @@ fn emit_shape_label(
         font_size_min: None,
         font_weight: None,
         font_features: None,
+        font_alternates: None,
         letter_spacing: None,
         kerning_pairs: Vec::new(),
         shadow: None,

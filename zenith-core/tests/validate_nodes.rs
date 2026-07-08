@@ -44,9 +44,9 @@ fn font_features_validate_tags_and_values() {
   document id="doc.features" title="Features" {
     page id="page.one" w=(px)400 h=(px)400 {
       text id="body" x=(px)10 y=(px)10 w=(px)300 h=(px)100 font-features="liga=0,bad" {
-        span "Text" font-features="kern=on"
+        span "Text" font-features="kern=on" font-alternates="styleset(0)"
       }
-      code id="code" x=(px)10 y=(px)140 w=(px)300 h=(px)100 font-features="toolong=1" {
+      code id="code" x=(px)10 y=(px)140 w=(px)300 h=(px)100 font-features="toolong=1" font-alternates="character-variant(100),stylistic=on" {
         content "let x = 1;"
       }
     }
@@ -62,7 +62,7 @@ fn font_features_validate_tags_and_values() {
         .count();
     assert_eq!(
         invalid_count,
-        3,
+        6,
         "expected invalid tag/value diagnostics, got codes: {:?}",
         codes(&report)
     );
@@ -329,6 +329,7 @@ fn font_weight_with_missing_token_ref_produces_unknown_reference() {
         font_size_min: None,
         font_weight: Some(token_ref("weight.does.not.exist")),
         font_features: None,
+        font_alternates: None,
         letter_spacing: None,
         kerning_pairs: Vec::new(),
         opacity: None,

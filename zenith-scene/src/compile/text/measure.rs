@@ -18,8 +18,8 @@ use super::ctx::{NodeShape, ShapeEnv};
 use super::kerning::resolve_kerning_pairs;
 use super::pack::pack_lines;
 use super::shape::{
-    ResolvedSpan, resolve_font_family_name, resolve_font_features, resolve_font_weight,
-    resolve_letter_spacing, resolve_vertical_align, shape_words,
+    ResolvedSpan, resolve_font_family_name, resolve_font_feature_set, resolve_font_weight,
+    resolve_letter_spacing, resolve_span_font_feature_set, resolve_vertical_align, shape_words,
 };
 
 /// Resolve a text node's font size in pixels with style cascade (default 16.0).
@@ -117,8 +117,9 @@ fn build_resolved_spans(
         .as_ref()
         .or_else(|| style_prop(&text.style, style_map, "font-weight"));
     let base_weight = resolve_font_weight(node_weight_prop, resolved, 400);
-    let node_features = resolve_font_features(
+    let node_features = resolve_font_feature_set(
         text.font_features.as_deref(),
+        text.font_alternates.as_deref(),
         diagnostics,
         &text.id,
         text.source_span,
@@ -143,9 +144,19 @@ fn build_resolved_spans(
         };
         let (span_font_size, baseline_dy) =
             resolve_vertical_align(span.vertical_align.as_deref(), font_size);
-        let features = match span.font_features.as_deref() {
-            Some(raw) => resolve_font_features(Some(raw), diagnostics, &text.id, text.source_span),
-            None => node_features.clone(),
+        let features = match (
+            span.font_features.as_deref(),
+            span.font_alternates.as_deref(),
+        ) {
+            (None, None) => node_features.clone(),
+            (span_features, span_alternates) => resolve_span_font_feature_set(
+                &node_features,
+                span_features,
+                span_alternates,
+                diagnostics,
+                &text.id,
+                text.source_span,
+            ),
         };
         let span_letter_spacing_px = resolve_letter_spacing(
             span.letter_spacing.as_ref().or(node_letter_spacing_prop),

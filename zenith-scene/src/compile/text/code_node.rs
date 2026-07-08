@@ -17,7 +17,7 @@ use super::super::util::{resolve_geometry_px, rotation_degrees, unsupported_unit
 use super::ctx::TextCompileEnv;
 use super::resolve_kerning_pairs;
 use super::shape::{
-    resolve_family_with_fallback, resolve_font_family_name, resolve_font_features,
+    resolve_family_with_fallback, resolve_font_family_name, resolve_font_feature_set,
     resolve_font_weight, resolve_letter_spacing, run_to_scene_glyphs,
 };
 
@@ -223,8 +223,9 @@ fn compile_code_impl(
         .as_ref()
         .or_else(|| style_prop(&code.style, style_map, "font-weight"));
     let weight = resolve_font_weight(font_weight_prop, resolved, 400);
-    let font_features = resolve_font_features(
+    let font_features = resolve_font_feature_set(
         code.font_features.as_deref(),
+        code.font_alternates.as_deref(),
         diagnostics,
         &code.id,
         code.source_span,

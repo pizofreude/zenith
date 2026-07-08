@@ -137,10 +137,12 @@ pub fn node_content(kind: &str) -> Option<NodeContentDescriptor> {
         "text" => Some(NodeContentDescriptor {
             description: "One or more `span` children carry the text runs. \
                 Each span takes a string argument and optional inline style props: \
-                fill, font-weight, font-features, letter-spacing, italic, underline, strikethrough, highlight, \
+                fill, font-weight, font-features, font-alternates, letter-spacing, italic, underline, strikethrough, highlight, \
                 code, link, vertical-align, footnote-ref. \
                 `font-features` is a comma-separated OpenType feature list such as \
                 `liga=0,kern=1,ss01`; bare tags default to value 1. \
+                `font-alternates` is a comma-separated alternate list such as \
+                `styleset(1),character-variant(2)=3,stylistic`. \
                 `letter-spacing` is an optional dimension inserted between adjacent shaped clusters. \
                 Node-level `kern-pair \"A\" \"V\" by=(px)-2` children add manual spacing adjustments \
                 for matching adjacent shaped clusters; `by` accepts a dimension literal or dimension token. \
@@ -636,6 +638,7 @@ fn attribute_type_generic(name: &str, fallback: &'static str) -> &'static str {
         "font-family" => "token ref: fontFamily",
         "font-weight" => "token ref: fontWeight",
         "font-features" => "OpenType feature list",
+        "font-alternates" => "OpenType alternate list",
         "letter-spacing" | "tracking" => "token ref: dimension",
 
         // ── Floating-point ratios ─────────────────────────────────────────

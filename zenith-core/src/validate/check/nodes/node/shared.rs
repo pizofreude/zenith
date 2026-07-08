@@ -891,6 +891,7 @@ pub(super) fn check_spans(
             diagnostics,
         );
         check_font_features(node_id, span.font_features.as_deref(), None, diagnostics);
+        check_font_alternates(node_id, span.font_alternates.as_deref(), None, diagnostics);
         check_visual_prop(
             node_id,
             "letter-spacing",
@@ -939,6 +940,35 @@ pub(super) fn check_font_features(
             diagnostics.push(Diagnostic::warning(
                 "font.invalid_feature",
                 format!("node '{node_id}' has OpenType feature '{spec}' with a non-u32 value"),
+                span,
+                Some(node_id.to_owned()),
+            ));
+        }
+    }
+}
+
+pub(super) fn check_font_alternates(
+    node_id: &str,
+    raw: Option<&str>,
+    span: Option<crate::ast::Span>,
+    diagnostics: &mut Vec<Diagnostic>,
+) {
+    let Some(raw) = raw else {
+        return;
+    };
+
+    for item in raw.split(',') {
+        let spec = item.trim();
+        if spec.is_empty() {
+            continue;
+        }
+        if let Err(err) = crate::font::parse_font_alternate_spec(spec) {
+            diagnostics.push(Diagnostic::warning(
+                "font.invalid_feature",
+                format!(
+                    "node '{node_id}' has OpenType alternate '{}': {}",
+                    err.spec, err.message
+                ),
                 span,
                 Some(node_id.to_owned()),
             ));

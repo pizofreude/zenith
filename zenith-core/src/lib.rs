@@ -49,8 +49,9 @@ pub use data::{DataContext, DataFormat, format_data_value};
 pub use diagnostics::{Diagnostic, Severity};
 pub use error::{FormatError, ParseError, ParseErrorCode};
 pub use font::{
-    BytesFontProvider, FontData, FontProvider, FontSource, FontStyle, LocalFontEntry,
-    default_provider, scan_font_dirs,
+    BytesFontProvider, FontAlternateFeature, FontAlternateParseError, FontData, FontProvider,
+    FontSource, FontStyle, LocalFontEntry, default_provider, parse_font_alternate_spec,
+    scan_font_dirs,
 };
 pub use markdown::{ListKind, MdBlock, parse_block_markdown, parse_inline_markdown};
 pub use parse::{KdlAdapter, KdlSource, parse_brand_contract, parse_diagnostic_policy};

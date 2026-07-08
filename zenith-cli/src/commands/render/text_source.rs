@@ -132,6 +132,7 @@ fn resolve_one(
                 fill: None,
                 font_weight: None,
                 font_features: None,
+                font_alternates: None,
                 letter_spacing: None,
                 italic: None,
                 underline: None,

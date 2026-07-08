@@ -183,6 +183,88 @@ pub(in crate::compile) fn resolve_font_features(
     features
 }
 
+pub(in crate::compile) fn resolve_font_feature_set(
+    raw_features: Option<&str>,
+    raw_alternates: Option<&str>,
+    diagnostics: &mut Vec<Diagnostic>,
+    node_id: &str,
+    span: Option<zenith_core::Span>,
+) -> Vec<FontFeature> {
+    let mut features = resolve_font_features(raw_features, diagnostics, node_id, span);
+    if let Some(raw_alternates) = raw_alternates {
+        features.extend(resolve_font_alternates(
+            raw_alternates,
+            diagnostics,
+            node_id,
+            span,
+        ));
+    }
+
+    features
+}
+
+pub(in crate::compile) fn resolve_span_font_feature_set(
+    node_features: &[FontFeature],
+    span_features: Option<&str>,
+    span_alternates: Option<&str>,
+    diagnostics: &mut Vec<Diagnostic>,
+    node_id: &str,
+    span: Option<zenith_core::Span>,
+) -> Vec<FontFeature> {
+    let mut features = node_features.to_vec();
+    features.extend(resolve_font_features(
+        span_features,
+        diagnostics,
+        node_id,
+        span,
+    ));
+    if let Some(raw_alternates) = span_alternates {
+        features.extend(resolve_font_alternates(
+            raw_alternates,
+            diagnostics,
+            node_id,
+            span,
+        ));
+    }
+    features
+}
+
+fn resolve_font_alternates(
+    raw: &str,
+    diagnostics: &mut Vec<Diagnostic>,
+    node_id: &str,
+    span: Option<zenith_core::Span>,
+) -> Vec<FontFeature> {
+    let mut features = Vec::new();
+
+    for item in raw.split(',') {
+        let spec = item.trim();
+        if spec.is_empty() {
+            continue;
+        }
+        let alternate = match zenith_core::parse_font_alternate_spec(spec) {
+            Ok(alternate) => alternate,
+            Err(err) => {
+                diagnostics.push(Diagnostic::warning(
+                    "font.invalid_feature",
+                    format!(
+                        "text node '{node_id}' has OpenType alternate '{}': {}",
+                        err.spec, err.message
+                    ),
+                    span,
+                    Some(node_id.to_owned()),
+                ));
+                continue;
+            }
+        };
+        if let Some(feature) = FontFeature::new(&alternate.tag, alternate.value) {
+            features.push(feature);
+        }
+    }
+
+    features
+}
+
 pub(in crate::compile) fn resolve_letter_spacing(
     prop: Option<&PropertyValue>,
     resolved: &BTreeMap<String, ResolvedToken>,
@@ -581,5 +663,92 @@ pub(in crate::compile) fn resolve_vertical_align(
         Some("super") => ((full * VALIGN_SCALE) as f32, -(full * VALIGN_SUPER_SHIFT)),
         Some("sub") => ((full * VALIGN_SCALE) as f32, full * VALIGN_SUB_SHIFT),
         _ => (node_font_size, 0.0),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn font_alternates_lower_to_layout_features() {
+        let mut diagnostics = Vec::new();
+        let features = resolve_font_feature_set(
+            Some("liga=0"),
+            Some("styleset(2),character-variant(3)=4,stylistic"),
+            &mut diagnostics,
+            "text.alt",
+            None,
+        );
+
+        assert!(
+            diagnostics.is_empty(),
+            "unexpected diagnostics: {diagnostics:?}"
+        );
+        let pairs: Vec<_> = features
+            .iter()
+            .map(|feature| (feature.tag(), feature.value()))
+            .collect();
+        assert_eq!(
+            pairs,
+            vec![(*b"liga", 0), (*b"ss02", 1), (*b"cv03", 4), (*b"salt", 1)]
+        );
+    }
+
+    #[test]
+    fn invalid_font_alternates_emit_font_feature_warning() {
+        let mut diagnostics = Vec::new();
+        let features = resolve_font_feature_set(
+            None,
+            Some("styleset(0),stylistic=on"),
+            &mut diagnostics,
+            "text.alt",
+            None,
+        );
+
+        assert!(features.is_empty());
+        assert_eq!(
+            diagnostics
+                .iter()
+                .filter(|diagnostic| diagnostic.code == "font.invalid_feature")
+                .count(),
+            2
+        );
+    }
+
+    #[test]
+    fn span_font_alternates_inherit_node_features() {
+        let mut diagnostics = Vec::new();
+        let node_features = resolve_font_feature_set(
+            Some("liga=0"),
+            Some("stylistic=on"),
+            &mut diagnostics,
+            "text.alt",
+            None,
+        );
+        assert_eq!(diagnostics.len(), 1);
+
+        let features = resolve_span_font_feature_set(
+            &node_features,
+            None,
+            Some("character-variant(2)=3,styleset(1)"),
+            &mut diagnostics,
+            "text.alt",
+            None,
+        );
+
+        assert_eq!(
+            diagnostics
+                .iter()
+                .filter(|d| d.code == "font.invalid_feature")
+                .count(),
+            1,
+            "unexpected diagnostics: {diagnostics:?}"
+        );
+        let pairs: Vec<_> = features
+            .iter()
+            .map(|feature| (feature.tag(), feature.value()))
+            .collect();
+        assert_eq!(pairs, vec![(*b"liga", 0), (*b"cv02", 3), (*b"ss01", 1)]);
     }
 }
