@@ -405,9 +405,6 @@ pub(super) fn apply_transform_path_anchors(
             let kind = node_kind_str(node);
             match node {
                 Node::Path(path) => {
-                    if reject_compound_path(node_id, "transform_path_anchors", path, diagnostics) {
-                        return;
-                    }
                     let affine = match path_transform(transform) {
                         Ok(affine) => affine,
                         Err(error) => {
@@ -415,33 +412,41 @@ pub(super) fn apply_transform_path_anchors(
                             return;
                         }
                     };
-                    let geometry = match resolved_path_geometry(
-                        node_id,
-                        &path.anchors,
-                        path.closed == Some(true),
-                    ) {
-                        Ok(geometry) => geometry,
-                        Err(diagnostic) => {
-                            diagnostics.push(diagnostic);
-                            return;
+                    if path.subpaths.is_empty() {
+                        path.anchors = match transform_core_anchors(
+                            node_id,
+                            &path.anchors,
+                            path.closed == Some(true),
+                            affine,
+                        ) {
+                            Ok(anchors) => anchors,
+                            Err(diagnostic) => {
+                                diagnostics.push(diagnostic);
+                                return;
+                            }
+                        };
+                    } else {
+                        let mut transformed_subpaths = Vec::with_capacity(path.subpaths.len());
+                        for subpath in &path.subpaths {
+                            let anchors = match transform_core_anchors(
+                                node_id,
+                                &subpath.anchors,
+                                subpath.closed == Some(true),
+                                affine,
+                            ) {
+                                Ok(anchors) => anchors,
+                                Err(diagnostic) => {
+                                    diagnostics.push(diagnostic);
+                                    return;
+                                }
+                            };
+                            transformed_subpaths.push(anchors);
                         }
-                    };
-                    let transformed = match geometry.transform(affine) {
-                        Ok(transformed) => transformed,
-                        Err(error) => {
-                            diagnostics.push(transform_geometry_diagnostic(node_id, error));
-                            return;
+                        for (subpath, anchors) in path.subpaths.iter_mut().zip(transformed_subpaths)
+                        {
+                            subpath.anchors = anchors;
                         }
-                    };
-
-                    path.anchors = transformed
-                        .anchors()
-                        .iter()
-                        .zip(path.anchors.iter())
-                        .map(|(anchor, original)| {
-                            geometry_anchor_to_core(*anchor, original.kind.clone())
-                        })
-                        .collect();
+                    }
                     record_affected(node_id, affected);
                 }
                 non_path_nodes!() => {
@@ -455,6 +460,25 @@ pub(super) fn apply_transform_path_anchors(
             }
         }
     }
+}
+
+fn transform_core_anchors(
+    node_id: &str,
+    anchors: &[CorePathAnchor],
+    closed: bool,
+    affine: AffineTransform,
+) -> Result<Vec<CorePathAnchor>, Diagnostic> {
+    let geometry = resolved_path_geometry(node_id, anchors, closed)?;
+    let transformed = geometry
+        .transform(affine)
+        .map_err(|error| transform_geometry_diagnostic(node_id, error))?;
+
+    Ok(transformed
+        .anchors()
+        .iter()
+        .zip(anchors.iter())
+        .map(|(anchor, original)| geometry_anchor_to_core(*anchor, original.kind.clone()))
+        .collect())
 }
 
 fn path_transform(transform: &OpPathTransform) -> Result<AffineTransform, GeometryError> {

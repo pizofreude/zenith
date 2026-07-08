@@ -166,6 +166,31 @@ fn transform_path_anchors_reflects_across_line() {
 }
 
 #[test]
+fn transform_path_anchors_translates_compound_subpaths() {
+    let doc = parse(COMPOUND_PATH_DOC);
+    let tx = Transaction {
+        ops: vec![Op::TransformPathAnchors {
+            node: "compound".to_owned(),
+            transform: OpPathTransform::Translate { dx: 10.0, dy: -5.0 },
+        }],
+        permissions: Permissions::default(),
+    };
+    let result = run_transaction(&doc, &tx).expect("run_transaction should not error");
+
+    assert_eq!(result.status, TxStatus::Accepted);
+    assert_eq!(result.affected_node_ids, vec!["compound".to_owned()]);
+    assert_px_close(anchor_px_attr(&result.source_after, 0, "x"), 10.0);
+    assert_px_close(anchor_px_attr(&result.source_after, 0, "y"), -5.0);
+    assert_px_close(anchor_px_attr(&result.source_after, 3, "x"), 35.0);
+    assert_px_close(anchor_px_attr(&result.source_after, 3, "y"), 20.0);
+    assert!(
+        result.source_after.contains("fill-rule=\"evenodd\""),
+        "compound path styling should be preserved; got:\n{}",
+        result.source_after
+    );
+}
+
+#[test]
 fn transform_path_anchors_unsupported_on_rect() {
     let doc = parse(RECT_GEOM_DOC);
     let tx = Transaction {
