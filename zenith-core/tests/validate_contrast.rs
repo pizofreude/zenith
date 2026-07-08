@@ -234,6 +234,18 @@ fn ellipse_backdrop(id: &str, fill_token: &str) -> Node {
 }
 
 fn rect_backdrop_at(id: &str, fill_token: &str, x: f64, y: f64, w: f64, h: f64) -> Node {
+    rect_backdrop_at_with_opacity(id, fill_token, x, y, w, h, None)
+}
+
+fn rect_backdrop_at_with_opacity(
+    id: &str,
+    fill_token: &str,
+    x: f64,
+    y: f64,
+    w: f64,
+    h: f64,
+    opacity: Option<f64>,
+) -> Node {
     let Node::Rect(mut rect) =
         minimal_rect(id, Some(PropertyValue::TokenRef(fill_token.to_owned())))
     else {
@@ -243,10 +255,21 @@ fn rect_backdrop_at(id: &str, fill_token: &str, x: f64, y: f64, w: f64, h: f64) 
     rect.y = Some(pxv(y));
     rect.w = Some(pxv(w));
     rect.h = Some(pxv(h));
+    rect.opacity = opacity;
     Node::Rect(rect)
 }
 
 fn group_at(id: &str, x: f64, y: f64, children: Vec<Node>) -> Node {
+    group_at_with_opacity(id, x, y, None, children)
+}
+
+fn group_at_with_opacity(
+    id: &str,
+    x: f64,
+    y: f64,
+    opacity: Option<f64>,
+    children: Vec<Node>,
+) -> Node {
     Node::Group(GroupNode {
         id: id.to_owned(),
         name: None,
@@ -255,7 +278,7 @@ fn group_at(id: &str, x: f64, y: f64, children: Vec<Node>) -> Node {
         y: Some(pxv(y)),
         w: None,
         h: None,
-        opacity: None,
+        opacity,
         visible: None,
         locked: None,
         rotate: None,
@@ -344,6 +367,17 @@ fn shape_backdrop_at(
 }
 
 fn image_backdrop_at(id: &str, x: f64, y: f64, w: f64, h: f64) -> Node {
+    image_backdrop_at_with_opacity(id, x, y, w, h, None)
+}
+
+fn image_backdrop_at_with_opacity(
+    id: &str,
+    x: f64,
+    y: f64,
+    w: f64,
+    h: f64,
+    opacity: Option<f64>,
+) -> Node {
     Node::Image(ImageNode {
         shadow: None,
         filter: None,
@@ -368,7 +402,7 @@ fn image_backdrop_at(id: &str, x: f64, y: f64, w: f64, h: f64) -> Node {
         clip_radius: None,
         object_position_x: None,
         object_position_y: None,
-        opacity: None,
+        opacity,
         visible: None,
         locked: None,
         rotate: None,
@@ -759,6 +793,104 @@ fn gradient_backdrop_uses_worst_stop() {
     );
 }
 
+#[test]
+fn translucent_backdrop_composites_over_page() {
+    let doc = doc_with(
+        vec![
+            color_token_hex("color.page", "#000000"),
+            color_token_hex("color.scrim", "#ffffff80"),
+            color_token_hex("color.text", "#000000"),
+        ],
+        vec![page_with_bg(
+            "page.one",
+            "color.page",
+            vec![
+                rect_backdrop_at("scrim", "color.scrim", 100.0, 100.0, 220.0, 100.0),
+                text_at("headline", "color.text", 130.0, 130.0, 80.0, 30.0),
+            ],
+        )],
+    );
+    let report = validate(&doc);
+    assert!(
+        has_code(&report, "contrast.low"),
+        "translucent white over black should composite to gray and warn as low contrast; codes: {:?}",
+        codes(&report)
+    );
+    assert!(
+        !has_code(&report, "contrast.invisible"),
+        "translucent compositing should not fall back to black-on-black invisibility; codes: {:?}",
+        codes(&report)
+    );
+}
+
+#[test]
+fn group_opacity_cascades_into_backdrop_compositing() {
+    let doc = doc_with(
+        vec![
+            color_token_hex("color.page", "#000000"),
+            color_token_hex("color.scrim", "#ffffff"),
+            color_token_hex("color.text", "#000000"),
+        ],
+        vec![page_with_bg(
+            "page.one",
+            "color.page",
+            vec![
+                group_at_with_opacity(
+                    "group.scrim",
+                    0.0,
+                    0.0,
+                    Some(0.5),
+                    vec![rect_backdrop_at(
+                        "scrim",
+                        "color.scrim",
+                        100.0,
+                        100.0,
+                        220.0,
+                        100.0,
+                    )],
+                ),
+                text_at("headline", "color.text", 130.0, 130.0, 80.0, 30.0),
+            ],
+        )],
+    );
+    let report = validate(&doc);
+    assert!(
+        has_code(&report, "contrast.low"),
+        "group opacity should cascade into the child backdrop before contrast sampling; codes: {:?}",
+        codes(&report)
+    );
+    assert!(
+        !has_code(&report, "contrast.invisible"),
+        "group opacity compositing should not treat the child backdrop as fully opaque or absent; codes: {:?}",
+        codes(&report)
+    );
+}
+
+#[test]
+fn transparent_backdrop_does_not_override_page() {
+    let doc = doc_with(
+        vec![
+            color_token_hex("color.page", "#003087"),
+            color_token_hex("color.clear", "#ffffff00"),
+            color_token_hex("color.text", "#000000"),
+        ],
+        vec![page_with_bg(
+            "page.one",
+            "color.page",
+            vec![
+                rect_backdrop_at("clear", "color.clear", 100.0, 100.0, 220.0, 100.0),
+                text_at("headline", "color.text", 130.0, 130.0, 80.0, 30.0),
+            ],
+        )],
+    );
+    let report = validate(&doc);
+    assert!(
+        has_code(&report, "contrast.invisible"),
+        "fully transparent paint should leave the navy page as the sampled backdrop; codes: {:?}",
+        codes(&report)
+    );
+}
+
 /// Text node with no fill → no contrast check → no warning.
 #[test]
 fn text_without_fill_skips_contrast_check() {
@@ -971,6 +1103,70 @@ fn contrast_bg_hint_suppresses_image_indeterminate() {
     assert!(
         !has_code(&report, "contrast.indeterminate_backdrop"),
         "contrast-bg hint should suppress image indeterminate advisory; codes: {:?}",
+        codes(&report)
+    );
+}
+
+#[test]
+fn opaque_solid_above_image_suppresses_indeterminate_backdrop() {
+    let doc = doc_with_backdrop_image(
+        vec![
+            color_token_hex("color.page", "#ffffff"),
+            color_token_hex("color.cover", "#ffffff"),
+            color_token_hex("color.text", "#000000"),
+        ],
+        vec![
+            image_backdrop_at("image.backdrop", 0.0, 0.0, 220.0, 100.0),
+            rect_backdrop_at("cover", "color.cover", 0.0, 0.0, 220.0, 100.0),
+            text_at("headline", "color.text", 40.0, 30.0, 80.0, 30.0),
+        ],
+    );
+    let report = validate(&doc);
+    assert!(
+        !has_code(&report, "contrast.indeterminate_backdrop"),
+        "opaque known paint above an image should make the sampled backdrop determinate; codes: {:?}",
+        codes(&report)
+    );
+}
+
+#[test]
+fn translucent_solid_above_image_remains_indeterminate() {
+    let doc = doc_with_backdrop_image(
+        vec![
+            color_token_hex("color.page", "#ffffff"),
+            color_token_hex("color.scrim", "#ffffff80"),
+            color_token_hex("color.text", "#000000"),
+        ],
+        vec![
+            image_backdrop_at("image.backdrop", 0.0, 0.0, 220.0, 100.0),
+            rect_backdrop_at("scrim", "color.scrim", 0.0, 0.0, 220.0, 100.0),
+            text_at("headline", "color.text", 40.0, 30.0, 80.0, 30.0),
+        ],
+    );
+    let report = validate(&doc);
+    assert!(
+        has_code(&report, "contrast.indeterminate_backdrop"),
+        "translucent known paint above an image should still include unknown image pixels; codes: {:?}",
+        codes(&report)
+    );
+}
+
+#[test]
+fn transparent_image_backdrop_is_ignored() {
+    let doc = doc_with_backdrop_image(
+        vec![
+            color_token_hex("color.page", "#ffffff"),
+            color_token_hex("color.text", "#000000"),
+        ],
+        vec![
+            image_backdrop_at_with_opacity("image.backdrop", 0.0, 0.0, 220.0, 100.0, Some(0.0)),
+            text_at("headline", "color.text", 40.0, 30.0, 80.0, 30.0),
+        ],
+    );
+    let report = validate(&doc);
+    assert!(
+        !has_code(&report, "contrast.indeterminate_backdrop"),
+        "fully transparent image paint should not make the backdrop indeterminate; codes: {:?}",
         codes(&report)
     );
 }

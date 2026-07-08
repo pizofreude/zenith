@@ -18,14 +18,10 @@ use crate::tokens::{ResolvedToken, ResolvedValue};
 
 use geometry::{CoverageShape, RectPx, group_offset, local_box, text_box};
 
-/// Minimum alpha for a backdrop fill to be treated as opaque enough to act as
-/// the effective background. Fills below this (e.g. a translucent scrim) are
-/// skipped so they don't override a more solid backdrop or the page colour.
-const BACKDROP_OPAQUE_ALPHA: u8 = 128;
-
 /// Below this APCA magnitude the text is effectively painted into its backdrop,
 /// which is a stronger signal than ordinary sub-threshold contrast.
 const INVISIBLE_LC_FLOOR: f64 = 15.0;
+const MIN_PAINT_ALPHA: f64 = 1.0 / 255.0;
 
 pub(super) fn check_page_text_contrast(
     children: &[Node],
@@ -40,6 +36,7 @@ pub(super) fn check_page_text_contrast(
         dx: 0.0,
         dy: 0.0,
         clip: None,
+        opacity: 1.0,
         page_bg_rgb,
         page_size,
     };
@@ -55,6 +52,7 @@ struct PaintCtx {
     dx: f64,
     dy: f64,
     clip: Option<RectPx>,
+    opacity: f64,
     page_bg_rgb: Option<(u8, u8, u8)>,
     page_size: (f64, f64),
 }
@@ -67,9 +65,15 @@ struct BackdropCandidate {
 
 #[derive(Debug)]
 enum BackdropPaint {
-    Solid((u8, u8, u8)),
-    Gradient(Vec<(u8, u8, u8)>),
+    Solid(PaintColor),
+    Gradient(Vec<PaintColor>),
     Indeterminate,
+}
+
+#[derive(Clone, Copy, Debug)]
+struct PaintColor {
+    rgb: (u8, u8, u8),
+    alpha: f64,
 }
 
 #[derive(Clone, Copy)]
@@ -98,6 +102,9 @@ fn walk_paint(
     diagnostics: &mut Vec<Diagnostic>,
 ) {
     for node in children {
+        if !node_visible(node) {
+            continue;
+        }
         match node {
             Node::Rect(r) => push_backdrop(
                 node,
@@ -121,10 +128,7 @@ fn walk_paint(
             Node::Image(img) => push_image_backdrop(node, img, ctx, candidates, env),
             Node::Frame(f) => {
                 let frame_box = absolute_box(node, ctx, env.resolved_tokens);
-                let frame_clip = frame_box.and_then(|b| match ctx.clip {
-                    Some(clip) => clip.intersect(b),
-                    None => Some(b),
-                });
+                let frame_clip = frame_box.and_then(|b| clip_bounds(ctx.clip, b));
                 let no_fill: Option<PropertyValue> = None;
                 push_backdrop(
                     node,
@@ -137,6 +141,7 @@ fn walk_paint(
                 );
                 let child_ctx = PaintCtx {
                     clip: frame_clip,
+                    opacity: cascaded_opacity(ctx.opacity, f.opacity),
                     ..ctx
                 };
                 walk_paint(&f.children, child_ctx, candidates, env, diagnostics);
@@ -151,6 +156,7 @@ fn walk_paint(
                 let child_ctx = PaintCtx {
                     dx: ctx.dx + gx,
                     dy: ctx.dy + gy,
+                    opacity: cascaded_opacity(ctx.opacity, g.opacity),
                     ..ctx
                 };
                 walk_paint(&g.children, child_ctx, candidates, env, diagnostics);
@@ -212,19 +218,20 @@ fn push_backdrop(
     candidates: &mut Vec<BackdropCandidate>,
     env: ContrastEnv<'_>,
 ) {
-    let Some(paint) =
-        resolve_fill_paint(fill, style.as_deref(), env.style_map, env.resolved_tokens)
-    else {
+    let opacity = ctx.opacity * node_opacity(node).unwrap_or(1.0);
+    let Some(paint) = resolve_fill_paint(
+        fill,
+        style.as_deref(),
+        env.style_map,
+        env.resolved_tokens,
+        opacity,
+    ) else {
         return;
     };
     let Some(bounds) = absolute_box(node, ctx, env.resolved_tokens) else {
         return;
     };
-    let clipped_bounds = match ctx.clip {
-        Some(clip) => clip.intersect(bounds),
-        None => Some(bounds),
-    };
-    if let Some(bounds) = clipped_bounds {
+    if let Some(bounds) = clip_bounds(ctx.clip, bounds) {
         candidates.push(BackdropCandidate {
             paint,
             bounds,
@@ -240,14 +247,13 @@ fn push_image_backdrop(
     candidates: &mut Vec<BackdropCandidate>,
     env: ContrastEnv<'_>,
 ) {
+    if ctx.opacity * node_opacity(node).unwrap_or(1.0) < MIN_PAINT_ALPHA {
+        return;
+    }
     let Some(bounds) = absolute_box(node, ctx, env.resolved_tokens) else {
         return;
     };
-    let clipped_bounds = match ctx.clip {
-        Some(clip) => clip.intersect(bounds),
-        None => Some(bounds),
-    };
-    if let Some(bounds) = clipped_bounds {
+    if let Some(bounds) = clip_bounds(ctx.clip, bounds) {
         candidates.push(BackdropCandidate {
             paint: BackdropPaint::Indeterminate,
             bounds,
@@ -353,52 +359,96 @@ fn collect_backdrop_samples(
         return (backdrops, indeterminate);
     }
     for (x, y) in text_box.sample_points() {
-        let mut sampled_any = false;
-        for candidate in candidates.iter().rev() {
+        let mut point_indeterminate = false;
+        let mut samples: Vec<SampledBackdrop> = page_bg_rgb
+            .into_iter()
+            .map(|rgb| SampledBackdrop {
+                rgb,
+                source: "page background",
+            })
+            .collect();
+        for candidate in candidates {
             if candidate.shape.contains_point(candidate.bounds, x, y) {
                 match &candidate.paint {
-                    BackdropPaint::Solid(rgb) => {
-                        push_unique_sample(
-                            &mut backdrops,
-                            SampledBackdrop {
-                                rgb: *rgb,
-                                source: "backdrop",
-                            },
-                        );
-                        sampled_any = true;
+                    BackdropPaint::Solid(color) => {
+                        samples = composite_solid_samples(&samples, *color);
+                        if color.alpha >= 1.0 {
+                            point_indeterminate = false;
+                        }
                     }
                     BackdropPaint::Gradient(stops) => {
-                        for rgb in stops.iter().copied() {
-                            push_unique_sample(
-                                &mut backdrops,
-                                SampledBackdrop {
-                                    rgb,
-                                    source: "backdrop",
-                                },
-                            );
+                        samples = composite_gradient_samples(&samples, stops);
+                        if stops.iter().all(|stop| stop.alpha >= 1.0) {
+                            point_indeterminate = false;
                         }
-                        sampled_any = true;
                     }
                     BackdropPaint::Indeterminate => {
-                        indeterminate = true;
+                        point_indeterminate = true;
                     }
                 }
-                break;
             }
         }
-        if !sampled_any {
-            for rgb in page_bg_rgb {
-                push_unique_sample(
-                    &mut backdrops,
-                    SampledBackdrop {
-                        rgb,
-                        source: "page background",
-                    },
-                );
-            }
+        if point_indeterminate {
+            indeterminate = true;
+        }
+        for sample in samples {
+            push_unique_sample(&mut backdrops, sample);
         }
     }
     (backdrops, indeterminate)
+}
+
+fn composite_solid_samples(samples: &[SampledBackdrop], paint: PaintColor) -> Vec<SampledBackdrop> {
+    if samples.is_empty() {
+        return vec![SampledBackdrop {
+            rgb: paint.rgb,
+            source: "backdrop",
+        }];
+    }
+    samples
+        .iter()
+        .map(|sample| SampledBackdrop {
+            rgb: composite_rgb(paint.rgb, paint.alpha, sample.rgb),
+            source: "backdrop",
+        })
+        .collect()
+}
+
+fn composite_gradient_samples(
+    samples: &[SampledBackdrop],
+    stops: &[PaintColor],
+) -> Vec<SampledBackdrop> {
+    if stops.is_empty() {
+        return samples.to_vec();
+    }
+    let mut composited = Vec::with_capacity(stops.len() * samples.len().max(1));
+    for stop in stops {
+        if samples.is_empty() {
+            composited.push(SampledBackdrop {
+                rgb: stop.rgb,
+                source: "backdrop",
+            });
+        } else {
+            composited.extend(samples.iter().map(|sample| SampledBackdrop {
+                rgb: composite_rgb(stop.rgb, stop.alpha, sample.rgb),
+                source: "backdrop",
+            }));
+        }
+    }
+    composited
+}
+
+fn composite_rgb(src: (u8, u8, u8), alpha: f64, dst: (u8, u8, u8)) -> (u8, u8, u8) {
+    let alpha = alpha.clamp(0.0, 1.0);
+    (
+        composite_channel(src.0, alpha, dst.0),
+        composite_channel(src.1, alpha, dst.1),
+        composite_channel(src.2, alpha, dst.2),
+    )
+}
+
+fn composite_channel(src: u8, alpha: f64, dst: u8) -> u8 {
+    ((src as f64 * alpha) + (dst as f64 * (1.0 - alpha))).round() as u8
 }
 
 fn push_unique_sample(backdrops: &mut Vec<SampledBackdrop>, sample: SampledBackdrop) {
@@ -450,7 +500,7 @@ fn check_table_text_contrast(
 ) {
     let header_rows = table.header_rows.unwrap_or(0);
     let resolve_fill = |pv: &Option<PropertyValue>| -> Option<(u8, u8, u8)> {
-        resolve_fill_paint(pv, None, env.style_map, env.resolved_tokens)?.as_solid_rgb()
+        resolve_fill_paint(pv, None, env.style_map, env.resolved_tokens, 1.0)?.as_solid_rgb()
     };
 
     for (row_idx, row) in table.rows.iter().enumerate() {
@@ -469,6 +519,7 @@ fn check_table_text_contrast(
                 dx: 0.0,
                 dy: 0.0,
                 clip: None,
+                opacity: 1.0,
                 page_bg_rgb: cell_bg,
                 page_size,
             };
@@ -483,6 +534,7 @@ fn resolve_fill_paint(
     style: Option<&str>,
     style_map: &BTreeMap<&str, &Style>,
     resolved_tokens: &BTreeMap<String, ResolvedToken>,
+    opacity: f64,
 ) -> Option<BackdropPaint> {
     let pv = fill
         .as_ref()
@@ -492,16 +544,16 @@ fn resolve_fill_paint(
     };
     let token = resolved_tokens.get(id.as_str())?;
     match &token.value {
-        ResolvedValue::Color(hex) => solid_paint_from_hex(hex),
-        ResolvedValue::CmykColor { hex, .. } => solid_paint_from_hex(hex),
+        ResolvedValue::Color(hex) => solid_paint_from_hex(hex, opacity),
+        ResolvedValue::CmykColor { hex, .. } => solid_paint_from_hex(hex, opacity),
         ResolvedValue::Gradient(gradient) => {
-            let stops: Vec<(u8, u8, u8)> = gradient
+            let stops: Vec<PaintColor> = gradient
                 .stops
                 .iter()
                 .filter_map(|(_, color_id)| {
                     resolved_tokens
                         .get(color_id.as_str())
-                        .and_then(resolved_color_rgb)
+                        .and_then(|token| resolved_color_paint(token, opacity))
                 })
                 .collect();
             if stops.is_empty() {
@@ -523,28 +575,21 @@ fn resolve_fill_paint(
 impl BackdropPaint {
     fn as_solid_rgb(&self) -> Option<(u8, u8, u8)> {
         match self {
-            BackdropPaint::Solid(rgb) => Some(*rgb),
+            BackdropPaint::Solid(color) if color.alpha >= 1.0 => Some(color.rgb),
+            BackdropPaint::Solid(_) => None,
             BackdropPaint::Gradient(_) | BackdropPaint::Indeterminate => None,
         }
     }
 }
 
-fn solid_paint_from_hex(hex: &str) -> Option<BackdropPaint> {
-    let alpha = hex
-        .strip_prefix('#')
-        .filter(|h| h.len() == 8)
-        .and_then(|h| u8::from_str_radix(&h[6..8], 16).ok())
-        .unwrap_or(255);
-    if alpha < BACKDROP_OPAQUE_ALPHA {
-        return None;
-    }
-    parse_rgb(hex).map(BackdropPaint::Solid)
+fn solid_paint_from_hex(hex: &str, opacity: f64) -> Option<BackdropPaint> {
+    parse_paint_color(hex, opacity).map(BackdropPaint::Solid)
 }
 
-fn resolved_color_rgb(token: &ResolvedToken) -> Option<(u8, u8, u8)> {
+fn resolved_color_paint(token: &ResolvedToken, opacity: f64) -> Option<PaintColor> {
     match &token.value {
-        ResolvedValue::Color(hex) => parse_rgb(hex),
-        ResolvedValue::CmykColor { hex, .. } => parse_rgb(hex),
+        ResolvedValue::Color(hex) => parse_paint_color(hex, opacity),
+        ResolvedValue::CmykColor { hex, .. } => parse_paint_color(hex, opacity),
         ResolvedValue::Dimension(_)
         | ResolvedValue::Number(_)
         | ResolvedValue::FontFamily(_)
@@ -553,6 +598,70 @@ fn resolved_color_rgb(token: &ResolvedToken) -> Option<(u8, u8, u8)> {
         | ResolvedValue::Shadow(_)
         | ResolvedValue::Filter(_)
         | ResolvedValue::Mask(_) => None,
+    }
+}
+
+fn parse_paint_color(hex: &str, opacity: f64) -> Option<PaintColor> {
+    let rgb = parse_rgb(hex)?;
+    let token_alpha = hex
+        .strip_prefix('#')
+        .filter(|h| h.len() == 8)
+        .and_then(|h| u8::from_str_radix(&h[6..8], 16).ok())
+        .unwrap_or(255) as f64
+        / 255.0;
+    let alpha = (token_alpha * opacity.clamp(0.0, 1.0)).clamp(0.0, 1.0);
+    if alpha < MIN_PAINT_ALPHA {
+        return None;
+    }
+    Some(PaintColor { rgb, alpha })
+}
+
+fn cascaded_opacity(parent: f64, opacity: Option<f64>) -> f64 {
+    parent * opacity.unwrap_or(1.0).clamp(0.0, 1.0)
+}
+
+macro_rules! node_option_field {
+    ($node:expr, $field:ident) => {
+        match $node {
+            Node::Rect(n) => n.$field,
+            Node::Ellipse(n) => n.$field,
+            Node::Image(n) => n.$field,
+            Node::Shape(n) => n.$field,
+            Node::Frame(n) => n.$field,
+            Node::Group(n) => n.$field,
+            Node::Text(n) => n.$field,
+            Node::Line(n) => n.$field,
+            Node::Code(n) => n.$field,
+            Node::Polygon(n) => n.$field,
+            Node::Polyline(n) => n.$field,
+            Node::Path(n) => n.$field,
+            Node::Instance(n) => n.$field,
+            Node::Field(n) => n.$field,
+            Node::Footnote(_) => None,
+            Node::Toc(n) => n.$field,
+            Node::Connector(n) => n.$field,
+            Node::Pattern(n) => n.$field,
+            Node::Chart(n) => n.$field,
+            Node::Light(n) => n.$field,
+            Node::Mesh(n) => n.$field,
+            Node::Table(n) => n.$field,
+            Node::Unknown(_) => None,
+        }
+    };
+}
+
+fn node_opacity(node: &Node) -> Option<f64> {
+    node_option_field!(node, opacity)
+}
+
+fn node_visible(node: &Node) -> bool {
+    node_option_field!(node, visible).unwrap_or(true)
+}
+
+fn clip_bounds(clip: Option<RectPx>, bounds: RectPx) -> Option<RectPx> {
+    match clip {
+        Some(clip) => clip.intersect(bounds),
+        None => Some(bounds),
     }
 }
 
