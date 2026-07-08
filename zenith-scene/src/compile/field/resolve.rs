@@ -19,7 +19,7 @@ use zenith_core::{FieldNode, Page, TextNode, TextSpan};
 use crate::compile::util::px_prop;
 
 use super::folio::format_folio;
-use super::projection::ConnectorTargetKind;
+use super::projection::{ConnectorTargetKind, PortTarget};
 
 /// Per-page context threaded into field resolution.
 ///
@@ -55,7 +55,7 @@ pub(crate) struct FieldCtx<'a> {
     pub(in crate::compile) connector_target_kinds: &'a BTreeMap<String, ConnectorTargetKind>,
     /// This page's node id -> port id -> connector anchor string map. Ports are
     /// page/component metadata used only by connectors that reference `node#port`.
-    pub(in crate::compile) port_map: &'a BTreeMap<String, BTreeMap<String, String>>,
+    pub(in crate::compile) port_map: &'a BTreeMap<String, BTreeMap<String, PortTarget>>,
     /// Total page count in `doc.body.pages`, for `page-count` field resolution.
     /// A `page-count` field resolves to this value as a decimal string (the "M"
     /// in a "Slide N of M" footer, where `page-number` supplies N).
@@ -305,7 +305,7 @@ mod tests {
         let markers: BTreeMap<String, String> = BTreeMap::new();
         let boxes: BTreeMap<String, (f64, f64, f64, f64)> = BTreeMap::new();
         let connector_target_kinds: BTreeMap<String, ConnectorTargetKind> = BTreeMap::new();
-        let port_map: BTreeMap<String, BTreeMap<String, String>> = BTreeMap::new();
+        let port_map: BTreeMap<String, BTreeMap<String, PortTarget>> = BTreeMap::new();
         let ctx = FieldCtx {
             page_index_1based: 2,
             is_recto: false,
@@ -350,8 +350,8 @@ mod tests {
         EMPTY.get_or_init(BTreeMap::new)
     }
 
-    fn empty_port_map() -> &'static BTreeMap<String, BTreeMap<String, String>> {
-        static EMPTY: OnceLock<BTreeMap<String, BTreeMap<String, String>>> = OnceLock::new();
+    fn empty_port_map() -> &'static BTreeMap<String, BTreeMap<String, PortTarget>> {
+        static EMPTY: OnceLock<BTreeMap<String, BTreeMap<String, PortTarget>>> = OnceLock::new();
         EMPTY.get_or_init(BTreeMap::new)
     }
 

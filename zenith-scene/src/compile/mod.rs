@@ -469,9 +469,9 @@ pub(in crate::compile) fn compile_page_inner(
     // (frames are clip-only). Drives text-runaround exclusion lookup. Empty when
     // no node carries a complete rect (byte-identical to before for any text node
     // without `text-exclusion`).
-    let node_boxes = build_node_boxes(page, resolved);
+    let node_boxes = build_node_boxes(page, resolved, &component_map);
     let connector_target_kinds = build_connector_target_kinds(page, &node_boxes);
-    let port_map = build_port_map(page);
+    let port_map = build_port_map(page, &component_map);
 
     // ── Step 7d: compute section assignments (document-wide, one-shot) ───
     // Precompute once (outside any inner loop — this is the single page compile

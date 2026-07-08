@@ -5,8 +5,9 @@
 
 use std::collections::BTreeMap;
 
-use zenith_core::{Node, Page, PropertyValue, ResolvedToken};
+use zenith_core::{ComponentDef, Node, Page, PropertyValue, ResolvedToken, dim_to_px};
 
+use super::super::container::prefix_ids_in_children;
 use super::super::util::resolve_geometry_px;
 
 /// Build the document-wide `node id → 1-based page index` map for `page-ref`
@@ -82,19 +83,28 @@ fn index_nodes(children: &[Node], page_index_1based: usize, map: &mut BTreeMap<S
 pub(in crate::compile) fn build_node_boxes(
     page: &Page,
     resolved: &BTreeMap<String, ResolvedToken>,
+    components: &BTreeMap<&str, &ComponentDef>,
 ) -> BTreeMap<String, (f64, f64, f64, f64)> {
     let mut map: BTreeMap<String, (f64, f64, f64, f64)> = BTreeMap::new();
-    collect_node_boxes(&page.children, 0.0, 0.0, resolved, &mut map);
+    collect_node_boxes(&page.children, 0.0, 0.0, resolved, components, &mut map);
     map
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(in crate::compile) struct PortTarget {
+    pub(in crate::compile) node_id: String,
+    pub(in crate::compile) anchor: String,
 }
 
 pub(in crate::compile) fn build_port_map(
     page: &Page,
-) -> BTreeMap<String, BTreeMap<String, String>> {
-    let mut map: BTreeMap<String, BTreeMap<String, String>> = BTreeMap::new();
+    components: &BTreeMap<&str, &ComponentDef>,
+) -> BTreeMap<String, BTreeMap<String, PortTarget>> {
+    let mut map: BTreeMap<String, BTreeMap<String, PortTarget>> = BTreeMap::new();
     for port in &page.ports {
-        insert_port(&mut map, &port.node, &port.id, &port.anchor);
+        insert_port(&mut map, &port.node, &port.id, &port.node, &port.anchor);
     }
+    collect_component_ports(&page.children, components, "", &mut map);
     map
 }
 
@@ -195,6 +205,7 @@ fn collect_node_boxes(
     dx: f64,
     dy: f64,
     resolved: &BTreeMap<String, ResolvedToken>,
+    components: &BTreeMap<&str, &ComponentDef>,
     map: &mut BTreeMap<String, (f64, f64, f64, f64)>,
 ) {
     for child in children {
@@ -205,7 +216,7 @@ fn collect_node_boxes(
         }
         match child {
             // A frame is clip-only: its children are NOT translated by its origin.
-            Node::Frame(f) => collect_node_boxes(&f.children, dx, dy, resolved, map),
+            Node::Frame(f) => collect_node_boxes(&f.children, dx, dy, resolved, components, map),
             // A group translates its children by its own x/y (absent/bad-unit → 0).
             Node::Group(g) => {
                 let gx = resolve_geometry_px(g.x.as_ref(), resolved);
@@ -215,8 +226,29 @@ fn collect_node_boxes(
                     dx + gx.unwrap_or(0.0),
                     dy + gy.unwrap_or(0.0),
                     resolved,
+                    components,
                     map,
                 );
+            }
+            Node::Instance(i) => {
+                if let Some(component_id) = i.component.as_deref()
+                    && let Some(component) = components.get(component_id)
+                {
+                    let mut children = component.children.clone();
+                    let prefix = format!("{}/", i.id);
+                    prefix_ids_in_children(&mut children, &prefix);
+                    let ix = i
+                        .x
+                        .as_ref()
+                        .and_then(|d| dim_to_px(d.value, &d.unit))
+                        .unwrap_or(0.0);
+                    let iy = i
+                        .y
+                        .as_ref()
+                        .and_then(|d| dim_to_px(d.value, &d.unit))
+                        .unwrap_or(0.0);
+                    collect_node_boxes(&children, dx + ix, dy + iy, resolved, components, map);
+                }
             }
             // A table records its OWN box (above); its cell content is
             // translated at render time, so cell children are not added to the
@@ -231,7 +263,6 @@ fn collect_node_boxes(
             | Node::Polygon(_)
             | Node::Polyline(_)
             | Node::Path(_)
-            | Node::Instance(_)
             | Node::Field(_)
             | Node::Toc(_)
             | Node::Footnote(_)
@@ -249,15 +280,72 @@ fn collect_node_boxes(
 }
 
 fn insert_port(
-    map: &mut BTreeMap<String, BTreeMap<String, String>>,
-    node: &str,
+    map: &mut BTreeMap<String, BTreeMap<String, PortTarget>>,
+    endpoint_node: &str,
     port: &str,
+    target_node: &str,
     anchor: &str,
 ) {
-    map.entry(node.to_owned())
+    map.entry(endpoint_node.to_owned())
         .or_default()
         .entry(port.to_owned())
-        .or_insert_with(|| anchor.to_owned());
+        .or_insert_with(|| PortTarget {
+            node_id: target_node.to_owned(),
+            anchor: anchor.to_owned(),
+        });
+}
+
+fn collect_component_ports(
+    children: &[Node],
+    components: &BTreeMap<&str, &ComponentDef>,
+    prefix: &str,
+    map: &mut BTreeMap<String, BTreeMap<String, PortTarget>>,
+) {
+    for child in children {
+        match child {
+            Node::Instance(i) => {
+                let instance_id = format!("{prefix}{}", i.id);
+                if let Some(component_id) = i.component.as_deref()
+                    && let Some(component) = components.get(component_id)
+                {
+                    let child_prefix = format!("{instance_id}/");
+                    for port in &component.ports {
+                        let target_node = format!("{child_prefix}{}", port.node);
+                        insert_port(map, &instance_id, &port.id, &target_node, &port.anchor);
+                    }
+                    collect_component_ports(&component.children, components, &child_prefix, map);
+                }
+            }
+            Node::Frame(f) => collect_component_ports(&f.children, components, prefix, map),
+            Node::Group(g) => collect_component_ports(&g.children, components, prefix, map),
+            Node::Table(t) => {
+                for row in &t.rows {
+                    for cell in &row.cells {
+                        collect_component_ports(&cell.children, components, prefix, map);
+                    }
+                }
+            }
+            Node::Rect(_)
+            | Node::Ellipse(_)
+            | Node::Line(_)
+            | Node::Text(_)
+            | Node::Code(_)
+            | Node::Image(_)
+            | Node::Polygon(_)
+            | Node::Polyline(_)
+            | Node::Path(_)
+            | Node::Field(_)
+            | Node::Footnote(_)
+            | Node::Toc(_)
+            | Node::Shape(_)
+            | Node::Connector(_)
+            | Node::Pattern(_)
+            | Node::Chart(_)
+            | Node::Light(_)
+            | Node::Mesh(_)
+            | Node::Unknown(_) => {}
+        }
+    }
 }
 
 /// A node's LOCAL `(x, y, w, h)` rectangle in pixels, when all four resolve.
