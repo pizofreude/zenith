@@ -11,7 +11,10 @@ mod effect;
 mod leaf;
 mod special;
 
-pub use anchor::{Anchor, AnchorEdge, anchor_xy, parse_anchor, parse_anchor_edge};
+pub use anchor::{
+    Anchor, AnchorEdge, ConnectorAnchor, ConnectorAnchorParseError, anchor_xy, parse_anchor,
+    parse_anchor_edge, parse_connector_anchor,
+};
 pub use common::{Node, ObjectPosition, Point, TextSpan, UnknownProperty, UnknownValue};
 pub use container::{
     FrameNode, GroupNode, ProtectedRegion, TableCell, TableColumn, TableNode, TableRow,

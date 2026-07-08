@@ -73,6 +73,75 @@ pub fn parse_anchor_edge(s: &str) -> Option<AnchorEdge> {
     }
 }
 
+/// Parsed connector endpoint anchor.
+///
+/// Connector anchor attributes remain authored as strings in the AST. This
+/// helper gives validation and scene compilation one shared syntax contract for
+/// the accepted forms:
+/// - `auto`
+/// - existing named/grid anchors (`top`, `bottom-right`, `mid-right`, ...)
+/// - divided perimeter anchors (`i/N`)
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ConnectorAnchor {
+    Auto,
+    Grid,
+    Divided { index: usize, count: usize },
+}
+
+/// Why a connector anchor string failed to parse.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ConnectorAnchorParseError {
+    InvalidSyntax,
+    ZeroCount,
+    IndexOutOfRange { index: usize, count: usize },
+}
+
+/// Parse a connector endpoint anchor.
+///
+/// Divided anchors use `i/N` syntax and require `0 <= i < N`; `N=0` is
+/// rejected. Existing grid/named connector anchors are accepted exactly as they
+/// were before, including `centre`/`mid`/`middle` center synonyms.
+pub fn parse_connector_anchor(s: &str) -> Result<ConnectorAnchor, ConnectorAnchorParseError> {
+    if s == "auto" {
+        return Ok(ConnectorAnchor::Auto);
+    }
+    if let Some((index, count)) = s.split_once('/') {
+        if index.is_empty() || count.is_empty() || count.contains('/') {
+            return Err(ConnectorAnchorParseError::InvalidSyntax);
+        }
+        let Ok(index) = index.parse::<usize>() else {
+            return Err(ConnectorAnchorParseError::InvalidSyntax);
+        };
+        let Ok(count) = count.parse::<usize>() else {
+            return Err(ConnectorAnchorParseError::InvalidSyntax);
+        };
+        if count == 0 {
+            return Err(ConnectorAnchorParseError::ZeroCount);
+        }
+        if index >= count {
+            return Err(ConnectorAnchorParseError::IndexOutOfRange { index, count });
+        }
+        return Ok(ConnectorAnchor::Divided { index, count });
+    }
+    if is_connector_grid_anchor(s) {
+        return Ok(ConnectorAnchor::Grid);
+    }
+    Err(ConnectorAnchorParseError::InvalidSyntax)
+}
+
+fn is_connector_grid_anchor(s: &str) -> bool {
+    let mut recognized = false;
+    for part in s.split('-') {
+        match part {
+            "top" | "bottom" | "left" | "right" | "center" | "centre" | "mid" | "middle" => {
+                recognized = true;
+            }
+            _ => return false,
+        }
+    }
+    recognized
+}
+
 /// Derive the `(x, y)` for the given anchor given the page and node dimensions.
 ///
 /// `page_w`/`page_h` and `node_w`/`node_h` are all in pixels.

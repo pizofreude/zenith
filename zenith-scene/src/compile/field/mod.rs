@@ -19,7 +19,8 @@ mod section;
 
 pub(in crate::compile) use folio::format_folio;
 pub(in crate::compile) use projection::{
-    build_node_boxes, build_page_index_map, compute_live_area,
+    ConnectorTargetKind, build_connector_target_kinds, build_node_boxes, build_page_index_map,
+    compute_live_area,
 };
 pub(in crate::compile) use resolve::{FieldCtx, resolve_field_to_text};
 pub(in crate::compile) use section::build_section_assignments;

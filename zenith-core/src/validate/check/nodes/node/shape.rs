@@ -6,7 +6,9 @@
 
 use std::collections::BTreeSet;
 
-use crate::ast::node::{ConnectorNode, ShapeNode, UnknownNode};
+use crate::ast::node::{
+    ConnectorAnchorParseError, ConnectorNode, ShapeNode, UnknownNode, parse_connector_anchor,
+};
 use crate::diagnostics::Diagnostic;
 
 use super::shared::{
@@ -347,41 +349,47 @@ pub(in crate::validate::check) fn check_connector(
             ));
         }
     }
-    // A connector anchor is `auto` or a nine-point grid position: one or more
-    // hyphen-separated bands from top/bottom/left/right/center (mid/middle accepted
-    // as center), e.g. `top`, `center`, `bottom-right`. Mirrors the scene resolver.
-    fn is_valid_anchor(a: &str) -> bool {
-        if a == "auto" {
-            return true;
-        }
-        let mut recognized = false;
-        for part in a.split('-') {
-            match part {
-                "top" | "bottom" | "left" | "right" | "center" | "centre" | "mid" | "middle" => {
-                    recognized = true;
-                }
-                _ => return false,
-            }
-        }
-        recognized
-    }
     for (label, anchor) in [
         ("from-anchor", c.from_anchor.as_deref()),
         ("to-anchor", c.to_anchor.as_deref()),
     ] {
-        if let Some(a) = anchor
-            && !is_valid_anchor(a)
-        {
-            diagnostics.push(Diagnostic::warning(
-                "connector.invalid_anchor",
-                format!(
-                    "connector '{}': {label} '{a}' is not 'auto' or a nine-point anchor \
-                     (top/center/bottom × left/center/right, e.g. bottom-right)",
-                    c.id
-                ),
-                c.source_span,
-                Some(c.id.clone()),
-            ));
+        if let Some(a) = anchor {
+            match parse_connector_anchor(a) {
+                Ok(_) => {}
+                Err(ConnectorAnchorParseError::ZeroCount) => {
+                    diagnostics.push(Diagnostic::warning(
+                        "connector.invalid_anchor",
+                        format!(
+                            "connector '{}': {label} '{a}' has a divided anchor count of 0",
+                            c.id
+                        ),
+                        c.source_span,
+                        Some(c.id.clone()),
+                    ));
+                }
+                Err(ConnectorAnchorParseError::IndexOutOfRange { index, count }) => {
+                    diagnostics.push(Diagnostic::warning(
+                        "connector.invalid_anchor",
+                        format!(
+                            "connector '{}': {label} '{a}' has index {index} outside divided anchor count {count}",
+                            c.id
+                        ),
+                        c.source_span,
+                        Some(c.id.clone()),
+                    ));
+                }
+                Err(ConnectorAnchorParseError::InvalidSyntax) => {
+                    diagnostics.push(Diagnostic::warning(
+                        "connector.invalid_anchor",
+                        format!(
+                            "connector '{}': {label} '{a}' is not 'auto', a divided anchor like '4/16', or a nine-point anchor (top/center/bottom × left/center/right, e.g. bottom-right)",
+                            c.id
+                        ),
+                        c.source_span,
+                        Some(c.id.clone()),
+                    ));
+                }
+            }
         }
     }
 

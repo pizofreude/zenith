@@ -4,9 +4,11 @@
 
 use std::collections::BTreeMap;
 
+use zenith_core::ast::{ConnectorAnchor, parse_connector_anchor};
 use zenith_core::{ConnectorNode, Diagnostic, FontProvider, ResolvedToken, Style, TextNode};
 use zenith_layout::RustybuzzEngine;
 
+use crate::compile::field::ConnectorTargetKind;
 use crate::ir::{FillRule, Paint, SceneCommand, StrokeAlign};
 
 use super::super::RenderCtx;
@@ -45,6 +47,7 @@ pub(in crate::compile) struct ConnectorEnv<'a> {
     pub(in crate::compile) chains: &'a ChainAssignments,
     pub(in crate::compile) footnote_markers: &'a BTreeMap<String, String>,
     pub(in crate::compile) node_boxes: &'a BTreeMap<String, (f64, f64, f64, f64)>,
+    pub(in crate::compile) connector_target_kinds: &'a BTreeMap<String, ConnectorTargetKind>,
     pub(in crate::compile) anchors: &'a AnchorMap,
     pub(in crate::compile) ctx: RenderCtx,
 }
@@ -79,12 +82,17 @@ enum AnchorSide {
 /// (`Vertical`).
 fn resolve_anchor(
     boxr: (f64, f64, f64, f64),
+    kind: ConnectorTargetKind,
     anchor: &str,
     toward: (f64, f64),
 ) -> ((f64, f64), AnchorSide) {
     let (x, y, w, h) = boxr;
     let cx = x + w / 2.0;
     let cy = y + h / 2.0;
+
+    if let Ok(ConnectorAnchor::Divided { index, count }) = parse_connector_anchor(anchor) {
+        return divided_anchor(boxr, kind, index, count);
+    }
 
     if let Some(resolved) = grid_anchor(anchor, boxr) {
         return resolved;
@@ -101,6 +109,71 @@ fn resolve_anchor(
     } else {
         ((cx, y), AnchorSide::Vertical)
     }
+}
+
+fn divided_anchor(
+    boxr: (f64, f64, f64, f64),
+    kind: ConnectorTargetKind,
+    index: usize,
+    count: usize,
+) -> ((f64, f64), AnchorSide) {
+    match kind {
+        ConnectorTargetKind::Ellipse => divided_ellipse_anchor(boxr, index, count),
+        ConnectorTargetKind::BoxLike => divided_box_anchor(boxr, index, count),
+    }
+}
+
+fn divided_ellipse_anchor(
+    boxr: (f64, f64, f64, f64),
+    index: usize,
+    count: usize,
+) -> ((f64, f64), AnchorSide) {
+    let (x, y, w, h) = boxr;
+    let cx = x + w / 2.0;
+    let cy = y + h / 2.0;
+    let rx = w / 2.0;
+    let ry = h / 2.0;
+    let angle =
+        -std::f64::consts::FRAC_PI_2 + std::f64::consts::TAU * (index as f64 / count as f64);
+    let px = cx + rx * angle.cos();
+    let py = cy + ry * angle.sin();
+    let side = if (px - cx).abs() >= (py - cy).abs() {
+        AnchorSide::Horizontal
+    } else {
+        AnchorSide::Vertical
+    };
+    ((px, py), side)
+}
+
+fn divided_box_anchor(
+    boxr: (f64, f64, f64, f64),
+    index: usize,
+    count: usize,
+) -> ((f64, f64), AnchorSide) {
+    let (x, y, w, h) = boxr;
+    let perimeter = 2.0 * (w + h);
+    if perimeter <= 0.0 {
+        return ((x + w / 2.0, y), AnchorSide::Vertical);
+    }
+    let mut distance = perimeter * (index as f64 / count as f64);
+    let top_right = w / 2.0;
+    if distance <= top_right {
+        return ((x + w / 2.0 + distance, y), AnchorSide::Vertical);
+    }
+    distance -= top_right;
+    if distance <= h {
+        return ((x + w, y + distance), AnchorSide::Horizontal);
+    }
+    distance -= h;
+    if distance <= w {
+        return ((x + w - distance, y + h), AnchorSide::Vertical);
+    }
+    distance -= w;
+    if distance <= h {
+        return ((x, y + h - distance), AnchorSide::Horizontal);
+    }
+    distance -= h;
+    ((x + distance, y), AnchorSide::Vertical)
 }
 
 /// Resolve a nine-point grid anchor string (e.g. `top-left`, `bottom-center`,
@@ -376,6 +449,7 @@ fn emit_connector_label(
         chains,
         footnote_markers,
         node_boxes,
+        connector_target_kinds: _,
         anchors,
         ctx,
     } = env;
@@ -526,6 +600,7 @@ pub(in crate::compile) fn compile_connector(
         resolved,
         style_map,
         node_boxes,
+        connector_target_kinds,
         ctx,
         ..
     } = env;
@@ -550,12 +625,20 @@ pub(in crate::compile) fn compile_connector(
 
     let from_center = (from_box.0 + from_box.2 / 2.0, from_box.1 + from_box.3 / 2.0);
     let to_center = (to_box.0 + to_box.2 / 2.0, to_box.1 + to_box.3 / 2.0);
+    let from_kind = connector_target_kinds
+        .get(from_id)
+        .copied()
+        .unwrap_or(ConnectorTargetKind::BoxLike);
+    let to_kind = connector_target_kinds
+        .get(to_id)
+        .copied()
+        .unwrap_or(ConnectorTargetKind::BoxLike);
 
     // Resolve anchors: each end aims toward the OTHER box's center for "auto".
     let from_anchor = connector.from_anchor.as_deref().unwrap_or("auto");
     let to_anchor = connector.to_anchor.as_deref().unwrap_or("auto");
-    let (f_pt, f_side) = resolve_anchor(from_box, from_anchor, to_center);
-    let (t_pt, t_side) = resolve_anchor(to_box, to_anchor, from_center);
+    let (f_pt, f_side) = resolve_anchor(from_box, from_kind, from_anchor, to_center);
+    let (t_pt, t_side) = resolve_anchor(to_box, to_kind, to_anchor, from_center);
 
     // A self-loop (`from` and `to` name the same node) cannot be a line between
     // two distinct points — it routes as a small rectangular loop off one edge of

@@ -58,8 +58,8 @@ pub(in crate::compile) use ctx::NodeCtx;
 use data_resolve::{scan_for_data_refs, substitute_data_refs};
 use effect::{compile_light, compile_mesh};
 use field::{
-    FieldCtx, build_node_boxes, build_page_index_map, build_section_assignments, compute_live_area,
-    resolve_field_to_text,
+    FieldCtx, build_connector_target_kinds, build_node_boxes, build_page_index_map,
+    build_section_assignments, compute_live_area, resolve_field_to_text,
 };
 use image::compile_image;
 pub use imports::{ImportGraph, ImportedDocument};
@@ -470,6 +470,7 @@ pub(in crate::compile) fn compile_page_inner(
     // no node carries a complete rect (byte-identical to before for any text node
     // without `text-exclusion`).
     let node_boxes = build_node_boxes(page, resolved);
+    let connector_target_kinds = build_connector_target_kinds(page, &node_boxes);
 
     // ── Step 7d: compute section assignments (document-wide, one-shot) ───
     // Precompute once (outside any inner loop — this is the single page compile
@@ -486,6 +487,7 @@ pub(in crate::compile) fn compile_page_inner(
         page_index_by_node_id: &page_index_by_node_id,
         footnote_markers: &footnote_markers,
         node_boxes: &node_boxes,
+        connector_target_kinds: &connector_target_kinds,
         total_pages: doc.body.pages.len(),
         pages: &doc.body.pages,
         section_page_index: section_assign.map(|a| a.page_index_in_section),
@@ -951,6 +953,7 @@ pub(in crate::compile) fn compile_node(
                     chains,
                     footnote_markers: field_ctx.footnote_markers,
                     node_boxes: field_ctx.node_boxes,
+                    connector_target_kinds: field_ctx.connector_target_kinds,
                     anchors,
                     ctx,
                 },

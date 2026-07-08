@@ -88,6 +88,96 @@ pub(in crate::compile) fn build_node_boxes(
     map
 }
 
+/// Shape family for connector divided-anchor perimeter resolution.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(in crate::compile) enum ConnectorTargetKind {
+    BoxLike,
+    Ellipse,
+}
+
+/// Build a page's connector target kind map, keyed by node id.
+///
+/// The first occurrence of an id wins, matching [`build_node_boxes`]. Only ids
+/// already present in `node_boxes` are included, so this stays aligned with the
+/// connector routing inputs and avoids re-running geometry resolution.
+pub(in crate::compile) fn build_connector_target_kinds(
+    page: &zenith_core::Page,
+    node_boxes: &BTreeMap<String, (f64, f64, f64, f64)>,
+) -> BTreeMap<String, ConnectorTargetKind> {
+    let mut map: BTreeMap<String, ConnectorTargetKind> = BTreeMap::new();
+    collect_connector_target_kinds(&page.children, node_boxes, &mut map);
+    map
+}
+
+fn collect_connector_target_kinds(
+    children: &[Node],
+    node_boxes: &BTreeMap<String, (f64, f64, f64, f64)>,
+    map: &mut BTreeMap<String, ConnectorTargetKind>,
+) {
+    for child in children {
+        if let Some(id) = node_id(child)
+            && node_boxes.contains_key(id)
+        {
+            map.entry(id.to_owned())
+                .or_insert(connector_target_kind(child));
+        }
+        match child {
+            Node::Frame(f) => collect_connector_target_kinds(&f.children, node_boxes, map),
+            Node::Group(g) => collect_connector_target_kinds(&g.children, node_boxes, map),
+            Node::Table(_)
+            | Node::Rect(_)
+            | Node::Ellipse(_)
+            | Node::Line(_)
+            | Node::Text(_)
+            | Node::Code(_)
+            | Node::Image(_)
+            | Node::Polygon(_)
+            | Node::Polyline(_)
+            | Node::Path(_)
+            | Node::Instance(_)
+            | Node::Field(_)
+            | Node::Toc(_)
+            | Node::Footnote(_)
+            | Node::Shape(_)
+            | Node::Connector(_)
+            | Node::Pattern(_)
+            | Node::Chart(_)
+            | Node::Light(_)
+            | Node::Mesh(_)
+            | Node::Unknown(_) => {}
+        }
+    }
+}
+
+fn connector_target_kind(node: &Node) -> ConnectorTargetKind {
+    match node {
+        Node::Ellipse(_) => ConnectorTargetKind::Ellipse,
+        Node::Shape(n) if n.kind.as_deref() == Some("ellipse") => ConnectorTargetKind::Ellipse,
+        Node::Rect(_)
+        | Node::Text(_)
+        | Node::Code(_)
+        | Node::Frame(_)
+        | Node::Group(_)
+        | Node::Image(_)
+        | Node::Field(_)
+        | Node::Toc(_)
+        | Node::Table(_)
+        | Node::Shape(_)
+        | Node::Pattern(_)
+        | Node::Chart(_)
+        | Node::Mesh(_) => ConnectorTargetKind::BoxLike,
+        Node::Line(_)
+        | Node::Polygon(_)
+        | Node::Polyline(_)
+        | Node::Path(_)
+        | Node::Instance(_)
+        | Node::Footnote(_)
+        | Node::Connector(_)
+        | Node::Light(_)
+        | Node::Unknown(_) => ConnectorTargetKind::BoxLike,
+    }
+}
+
 /// Recursive worker for [`build_node_boxes`]. `dx`/`dy` are the accumulated
 /// ancestor translation in pixels.
 fn collect_node_boxes(

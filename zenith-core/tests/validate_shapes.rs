@@ -499,6 +499,96 @@ fn connector_invalid_anchor_warns() {
     );
 }
 
+#[test]
+fn connector_divided_anchors_are_valid() {
+    let mut connector = make_connector(ConnectorSpec {
+        id: "c1",
+        from: Some("a"),
+        to: Some("b"),
+        route: None,
+        marker_end: None,
+        from_anchor: Some("35/60"),
+    });
+    if let Node::Connector(c) = &mut connector {
+        c.to_anchor = Some("4/16".to_owned());
+    }
+    let doc = doc_with(
+        vec![],
+        vec![minimal_page(
+            "page.one",
+            vec![minimal_rect("a", None), minimal_rect("b", None), connector],
+        )],
+    );
+    let report = validate(&doc);
+    assert!(
+        !has_code(&report, "connector.invalid_anchor"),
+        "codes: {:?}",
+        codes(&report)
+    );
+}
+
+#[test]
+fn connector_divided_anchor_zero_count_warns() {
+    let doc = doc_with(
+        vec![],
+        vec![minimal_page(
+            "page.one",
+            vec![
+                minimal_rect("a", None),
+                minimal_rect("b", None),
+                make_connector(ConnectorSpec {
+                    id: "c1",
+                    from: Some("a"),
+                    to: Some("b"),
+                    route: None,
+                    marker_end: None,
+                    from_anchor: Some("0/0"),
+                }),
+            ],
+        )],
+    );
+    let report = validate(&doc);
+    assert!(
+        report
+            .diagnostics
+            .iter()
+            .any(|d| d.code == "connector.invalid_anchor" && d.message.contains("count of 0")),
+        "diagnostics: {:?}",
+        report.diagnostics
+    );
+}
+
+#[test]
+fn connector_divided_anchor_out_of_range_warns() {
+    let doc = doc_with(
+        vec![],
+        vec![minimal_page(
+            "page.one",
+            vec![
+                minimal_rect("a", None),
+                minimal_rect("b", None),
+                make_connector(ConnectorSpec {
+                    id: "c1",
+                    from: Some("a"),
+                    to: Some("b"),
+                    route: None,
+                    marker_end: None,
+                    from_anchor: Some("4/4"),
+                }),
+            ],
+        )],
+    );
+    let report = validate(&doc);
+    assert!(
+        report.diagnostics.iter().any(|d| {
+            d.code == "connector.invalid_anchor"
+                && d.message.contains("outside divided anchor count")
+        }),
+        "diagnostics: {:?}",
+        report.diagnostics
+    );
+}
+
 // ── polygon: point with missing y → node.missing_geometry ─────────────
 
 #[test]

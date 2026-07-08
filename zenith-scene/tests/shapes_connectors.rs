@@ -149,6 +149,54 @@ page id="page.cn" w=(px)640 h=(px)360 {
     assert_eq!(pts, vec![140.0, 80.0, 350.0, 60.0]);
 }
 
+#[test]
+fn connector_divided_box_anchors_walk_perimeter() {
+    let src = r##"zenith version=1 {
+  project id="proj.cn" name="CN"
+  tokens format="zenith-token-v1" {
+token id="color.line" type="color" value="#1e3a8a"
+  }
+  styles {}
+  document id="doc.cn" title="CN" {
+page id="page.cn" w=(px)640 h=(px)360 {
+  rect id="a" x=(px)40 y=(px)40 w=(px)100 h=(px)80
+  rect id="b" x=(px)300 y=(px)60 w=(px)100 h=(px)80
+  connector id="c1" from="a" to="b" from-anchor="0/4" to-anchor="1/6" stroke=(token)"color.line"
+}
+  }
+}
+"##;
+    let doc = parse(src);
+    let result = compile(&doc, &default_provider());
+    let pts = first_stroke_polyline_points(&result.scene.commands);
+
+    assert_eq!(pts, vec![90.0, 40.0, 400.0, 70.0]);
+}
+
+#[test]
+fn connector_divided_ellipse_anchor_uses_ellipse_perimeter() {
+    let src = r##"zenith version=1 {
+  project id="proj.cn" name="CN"
+  tokens format="zenith-token-v1" {
+token id="color.line" type="color" value="#1e3a8a"
+  }
+  styles {}
+  document id="doc.cn" title="CN" {
+page id="page.cn" w=(px)640 h=(px)360 {
+  rect id="a" x=(px)40 y=(px)40 w=(px)100 h=(px)80
+  ellipse id="b" x=(px)300 y=(px)60 w=(px)100 h=(px)80
+  connector id="c1" from="a" to="b" from-anchor="0/4" to-anchor="1/4" stroke=(token)"color.line"
+}
+  }
+}
+"##;
+    let doc = parse(src);
+    let result = compile(&doc, &default_provider());
+    let pts = first_stroke_polyline_points(&result.scene.commands);
+
+    assert_eq!(pts, vec![90.0, 40.0, 400.0, 100.0]);
+}
+
 /// A connector to a MISSING target emits no StrokePolyline (graceful skip).
 #[test]
 fn connector_missing_target_emits_nothing() {

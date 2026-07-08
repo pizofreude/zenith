@@ -171,7 +171,7 @@ pub const DIAGNOSTIC_CODES: &[DiagnosticCodeInfo] = &[
     info(
         "connector.invalid_anchor",
         Severity::Warning,
-        "Connector anchor value is not recognized.",
+        "Connector anchor value is not recognized or a divided anchor is out of range.",
     ),
     info(
         "connector.invalid_marker",

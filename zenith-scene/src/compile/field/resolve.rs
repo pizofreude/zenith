@@ -19,6 +19,7 @@ use zenith_core::{FieldNode, Page, TextNode, TextSpan};
 use crate::compile::util::px_prop;
 
 use super::folio::format_folio;
+use super::projection::ConnectorTargetKind;
 
 /// Per-page context threaded into field resolution.
 ///
@@ -48,6 +49,10 @@ pub(crate) struct FieldCtx<'a> {
     /// nodes with a fully-resolvable x/y/w/h rect are included. Empty when no node
     /// on the page has a resolvable box.
     pub(in crate::compile) node_boxes: &'a BTreeMap<String, (f64, f64, f64, f64)>,
+    /// This page's node id → connector target shape family. Keys match
+    /// `node_boxes`; connectors use this only for divided anchor perimeter
+    /// resolution.
+    pub(in crate::compile) connector_target_kinds: &'a BTreeMap<String, ConnectorTargetKind>,
     /// Total page count in `doc.body.pages`, for `page-count` field resolution.
     /// A `page-count` field resolves to this value as a decimal string (the "M"
     /// in a "Slide N of M" footer, where `page-number` supplies N).
@@ -252,6 +257,8 @@ pub(in crate::compile) fn resolve_field_to_text(
 
 #[cfg(test)]
 mod tests {
+    use std::sync::OnceLock;
+
     use super::*;
 
     /// A minimal `page-count` field node (no geometry, no styling) for the
@@ -294,6 +301,7 @@ mod tests {
         let by_id: BTreeMap<String, usize> = BTreeMap::new();
         let markers: BTreeMap<String, String> = BTreeMap::new();
         let boxes: BTreeMap<String, (f64, f64, f64, f64)> = BTreeMap::new();
+        let connector_target_kinds: BTreeMap<String, ConnectorTargetKind> = BTreeMap::new();
         let ctx = FieldCtx {
             page_index_1based: 2,
             is_recto: false,
@@ -302,6 +310,7 @@ mod tests {
             pages: &[],
             footnote_markers: &markers,
             node_boxes: &boxes,
+            connector_target_kinds: &connector_target_kinds,
             total_pages: 5,
             section_page_index: None,
             section_page_count: None,
@@ -331,6 +340,11 @@ mod tests {
         (BTreeMap::new(), BTreeMap::new(), BTreeMap::new())
     }
 
+    fn empty_connector_target_kinds() -> &'static BTreeMap<String, ConnectorTargetKind> {
+        static EMPTY: OnceLock<BTreeMap<String, ConnectorTargetKind>> = OnceLock::new();
+        EMPTY.get_or_init(BTreeMap::new)
+    }
+
     /// The five section-relative fields, grouped to keep `ctx_with_section`
     /// under the argument-count lint.
     #[derive(Default)]
@@ -357,6 +371,7 @@ mod tests {
             pages: &[],
             footnote_markers: markers,
             node_boxes: boxes,
+            connector_target_kinds: empty_connector_target_kinds(),
             total_pages: total,
             section_page_index: None,
             section_page_count: None,
@@ -561,6 +576,7 @@ mod tests {
             pages: &[],
             footnote_markers: markers,
             node_boxes: boxes,
+            connector_target_kinds: empty_connector_target_kinds(),
             total_pages: total,
             section_page_index: sec.page_index,
             section_page_count: sec.page_count,

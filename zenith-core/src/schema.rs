@@ -686,7 +686,9 @@ fn attribute_type_generic(name: &str, fallback: &'static str) -> &'static str {
 
         // ── Connector-specific ────────────────────────────────────────────
         "from" | "to" => "node id",
-        "from-anchor" | "to-anchor" => "string",
+        "from-anchor" | "to-anchor" => {
+            "enum/string: auto|grid anchor|divided anchor i/N (0 <= i < N)"
+        }
         "marker-start" | "marker-end" => "string",
 
         // ── Text-specific strings ─────────────────────────────────────────
