@@ -696,6 +696,11 @@ pub enum SceneCommand {
     PopLayer,
     /// Push an affine rotation around a pivot; composes onto the renderer's transform stack.
     PushTransform { angle_deg: f64, cx: f64, cy: f64 },
+    /// Push a restricted scale+translate transform for composed page content.
+    ///
+    /// This is intentionally narrower than a general affine matrix so raster
+    /// clipping can stay deterministic with axis-aligned clip rectangles.
+    PushScaleTranslate { sx: f64, sy: f64, tx: f64, ty: f64 },
     /// Pop the most recent pushed transform.
     PopTransform,
     // ── Shadow capture ────────────────────────────────────────────────────

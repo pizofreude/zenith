@@ -210,6 +210,7 @@ fn effect_bracket(cmd: &SceneCommand) -> EffectBracket {
         | SceneCommand::PushLayer { .. }
         | SceneCommand::PopLayer
         | SceneCommand::PushTransform { .. }
+        | SceneCommand::PushScaleTranslate { .. }
         | SceneCommand::PopTransform => EffectBracket::None,
     }
 }
@@ -813,6 +814,10 @@ pub(super) fn emit_command(
             let (cx, cy) = (*cx as f32, *cy as f32);
             // Translate(cx,cy) · Rotate(θ) · Translate(-cx,-cy), as one matrix.
             content.transform([c, s, -s, c, cx - c * cx + s * cy, cy - s * cx - c * cy]);
+        }
+        SceneCommand::PushScaleTranslate { sx, sy, tx, ty } => {
+            content.save_state();
+            content.transform([*sx as f32, 0.0, 0.0, *sy as f32, *tx as f32, *ty as f32]);
         }
         SceneCommand::PopTransform => {
             content.restore_state();

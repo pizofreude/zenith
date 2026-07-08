@@ -243,6 +243,14 @@ fn clamp_unit(channel: f32) -> f32 {
     }
 }
 
+fn transform_rect_bounds(ts: Transform, x: f64, y: f64, w: f64, h: f64) -> (f64, f64, f64, f64) {
+    let x1 = x * f64::from(ts.sx) + y * f64::from(ts.kx) + f64::from(ts.tx);
+    let y1 = x * f64::from(ts.ky) + y * f64::from(ts.sy) + f64::from(ts.ty);
+    let x2 = (x + w) * f64::from(ts.sx) + (y + h) * f64::from(ts.kx) + f64::from(ts.tx);
+    let y2 = (x + w) * f64::from(ts.ky) + (y + h) * f64::from(ts.sy) + f64::from(ts.ty);
+    (x1.min(x2), y1.min(y2), x1.max(x2), y1.max(y2))
+}
+
 impl RasterBackend for TinySkiaBackend {
     fn rasterize(
         &self,
@@ -299,7 +307,7 @@ impl RasterBackend for TinySkiaBackend {
             // so the drawing dispatch below is reached only by drawing commands.
             match cmd {
                 SceneCommand::PushClip { x, y, w, h } => {
-                    let new_rect = (*x, *y, x + w, y + h);
+                    let new_rect = transform_rect_bounds(current_ts, *x, *y, *w, *h);
                     let current = *clip_stack.last().unwrap_or(&page_clip);
                     // Push the intersection so the stack always represents the
                     // effective clip at the current nesting depth.
@@ -320,6 +328,14 @@ impl RasterBackend for TinySkiaBackend {
                 SceneCommand::PushTransform { angle_deg, cx, cy } => {
                     let rot = Transform::from_rotate_at(*angle_deg as f32, *cx as f32, *cy as f32);
                     transform_stack.push(current_ts.pre_concat(rot));
+                    continue;
+                }
+
+                SceneCommand::PushScaleTranslate { sx, sy, tx, ty } => {
+                    let scale_translate = Transform::from_row(
+                        *sx as f32, 0.0, 0.0, *sy as f32, *tx as f32, *ty as f32,
+                    );
+                    transform_stack.push(current_ts.pre_concat(scale_translate));
                     continue;
                 }
 

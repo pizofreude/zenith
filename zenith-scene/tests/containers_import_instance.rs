@@ -92,6 +92,7 @@ fn fill_rects(result: &zenith_scene::CompileResult) -> Vec<FillRectSummary> {
             | SceneCommand::PushLayer { .. }
             | SceneCommand::PopLayer
             | SceneCommand::PushTransform { .. }
+            | SceneCommand::PushScaleTranslate { .. }
             | SceneCommand::PopTransform
             | SceneCommand::BeginShadow { .. }
             | SceneCommand::EndShadow

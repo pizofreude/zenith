@@ -73,10 +73,13 @@ pub(in crate::compile) fn record_connector_stroke(
 ///   points equal the raw `points`; mapping is a true no-op.
 /// - [`Rotate`](Transform::Rotate) — exactly one active `PushTransform`, a
 ///   rotation by `angle_deg` about pivot `(cx, cy)`.
+/// - [`Unsupported`](Transform::Unsupported) — a non-rotation transform is
+///   active, so line-jump geometry is intentionally skipped.
 #[derive(Clone, Copy)]
 enum Transform {
     Identity,
     Rotate { angle_deg: f64, cx: f64, cy: f64 },
+    Unsupported,
 }
 
 impl Transform {
@@ -86,6 +89,7 @@ impl Transform {
         match self {
             Transform::Identity => p,
             Transform::Rotate { angle_deg, cx, cy } => rotate_pt(p, angle_deg, (cx, cy)),
+            Transform::Unsupported => p,
         }
     }
 
@@ -96,6 +100,7 @@ impl Transform {
         match self {
             Transform::Identity => p,
             Transform::Rotate { angle_deg, cx, cy } => rotate_pt(p, -angle_deg, (cx, cy)),
+            Transform::Unsupported => p,
         }
     }
 }
@@ -134,13 +139,15 @@ fn active_transform_at(commands: &[SceneCommand], idx: usize) -> Option<Transfor
                 cx: *cx,
                 cy: *cy,
             });
+        } else if matches!(cmd, SceneCommand::PushScaleTranslate { .. }) {
+            stack.push(Transform::Unsupported);
         } else if matches!(cmd, SceneCommand::PopTransform) {
             stack.pop();
         }
     }
     match stack.as_slice() {
         [] => Some(Transform::Identity),
-        [single] => Some(*single),
+        [single @ (Transform::Rotate { .. } | Transform::Identity)] => Some(*single),
         _ => None,
     }
 }
