@@ -141,6 +141,48 @@ fn test_page_bleed_round_trips() {
     );
 }
 
+#[test]
+fn test_page_construction_guides_round_trip() {
+    let src = r##"zenith version=1 {
+  project id="proj.construction" name="Construction"
+  tokens format="zenith-token-v1" {
+  }
+  styles {
+  }
+  document id="doc.construction" title="Construction" {
+    page id="page.logo" w=(px)400 h=(px)300 {
+      construction {
+        guide id="guide.axis" type="segment" x1=(px)20 y1=(px)150 x2=(px)380 y2=(px)150 label="horizontal axis"
+        guide id="guide.circle" type="circle" cx=(px)200 cy=(px)150 r=(px)90
+      }
+    }
+  }
+}
+"##;
+    let adapter = KdlAdapter;
+    let doc = adapter.parse(src.as_bytes()).expect("parse");
+
+    let page = &doc.body.pages[0];
+    assert_eq!(page.construction.guides.len(), 2);
+    assert_eq!(page.construction.guides[0].id, "guide.axis");
+    assert_eq!(page.construction.guides[0].guide_type, "segment");
+    assert_eq!(
+        page.construction.guides[0].label.as_deref(),
+        Some("horizontal axis")
+    );
+    assert_eq!(page.construction.guides[1].guide_type, "circle");
+
+    let formatted = format_document(&doc).expect("format");
+    let reparsed = adapter
+        .parse(formatted.as_slice())
+        .expect("re-parse after format");
+    assert_eq!(
+        strip_spans(doc),
+        strip_spans(reparsed),
+        "construction guides must survive parse -> format -> parse"
+    );
+}
+
 /// **Page mirrored margins + document mirror-margins + page-progression
 /// round-trip**: the four page margins, the document `mirror-margins` toggle,
 /// and `page-progression` all parse, format into canonical text, and survive

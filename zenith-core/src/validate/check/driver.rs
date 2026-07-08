@@ -19,6 +19,7 @@ use crate::diagnostics::Diagnostic;
 use crate::tokens::{ResolvedToken, ResolvedValue};
 
 use super::brand::check_brand_contract;
+use super::construction::check_construction;
 use super::contrast::check_text_contrast;
 use super::nodes::{WalkCtx, WalkPos, check_sibling_anchors, walk_node};
 use super::passes::{
@@ -757,6 +758,12 @@ pub fn validate_with_policy(
         // page-level furniture) and check every text span's `footnote-ref`
         // against that set. An unresolved ref → Warning `footnote.unresolved_ref`.
         check_footnote_refs(page, &mut diagnostics);
+
+        // ── Construction guide metadata ───────────────────────────────────
+        // Guides are non-printing authoring scaffolds. They never affect the
+        // canonical render path, but malformed guides are surfaced here so
+        // overlay/perception callers can trust the parsed contract.
+        check_construction(page, &mut diagnostics);
 
         // ── Safe-zone advisories ──────────────────────────────────────────
         // Only run when the page dimensions resolved; zone/node geometry is

@@ -4,6 +4,7 @@ pub mod action;
 pub mod asset;
 pub mod block_style;
 pub mod brand;
+pub mod construction;
 pub mod document;
 pub mod library;
 pub mod node;
@@ -21,6 +22,7 @@ pub use action::ActionDef;
 pub use asset::{AssetBlock, AssetDecl, AssetKind};
 pub use block_style::{BLOCK_ROLE_VOCAB, BlockStyle};
 pub use brand::BrandContract;
+pub use construction::{ConstructionBlock, ConstructionGuideDef};
 pub use document::{
     ComponentDef, Document, DocumentBody, Fold, MasterDef, Page, Project, SafeZone, SafeZoneType,
     SectionDef,

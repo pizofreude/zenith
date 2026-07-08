@@ -39,6 +39,7 @@ pub(crate) const PAGE_KNOWN_PROPS: &[&str] = &[
     "master",
 ];
 
+use crate::ast::construction::{ConstructionBlock, ConstructionGuideDef};
 use crate::ast::document::{Fold, Page, SafeZone, SafeZoneType};
 use crate::ast::node::Node;
 use crate::error::{ParseError, ParseErrorCode};
@@ -123,12 +124,15 @@ pub(super) fn transform_page(node: &KdlNode) -> Result<Page, ParseError> {
 
     let source_span = node_span(node);
 
-    // A page's children block mixes `safe-zone`, `fold`, and `block` declarations
+    // A page's children block mixes `safe-zone`, `fold`, `construction`, and
+    // `block` declarations
     // (page metadata, not rendering nodes) with renderable nodes. Split them here:
-    // safe-zones go to `page.safe_zones`; folds to `page.folds`; block style decls
-    // to `page.block_styles`; everything else through `transform_node`.
+    // safe-zones go to `page.safe_zones`; folds to `page.folds`; construction
+    // guides to `page.construction`; block style decls to `page.block_styles`;
+    // everything else through `transform_node`.
     let mut safe_zones: Vec<SafeZone> = Vec::new();
     let mut folds: Vec<Fold> = Vec::new();
+    let mut construction = ConstructionBlock::default();
     let mut block_styles: Vec<BlockStyle> = Vec::new();
     let mut children: Vec<Node> = Vec::new();
     if let Some(doc) = node.children() {
@@ -136,6 +140,7 @@ pub(super) fn transform_page(node: &KdlNode) -> Result<Page, ParseError> {
             match child.name().value() {
                 "safe-zone" => safe_zones.push(transform_safe_zone(child)?),
                 "fold" => folds.push(transform_fold(child)?),
+                "construction" => construction = transform_construction(child)?,
                 "block" => block_styles.push(transform_block_style(child)?),
                 _ => children.push(transform_node(child)?),
             }
@@ -159,9 +164,43 @@ pub(super) fn transform_page(node: &KdlNode) -> Result<Page, ParseError> {
         master,
         safe_zones,
         folds,
+        construction,
         block_styles,
         children,
         source_span,
+    })
+}
+
+fn transform_construction(node: &KdlNode) -> Result<ConstructionBlock, ParseError> {
+    let mut guides = Vec::new();
+    if let Some(children) = node.children() {
+        for child in children.nodes() {
+            if child.name().value() == "guide" {
+                guides.push(transform_construction_guide(child)?);
+            }
+        }
+    }
+    Ok(ConstructionBlock { guides })
+}
+
+fn transform_construction_guide(node: &KdlNode) -> Result<ConstructionGuideDef, ParseError> {
+    let id = required_string_prop(node, "id")?.to_owned();
+    let guide_type = optional_string_prop(node, "type")
+        .unwrap_or("segment")
+        .to_owned();
+
+    Ok(ConstructionGuideDef {
+        id,
+        guide_type,
+        x1: optional_dimension_prop(node, "x1"),
+        y1: optional_dimension_prop(node, "y1"),
+        x2: optional_dimension_prop(node, "x2"),
+        y2: optional_dimension_prop(node, "y2"),
+        cx: optional_dimension_prop(node, "cx"),
+        cy: optional_dimension_prop(node, "cy"),
+        r: optional_dimension_prop(node, "r"),
+        label: optional_string_prop(node, "label").map(str::to_owned),
+        source_span: node_span(node),
     })
 }
 

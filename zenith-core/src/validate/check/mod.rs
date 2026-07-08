@@ -28,6 +28,7 @@
 //! - [`contrast`] — the WCAG 2.2 contrast advisory.
 //! - [`safezone`] — safe-zone exclusion/required overlap advisories.
 //! - [`fold`] — fold-line content-crossing advisories.
+//! - [`construction`] — non-printing construction guide metadata advisories.
 //! - [`margin`] — book live-area (mirrored-margin) violation advisories.
 //! - [`variants`] — `variants` block checks (unknown source pages, invalid
 //!   dimensions, override-node resolution).
@@ -39,6 +40,7 @@
 //! - [`report`] — the [`ValidationReport`] outcome type.
 
 mod brand;
+mod construction;
 mod contrast;
 mod driver;
 mod fold;

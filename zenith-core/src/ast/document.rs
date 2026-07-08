@@ -5,6 +5,7 @@ use super::action::ActionDef;
 use super::asset::AssetBlock;
 use super::block_style::BlockStyle;
 use super::brand::BrandContract;
+use super::construction::ConstructionBlock;
 use super::library::LibraryDef;
 use super::node::Node;
 use super::policy::DiagnosticPolicy;
@@ -87,6 +88,10 @@ pub struct Page {
     /// print). These are non-printing page metadata, not rendering nodes; the
     /// validator advises when content crosses a fold line.
     pub folds: Vec<Fold>,
+    /// Page-scoped construction guides for vector/logo authoring. These are
+    /// non-printing metadata and do not affect canonical rendering unless a
+    /// caller explicitly requests a construction overlay.
+    pub construction: ConstructionBlock,
     /// Per-role markdown block style declarations at page scope. Empty when no
     /// `block role="…"` children are declared on this page. Cascade precedence:
     /// page < text (the text node's own decls override these). `block` decls are
@@ -460,6 +465,7 @@ mod parity_tests {
             master: None,
             safe_zones: Vec::new(),
             folds: Vec::new(),
+            construction: ConstructionBlock::default(),
             block_styles: Vec::new(),
             children: Vec::new(),
             source_span: None,

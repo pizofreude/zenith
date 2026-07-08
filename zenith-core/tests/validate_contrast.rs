@@ -58,6 +58,7 @@ fn page_with_bg(id: &str, bg_token_id: &str, children: Vec<Node>) -> Page {
         master: None,
         safe_zones: Vec::new(),
         folds: Vec::new(),
+        construction: zenith_core::ConstructionBlock::default(),
         block_styles: Vec::new(),
         children,
         source_span: None,

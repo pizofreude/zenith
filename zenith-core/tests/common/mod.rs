@@ -18,12 +18,12 @@ pub use zenith_core::ast::block_style::BlockStyle;
 pub use zenith_core::ast::document::Fold;
 pub use zenith_core::{
     ActionDef, AnchorKind, AssetBlock, AssetDecl, AssetKind, BrandContract, CodeNode,
-    ConnectorNode, Dimension, Document, DocumentBody, EllipseNode, FieldNode, FrameNode, GroupNode,
-    ImageNode, LibraryDef, LineNode, MasterDef, Node, Page, PathAnchor, PathNode, Point,
-    PolygonNode, PolylineNode, PropertyValue, ProtectedRegion, ProvenanceDef, RecipeDef,
-    RecipeParam, RectNode, SafeZone, SafeZoneType, SectionDef, Severity, ShapeNode, Style,
-    StyleBlock, TableCell, TableColumn, TableNode, TableRow, TextNode, TextSpan, TocNode, Token,
-    TokenBlock, TokenLiteral, TokenType, TokenValue, Unit, UnknownNode, UnknownStyleProp,
+    ConnectorNode, ConstructionBlock, Dimension, Document, DocumentBody, EllipseNode, FieldNode,
+    FrameNode, GroupNode, ImageNode, LibraryDef, LineNode, MasterDef, Node, Page, PathAnchor,
+    PathNode, Point, PolygonNode, PolylineNode, PropertyValue, ProtectedRegion, ProvenanceDef,
+    RecipeDef, RecipeParam, RectNode, SafeZone, SafeZoneType, SectionDef, Severity, ShapeNode,
+    Style, StyleBlock, TableCell, TableColumn, TableNode, TableRow, TextNode, TextSpan, TocNode,
+    Token, TokenBlock, TokenLiteral, TokenType, TokenValue, Unit, UnknownNode, UnknownStyleProp,
     ValidationReport, VariantDef, VariantOverride, validate,
 };
 pub use zenith_core::{KdlAdapter, KdlSource};
@@ -217,6 +217,7 @@ pub fn minimal_page(id: &str, children: Vec<Node>) -> Page {
         master: None,
         safe_zones: Vec::new(),
         folds: Vec::new(),
+        construction: ConstructionBlock::default(),
         block_styles: Vec::new(),
         children,
         source_span: None,
@@ -301,6 +302,7 @@ pub fn bounded_page(id: &str, w: f64, h: f64, children: Vec<Node>) -> Page {
         master: None,
         safe_zones: Vec::new(),
         folds: Vec::new(),
+        construction: ConstructionBlock::default(),
         block_styles: Vec::new(),
         children,
         source_span: None,
@@ -446,6 +448,9 @@ pub fn strip_spans(mut doc: Document) -> Document {
         }
         for fold in &mut page.folds {
             fold.source_span = None;
+        }
+        for guide in &mut page.construction.guides {
+            guide.source_span = None;
         }
         for node in &mut page.children {
             strip_node_span(node);

@@ -1,7 +1,9 @@
 //! The `document` body, the `page` node, and its page-metadata children
 //! (`safe-zone`, `fold`, `block`).
 
-use crate::ast::{DocumentBody, Fold, Page, SafeZone, SafeZoneType};
+use crate::ast::{
+    ConstructionBlock, ConstructionGuideDef, DocumentBody, Fold, Page, SafeZone, SafeZoneType,
+};
 
 use crate::format::writer::{
     fmt_dimension, indent, write_opt_dimension, write_opt_property_value, write_opt_str,
@@ -69,14 +71,15 @@ fn write_page(page: &Page, out: &mut String, depth: usize) {
     write_opt_str(out, "master", &page.master);
 
     out.push_str(" {\n");
-    // Safe-zones and folds are page metadata, emitted before block decls and
-    // renderable children.
+    // Safe-zones, folds, and construction guides are page metadata, emitted
+    // before block decls and renderable children.
     for zone in &page.safe_zones {
         write_safe_zone(zone, out, depth + 1);
     }
     for fold in &page.folds {
         write_fold(fold, out, depth + 1);
     }
+    write_construction_block(&page.construction, out, depth + 1);
     // Block style decls at page scope emitted after safe-zones/folds, before children.
     for bs in &page.block_styles {
         write_block_style(bs, out, depth + 1);
@@ -126,5 +129,39 @@ fn write_fold(fold: &Fold, out: &mut String, depth: usize) {
     out.push_str(&fold.orientation);
     out.push('"');
     write_opt_dimension(out, "position", &fold.position);
+    out.push('\n');
+}
+
+fn write_construction_block(block: &ConstructionBlock, out: &mut String, depth: usize) {
+    if block.guides.is_empty() {
+        return;
+    }
+
+    indent(out, depth);
+    out.push_str("construction {\n");
+    for guide in &block.guides {
+        write_construction_guide(guide, out, depth + 1);
+    }
+    indent(out, depth);
+    out.push_str("}\n");
+}
+
+fn write_construction_guide(guide: &ConstructionGuideDef, out: &mut String, depth: usize) {
+    indent(out, depth);
+    out.push_str("guide");
+    out.push_str(" id=\"");
+    out.push_str(&guide.id);
+    out.push('"');
+    out.push_str(" type=\"");
+    out.push_str(&guide.guide_type);
+    out.push('"');
+    write_opt_dimension(out, "x1", &guide.x1);
+    write_opt_dimension(out, "y1", &guide.y1);
+    write_opt_dimension(out, "x2", &guide.x2);
+    write_opt_dimension(out, "y2", &guide.y2);
+    write_opt_dimension(out, "cx", &guide.cx);
+    write_opt_dimension(out, "cy", &guide.cy);
+    write_opt_dimension(out, "r", &guide.r);
+    write_opt_str_escaped(out, "label", &guide.label);
     out.push('\n');
 }
