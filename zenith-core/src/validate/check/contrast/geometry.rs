@@ -1,6 +1,6 @@
 use std::collections::BTreeMap;
 
-use crate::ast::node::{Node, TextNode, anchor_xy, parse_anchor};
+use crate::ast::node::{Node, Point, TextNode, anchor_xy, parse_anchor};
 use crate::ast::value::{Dimension, PropertyValue, Unit, dim_to_px};
 use crate::tokens::{ResolvedToken, ResolvedValue};
 
@@ -61,16 +61,17 @@ impl RectPx {
     }
 }
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Debug)]
 pub(super) enum CoverageShape {
     Rect,
     Ellipse,
     Diamond,
     Capsule,
+    Polygon(Vec<(f64, f64)>),
 }
 
 impl CoverageShape {
-    pub(super) fn contains_point(self, bounds: RectPx, x: f64, y: f64) -> bool {
+    pub(super) fn contains_point(&self, bounds: RectPx, x: f64, y: f64) -> bool {
         if !bounds.contains_point(x, y) {
             return false;
         }
@@ -79,6 +80,7 @@ impl CoverageShape {
             CoverageShape::Ellipse => point_in_ellipse(bounds, x, y),
             CoverageShape::Diamond => point_in_diamond(bounds, x, y),
             CoverageShape::Capsule => point_in_capsule(bounds, x, y),
+            CoverageShape::Polygon(points) => point_in_polygon(points, x, y),
         }
     }
 }
@@ -177,6 +179,33 @@ pub(super) fn group_offset(
         resolve_axis_px(x, page_w, resolved_tokens).unwrap_or(0.0),
         resolve_axis_px(y, page_h, resolved_tokens).unwrap_or(0.0),
     )
+}
+
+pub(super) fn polygon_region(
+    points: &[Point],
+    dx: f64,
+    dy: f64,
+    page_size: (f64, f64),
+) -> Option<(RectPx, CoverageShape)> {
+    let mut resolved = Vec::with_capacity(points.len());
+    for point in points {
+        let x = point
+            .x
+            .as_ref()
+            .and_then(|dim| resolve_dim_axis(dim, page_size.0))?
+            + dx;
+        let y = point
+            .y
+            .as_ref()
+            .and_then(|dim| resolve_dim_axis(dim, page_size.1))?
+            + dy;
+        resolved.push((x, y));
+    }
+    if resolved.len() < 3 {
+        return None;
+    }
+    let bounds = polygon_bounds(&resolved)?;
+    Some((bounds, CoverageShape::Polygon(resolved)))
 }
 
 fn resolve_dim_axis(dim: &Dimension, basis: f64) -> Option<f64> {
@@ -281,6 +310,49 @@ fn point_in_capsule(bounds: RectPx, x: f64, y: f64) -> bool {
         let cy = if y < top { top } else { bottom };
         distance_sq(x, y, cx, cy) <= radius * radius
     }
+}
+
+fn polygon_bounds(points: &[(f64, f64)]) -> Option<RectPx> {
+    let mut iter = points.iter();
+    let &(first_x, first_y) = iter.next()?;
+    let mut min_x = first_x;
+    let mut max_x = first_x;
+    let mut min_y = first_y;
+    let mut max_y = first_y;
+    for &(x, y) in iter {
+        min_x = min_x.min(x);
+        max_x = max_x.max(x);
+        min_y = min_y.min(y);
+        max_y = max_y.max(y);
+    }
+    Some(RectPx {
+        x: min_x,
+        y: min_y,
+        w: max_x - min_x,
+        h: max_y - min_y,
+    })
+}
+
+fn point_in_polygon(points: &[(f64, f64)], x: f64, y: f64) -> bool {
+    let Some(&(mut prev_x, mut prev_y)) = points.last() else {
+        return false;
+    };
+    let mut inside = false;
+    for &(curr_x, curr_y) in points {
+        let crosses = (curr_y > y) != (prev_y > y);
+        if crosses {
+            let dy = prev_y - curr_y;
+            if dy != 0.0 {
+                let intersect_x = (prev_x - curr_x) * (y - curr_y) / dy + curr_x;
+                if x < intersect_x {
+                    inside = !inside;
+                }
+            }
+        }
+        prev_x = curr_x;
+        prev_y = curr_y;
+    }
+    inside
 }
 
 fn distance_sq(x1: f64, y1: f64, x2: f64, y2: f64) -> f64 {

@@ -9,14 +9,16 @@ mod geometry;
 
 use std::collections::BTreeMap;
 
-use crate::ast::node::{ImageNode, Node, ShapeNode, TableNode, TextNode};
+use crate::ast::node::{
+    ImageNode, Node, PolygonNode, PolylineNode, ShapeNode, TableNode, TextNode,
+};
 use crate::ast::style::Style;
 use crate::ast::value::{PropertyValue, dim_to_px};
 use crate::color::{apca_lc, parse_rgb};
 use crate::diagnostics::Diagnostic;
 use crate::tokens::{ResolvedToken, ResolvedValue};
 
-use geometry::{CoverageShape, RectPx, group_offset, local_box, text_box};
+use geometry::{CoverageShape, RectPx, group_offset, local_box, polygon_region, text_box};
 
 /// Below this APCA magnitude the text is effectively painted into its backdrop,
 /// which is a stronger signal than ordinary sub-threshold contrast.
@@ -126,6 +128,8 @@ fn walk_paint(
             ),
             Node::Shape(s) => push_shape_backdrop(node, s, ctx, candidates, env),
             Node::Image(img) => push_image_backdrop(node, img, ctx, candidates, env),
+            Node::Polygon(poly) => push_polygon_backdrop(node, poly, ctx, candidates, env),
+            Node::Polyline(poly) => push_polyline_backdrop(node, poly, ctx, candidates, env),
             Node::Frame(f) => {
                 let frame_box = absolute_box(node, ctx, env.resolved_tokens);
                 let frame_clip = frame_box.and_then(|b| clip_bounds(ctx.clip, b));
@@ -167,8 +171,6 @@ fn walk_paint(
             }
             Node::Line(_)
             | Node::Code(_)
-            | Node::Polygon(_)
-            | Node::Polyline(_)
             | Node::Path(_)
             | Node::Instance(_)
             | Node::Field(_)
@@ -207,6 +209,73 @@ fn push_shape_backdrop(
         candidates,
         env,
     );
+}
+
+fn push_polygon_backdrop(
+    node: &Node,
+    polygon: &PolygonNode,
+    ctx: PaintCtx,
+    candidates: &mut Vec<BackdropCandidate>,
+    env: ContrastEnv<'_>,
+) {
+    push_point_backdrop(
+        node,
+        &polygon.fill,
+        &polygon.style,
+        &polygon.points,
+        ctx,
+        candidates,
+        env,
+    );
+}
+
+fn push_polyline_backdrop(
+    node: &Node,
+    polyline: &PolylineNode,
+    ctx: PaintCtx,
+    candidates: &mut Vec<BackdropCandidate>,
+    env: ContrastEnv<'_>,
+) {
+    push_point_backdrop(
+        node,
+        &polyline.fill,
+        &polyline.style,
+        &polyline.points,
+        ctx,
+        candidates,
+        env,
+    );
+}
+
+fn push_point_backdrop(
+    node: &Node,
+    fill: &Option<PropertyValue>,
+    style: &Option<String>,
+    points: &[crate::ast::node::Point],
+    ctx: PaintCtx,
+    candidates: &mut Vec<BackdropCandidate>,
+    env: ContrastEnv<'_>,
+) {
+    let opacity = ctx.opacity * node_opacity(node).unwrap_or(1.0);
+    let Some(paint) = resolve_fill_paint(
+        fill,
+        style.as_deref(),
+        env.style_map,
+        env.resolved_tokens,
+        opacity,
+    ) else {
+        return;
+    };
+    let Some((bounds, shape)) = polygon_region(points, ctx.dx, ctx.dy, ctx.page_size) else {
+        return;
+    };
+    if let Some(bounds) = clip_bounds(ctx.clip, bounds) {
+        candidates.push(BackdropCandidate {
+            paint,
+            bounds,
+            shape,
+        });
+    }
 }
 
 fn push_backdrop(

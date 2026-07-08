@@ -420,6 +420,59 @@ fn image_backdrop_at_with_opacity(
     })
 }
 
+fn polygon_backdrop(id: &str, fill_token: &str, points: Vec<(f64, f64)>) -> Node {
+    Node::Polygon(PolygonNode {
+        id: id.to_owned(),
+        name: None,
+        role: None,
+        fill: Some(PropertyValue::TokenRef(fill_token.to_owned())),
+        stroke: None,
+        stroke_width: None,
+        stroke_alignment: None,
+        fill_rule: None,
+        opacity: None,
+        visible: None,
+        locked: None,
+        rotate: None,
+        style: None,
+        points: points
+            .into_iter()
+            .map(|(x, y)| Point {
+                x: Some(px(x)),
+                y: Some(px(y)),
+            })
+            .collect(),
+        source_span: None,
+        unknown_props: BTreeMap::new(),
+    })
+}
+
+fn polyline_backdrop(id: &str, fill_token: &str, points: Vec<(f64, f64)>) -> Node {
+    Node::Polyline(PolylineNode {
+        id: id.to_owned(),
+        name: None,
+        role: None,
+        fill: Some(PropertyValue::TokenRef(fill_token.to_owned())),
+        stroke: None,
+        stroke_width: None,
+        fill_rule: None,
+        opacity: None,
+        visible: None,
+        locked: None,
+        rotate: None,
+        style: None,
+        points: points
+            .into_iter()
+            .map(|(x, y)| Point {
+                x: Some(px(x)),
+                y: Some(px(y)),
+            })
+            .collect(),
+        source_span: None,
+        unknown_props: BTreeMap::new(),
+    })
+}
+
 /// Build a text node with explicit dimensions and page-relative anchor.
 fn anchored_text_with_fill_and_size(
     id: &str,
@@ -887,6 +940,93 @@ fn transparent_backdrop_does_not_override_page() {
     assert!(
         has_code(&report, "contrast.invisible"),
         "fully transparent paint should leave the navy page as the sampled backdrop; codes: {:?}",
+        codes(&report)
+    );
+}
+
+#[test]
+fn polygon_backdrop_uses_true_containment() {
+    let doc = doc_with(
+        vec![
+            color_token_hex("color.page", "#ffffff"),
+            color_token_hex("color.backdrop", "#003087"),
+            color_token_hex("color.text", "#000000"),
+        ],
+        vec![page_with_bg(
+            "page.one",
+            "color.page",
+            vec![
+                polygon_backdrop(
+                    "triangle",
+                    "color.backdrop",
+                    vec![(100.0, 100.0), (300.0, 100.0), (200.0, 250.0)],
+                ),
+                text_at("headline", "color.text", 190.0, 140.0, 20.0, 20.0),
+            ],
+        )],
+    );
+    let report = validate(&doc);
+    assert!(
+        has_code(&report, "contrast.invisible"),
+        "text inside the triangle fill should use the polygon backdrop; codes: {:?}",
+        codes(&report)
+    );
+}
+
+#[test]
+fn polygon_bbox_corner_is_not_a_backdrop() {
+    let doc = doc_with(
+        vec![
+            color_token_hex("color.page", "#ffffff"),
+            color_token_hex("color.backdrop", "#003087"),
+            color_token_hex("color.text", "#000000"),
+        ],
+        vec![page_with_bg(
+            "page.one",
+            "color.page",
+            vec![
+                polygon_backdrop(
+                    "triangle",
+                    "color.backdrop",
+                    vec![(100.0, 100.0), (300.0, 100.0), (200.0, 250.0)],
+                ),
+                text_at("headline", "color.text", 105.0, 225.0, 20.0, 20.0),
+            ],
+        )],
+    );
+    let report = validate(&doc);
+    assert!(
+        !has_code(&report, "contrast.invisible"),
+        "text in the triangle bbox but outside the polygon should keep the page backdrop; codes: {:?}",
+        codes(&report)
+    );
+}
+
+#[test]
+fn polyline_fill_can_be_text_backdrop() {
+    let doc = doc_with(
+        vec![
+            color_token_hex("color.page", "#ffffff"),
+            color_token_hex("color.backdrop", "#003087"),
+            color_token_hex("color.text", "#000000"),
+        ],
+        vec![page_with_bg(
+            "page.one",
+            "color.page",
+            vec![
+                polyline_backdrop(
+                    "polyline.fill",
+                    "color.backdrop",
+                    vec![(100.0, 100.0), (300.0, 100.0), (200.0, 250.0)],
+                ),
+                text_at("headline", "color.text", 190.0, 140.0, 20.0, 20.0),
+            ],
+        )],
+    );
+    let report = validate(&doc);
+    assert!(
+        has_code(&report, "contrast.invisible"),
+        "filled polyline should use its renderer-closed fill as a backdrop; codes: {:?}",
         codes(&report)
     );
 }
