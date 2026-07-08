@@ -295,6 +295,7 @@ fn group_at_with_opacity(
         symmetry_cx: None,
         symmetry_cy: None,
         symmetry_start_angle: None,
+        symmetry_mode: None,
         anchor: None,
         anchor_zone: None,
         anchor_sibling: None,

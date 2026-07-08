@@ -186,7 +186,10 @@ fn emit_live_symmetry_children(
     let Some(count) = group.symmetry_count else {
         return;
     };
-    if count <= 1 {
+    let is_mirror = matches!(group.symmetry_mode.as_deref(), Some("mirror"));
+    // Radial symmetry needs ≥2 positions to produce a copy; mirror (dihedral)
+    // symmetry reflects even a single axis into a bilateral pair.
+    if count == 0 || (!is_mirror && count == 1) {
         return;
     }
     if count > 72 {
@@ -244,6 +247,58 @@ fn emit_live_symmetry_children(
             group.source_span,
             Some(group.id.clone()),
         ));
+        return;
+    }
+
+    // `mirror` mode reflects the subtree into a dihedral kaleidoscope
+    // (MirrorMe); the default `radial` mode rotates copies about the pivot.
+    if is_mirror {
+        let center = match zenith_geometry::Point2::new(cx_pivot, cy_pivot) {
+            Ok(center) => center,
+            Err(_) => {
+                diagnostics.push(Diagnostic::warning(
+                    "scene.invalid_symmetry",
+                    format!("group '{}' live symmetry center must be finite", group.id),
+                    group.source_span,
+                    Some(group.id.clone()),
+                ));
+                return;
+            }
+        };
+        let transforms = match zenith_geometry::AffineTransform::dihedral_symmetry(
+            count as usize,
+            center,
+            start_angle,
+        ) {
+            Ok(transforms) => transforms,
+            Err(_) => {
+                diagnostics.push(Diagnostic::warning(
+                    "scene.invalid_symmetry",
+                    format!(
+                        "group '{}' mirror symmetry could not be generated",
+                        group.id
+                    ),
+                    group.source_span,
+                    Some(group.id.clone()),
+                ));
+                return;
+            }
+        };
+        // Index 0 is the identity copy already drawn by the base emit above;
+        // emit the remaining reflected/rotated copies as exact affine matrices.
+        for transform in transforms.iter().skip(1) {
+            let (a, b, c, d, e, f) = transform.coefficients();
+            commands.push(SceneCommand::PushTransformMatrix { a, b, c, d, e, f });
+            emit_group_children(
+                group,
+                cx,
+                commands,
+                diagnostics,
+                connector_strokes,
+                child_ctx,
+            );
+            commands.push(SceneCommand::PopTransform);
+        }
         return;
     }
 

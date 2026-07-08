@@ -339,6 +339,14 @@ impl RasterBackend for TinySkiaBackend {
                     continue;
                 }
 
+                SceneCommand::PushTransformMatrix { a, b, c, d, e, f } => {
+                    let matrix = Transform::from_row(
+                        *a as f32, *b as f32, *c as f32, *d as f32, *e as f32, *f as f32,
+                    );
+                    transform_stack.push(current_ts.pre_concat(matrix));
+                    continue;
+                }
+
                 SceneCommand::PopTransform => {
                     if transform_stack.len() > 1 {
                         transform_stack.pop();

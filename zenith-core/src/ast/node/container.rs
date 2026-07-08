@@ -174,8 +174,14 @@ pub struct GroupNode {
     pub symmetry_cx: Option<Dimension>,
     /// Live radial symmetry center Y coordinate.
     pub symmetry_cy: Option<Dimension>,
-    /// Optional starting angle for generated copies, in degrees.
+    /// Optional starting angle for generated copies, in degrees. In `radial`
+    /// mode this is the angular offset of the first rotated copy; in `mirror`
+    /// mode it is the angle of the primary reflection axis.
     pub symmetry_start_angle: Option<Dimension>,
+    /// Live symmetry mode: `"radial"` (rotated copies, the default when absent)
+    /// or `"mirror"` (dihedral reflection about `symmetry_cx/cy` at the
+    /// `symmetry_start_angle` axis). Absent renders byte-identical to `radial`.
+    pub symmetry_mode: Option<String>,
     /// Child nodes in source order.
     pub children: Vec<Node>,
     /// Advisory text-safe rectangles declared as `protected-region` children.

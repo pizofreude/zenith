@@ -94,6 +94,7 @@ fn solid_fill_colors(result: &zenith_scene::CompileResult) -> Vec<(u8, u8, u8)> 
             | SceneCommand::PopLayer
             | SceneCommand::PushTransform { .. }
             | SceneCommand::PushScaleTranslate { .. }
+            | SceneCommand::PushTransformMatrix { .. }
             | SceneCommand::PopTransform
             | SceneCommand::BeginShadow { .. }
             | SceneCommand::EndShadow
@@ -133,6 +134,7 @@ fn scale_translate_commands(result: &zenith_scene::CompileResult) -> Vec<(f64, f
             | SceneCommand::PushLayer { .. }
             | SceneCommand::PopLayer
             | SceneCommand::PushTransform { .. }
+            | SceneCommand::PushTransformMatrix { .. }
             | SceneCommand::PopTransform
             | SceneCommand::BeginShadow { .. }
             | SceneCommand::EndShadow
@@ -172,6 +174,7 @@ fn image_asset_ids(result: &zenith_scene::CompileResult) -> Vec<&str> {
             | SceneCommand::PopLayer
             | SceneCommand::PushTransform { .. }
             | SceneCommand::PushScaleTranslate { .. }
+            | SceneCommand::PushTransformMatrix { .. }
             | SceneCommand::PopTransform
             | SceneCommand::BeginShadow { .. }
             | SceneCommand::EndShadow

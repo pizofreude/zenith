@@ -308,6 +308,7 @@ fn synthetic_group(instance: &InstanceNode, children: Vec<Node>) -> GroupNode {
         symmetry_cx: None,
         symmetry_cy: None,
         symmetry_start_angle: None,
+        symmetry_mode: None,
         anchor: None,
         anchor_zone: None,
         anchor_sibling: None,

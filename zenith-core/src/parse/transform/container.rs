@@ -132,6 +132,8 @@ pub(crate) const GROUP_KNOWN_PROPS: &[&str] = &[
     "symmetry_cy",
     "symmetry-start-angle",
     "symmetry_start_angle",
+    "symmetry-mode",
+    "symmetry_mode",
     "anchor",
     "anchor-zone",
     "anchor_zone",
@@ -203,6 +205,9 @@ pub(super) fn transform_group(node: &KdlNode) -> Result<GroupNode, ParseError> {
             .or_else(|| optional_dimension_prop(node, "symmetry_cy")),
         symmetry_start_angle: optional_dimension_prop(node, "symmetry-start-angle")
             .or_else(|| optional_dimension_prop(node, "symmetry_start_angle")),
+        symmetry_mode: optional_string_prop(node, "symmetry-mode")
+            .or_else(|| optional_string_prop(node, "symmetry_mode"))
+            .map(str::to_owned),
         children,
         protected_regions,
         editable_param_ids,

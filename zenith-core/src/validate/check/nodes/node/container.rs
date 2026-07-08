@@ -278,6 +278,20 @@ pub(in crate::validate::check) fn check_group(
 }
 
 fn check_group_symmetry(g: &GroupNode, diagnostics: &mut Vec<Diagnostic>) {
+    if let Some(mode) = g.symmetry_mode.as_deref()
+        && !matches!(mode, "radial" | "mirror")
+    {
+        diagnostics.push(Diagnostic::warning(
+            "group.invalid_symmetry",
+            format!(
+                "group '{}': symmetry-mode must be 'radial' or 'mirror', got '{mode}'",
+                g.id
+            ),
+            g.source_span,
+            Some(g.id.clone()),
+        ));
+    }
+
     let Some(count) = g.symmetry_count else {
         return;
     };

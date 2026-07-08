@@ -139,7 +139,10 @@ fn active_transform_at(commands: &[SceneCommand], idx: usize) -> Option<Transfor
                 cx: *cx,
                 cy: *cy,
             });
-        } else if matches!(cmd, SceneCommand::PushScaleTranslate { .. }) {
+        } else if matches!(
+            cmd,
+            SceneCommand::PushScaleTranslate { .. } | SceneCommand::PushTransformMatrix { .. }
+        ) {
             stack.push(Transform::Unsupported);
         } else if matches!(cmd, SceneCommand::PopTransform) {
             stack.pop();

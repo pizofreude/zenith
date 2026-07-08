@@ -79,6 +79,7 @@ pub(in crate::tiny_skia) fn draw_command(
         | SceneCommand::PopLayer
         | SceneCommand::PushTransform { .. }
         | SceneCommand::PushScaleTranslate { .. }
+        | SceneCommand::PushTransformMatrix { .. }
         | SceneCommand::PopTransform
         | SceneCommand::BeginShadow { .. }
         | SceneCommand::EndShadow

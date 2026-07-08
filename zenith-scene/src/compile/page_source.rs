@@ -276,6 +276,7 @@ fn prefix_imported_command_refs(commands: &mut [SceneCommand], prefixes: Importe
             | SceneCommand::PopLayer
             | SceneCommand::PushTransform { .. }
             | SceneCommand::PushScaleTranslate { .. }
+            | SceneCommand::PushTransformMatrix { .. }
             | SceneCommand::PopTransform
             | SceneCommand::BeginShadow { .. }
             | SceneCommand::EndShadow

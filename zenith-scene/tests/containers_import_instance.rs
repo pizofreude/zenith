@@ -107,6 +107,7 @@ fn fill_rects(result: &zenith_scene::CompileResult) -> Vec<FillRectSummary> {
             | SceneCommand::PopLayer
             | SceneCommand::PushTransform { .. }
             | SceneCommand::PushScaleTranslate { .. }
+            | SceneCommand::PushTransformMatrix { .. }
             | SceneCommand::PopTransform
             | SceneCommand::BeginShadow { .. }
             | SceneCommand::EndShadow
@@ -154,6 +155,7 @@ fn image_asset_ids(result: &zenith_scene::CompileResult) -> Vec<&str> {
             | SceneCommand::PopLayer
             | SceneCommand::PushTransform { .. }
             | SceneCommand::PushScaleTranslate { .. }
+            | SceneCommand::PushTransformMatrix { .. }
             | SceneCommand::PopTransform
             | SceneCommand::BeginShadow { .. }
             | SceneCommand::EndShadow

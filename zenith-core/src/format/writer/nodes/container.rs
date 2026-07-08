@@ -110,6 +110,7 @@ pub(super) fn write_group(g: &GroupNode, out: &mut String, depth: usize) {
     write_opt_dimension(out, "symmetry-cx", &g.symmetry_cx);
     write_opt_dimension(out, "symmetry-cy", &g.symmetry_cy);
     write_opt_dimension(out, "symmetry-start-angle", &g.symmetry_start_angle);
+    write_opt_str(out, "symmetry-mode", &g.symmetry_mode);
 
     // Unknown properties in sorted key order (BTreeMap iteration is sorted).
     for (key, prop) in &g.unknown_props {

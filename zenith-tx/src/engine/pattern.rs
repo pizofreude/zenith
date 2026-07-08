@@ -165,6 +165,7 @@ pub(super) fn apply_detach_pattern(
         symmetry_cx: None,
         symmetry_cy: None,
         symmetry_start_angle: None,
+        symmetry_mode: None,
         children,
         protected_regions: Vec::new(),
         editable_param_ids: Vec::new(),

@@ -146,6 +146,68 @@ page id="page.sym" w=(px)100 h=(px)100 {
 }
 
 #[test]
+fn group_mirror_symmetry_emits_reflection_matrices() {
+    let src = r##"zenith version=1 {
+  project id="proj.mir" name="MIR"
+  tokens format="zenith-token-v1" {
+token id="color.r" type="color" value="#ff0000"
+  }
+  styles {}
+  document id="doc.mir" title="MIR" {
+page id="page.mir" w=(px)100 h=(px)100 {
+  group id="group.mir" symmetry-count=1 symmetry-mode="mirror" symmetry-cx=(px)50 symmetry-cy=(px)50 symmetry-start-angle=(deg)90 {
+    rect id="rect.mir" x=(px)40 y=(px)10 w=(px)20 h=(px)20 fill=(token)"color.r"
+  }
+}
+  }
+}
+"##;
+    let doc = parse(src);
+    let result = compile(&doc, &default_provider());
+
+    assert!(
+        result.diagnostics.is_empty(),
+        "unexpected diagnostics: {:?}",
+        result.diagnostics
+    );
+
+    let cmds = &result.scene.commands;
+    let fill_count = cmds
+        .iter()
+        .filter(|cmd| matches!(cmd, SceneCommand::FillRect { .. }))
+        .count();
+    let matrices: Vec<_> = cmds
+        .iter()
+        .filter_map(|cmd| match cmd {
+            SceneCommand::PushTransformMatrix { a, b, c, d, e, f } => {
+                Some((*a, *b, *c, *d, *e, *f))
+            }
+            _ => None,
+        })
+        .collect();
+
+    // count=1 mirror → seed plus one reflected copy.
+    assert_eq!(fill_count, 2, "seed plus one mirrored copy must render");
+    assert_eq!(matrices.len(), 1, "one reflection matrix must be pushed");
+    // Reflection across the vertical axis x=50 negates x about the center:
+    // a=-1, d=1, e=2·50=100, others 0.
+    let (a, b, c, d, e, f) = matrices[0];
+    assert!((a - -1.0).abs() < 1.0e-9, "a={a}");
+    assert!(b.abs() < 1.0e-9, "b={b}");
+    assert!(c.abs() < 1.0e-9, "c={c}");
+    assert!((d - 1.0).abs() < 1.0e-9, "d={d}");
+    assert!((e - 100.0).abs() < 1.0e-9, "e={e}");
+    assert!(f.abs() < 1.0e-9, "f={f}");
+    // The radial-only PushTransform must NOT appear in mirror mode.
+    assert!(
+        !cmds
+            .iter()
+            .any(|cmd| matches!(cmd, SceneCommand::PushTransform { .. })),
+        "mirror mode must not emit rotational PushTransform copies"
+    );
+}
+
+#[test]
 fn plain_group_does_not_emit_live_symmetry_transforms() {
     let src = r##"zenith version=1 {
   project id="proj.symplain" name="SYMPLAIN"
