@@ -599,6 +599,11 @@ pub const DIAGNOSTIC_CODES: &[DiagnosticCodeInfo] = &[
         "A paint value could not be resolved to a valid color at compile time.",
     ),
     info(
+        "scene.invalid_import_source",
+        Severity::Advisory,
+        "An imported composition source is malformed and cannot be parsed.",
+    ),
+    info(
         "scene.missing_geometry",
         Severity::Advisory,
         "A node's geometry could not be resolved; the node is skipped in the scene.",
@@ -624,6 +629,16 @@ pub const DIAGNOSTIC_CODES: &[DiagnosticCodeInfo] = &[
         "An instance references a component that could not be found at compile time.",
     ),
     info(
+        "scene.unknown_import",
+        Severity::Advisory,
+        "An instance references an import that is not present in the scene import graph.",
+    ),
+    info(
+        "scene.unknown_import_component",
+        Severity::Advisory,
+        "An instance references a component that is not present in the imported document.",
+    ),
+    info(
         "scene.unresolved_token",
         Severity::Advisory,
         "A paint references a token that could not be resolved at compile time.",
@@ -632,6 +647,11 @@ pub const DIAGNOSTIC_CODES: &[DiagnosticCodeInfo] = &[
         "scene.unsupported_import_source",
         Severity::Advisory,
         "An imported composition source is not yet supported by scene compilation.",
+    ),
+    info(
+        "scene.unsupported_import_target",
+        Severity::Advisory,
+        "An imported composition source targets a kind that scene compilation does not support.",
     ),
     info(
         "scene.unsupported_node",
@@ -1078,13 +1098,17 @@ mod tests {
             ("footnote.body_overlap", Severity::Advisory),
             ("footnote.no_live_area", Severity::Advisory),
             ("scene.invalid_color", Severity::Advisory),
+            ("scene.invalid_import_source", Severity::Advisory),
             ("scene.missing_geometry", Severity::Advisory),
             ("scene.no_pages", Severity::Advisory),
             ("scene.page_out_of_range", Severity::Advisory),
             ("scene.text_unshaped", Severity::Advisory),
             ("scene.unknown_component", Severity::Advisory),
+            ("scene.unknown_import", Severity::Advisory),
+            ("scene.unknown_import_component", Severity::Advisory),
             ("scene.unresolved_token", Severity::Advisory),
             ("scene.unsupported_import_source", Severity::Advisory),
+            ("scene.unsupported_import_target", Severity::Advisory),
             ("scene.unsupported_node", Severity::Advisory),
             ("scene.unsupported_unit", Severity::Advisory),
             ("scene.wrong_token_type", Severity::Advisory),

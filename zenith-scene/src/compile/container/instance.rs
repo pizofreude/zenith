@@ -9,6 +9,7 @@ use zenith_core::{Diagnostic, GroupNode, InstanceNode, Node, Override, PropertyV
 
 use crate::ir::SceneCommand;
 
+use super::super::imports::{ImportSource, parse_import_source};
 use super::super::{NodeCtx, RenderCtx};
 use super::group::compile_group;
 
@@ -40,15 +41,15 @@ pub(in crate::compile) fn compile_instance(
     }
 
     if let Some(source) = &instance.source {
-        diagnostics.push(Diagnostic::advisory(
-            "scene.unsupported_import_source",
-            format!(
-                "instance '{}' references imported source '{}' which is not yet expanded by scene compile; the instance is skipped",
-                instance.id, source
-            ),
-            instance.source_span,
-            Some(instance.id.clone()),
-        ));
+        compile_imported_instance(
+            instance,
+            source,
+            cx,
+            commands,
+            diagnostics,
+            connector_strokes,
+            ctx,
+        );
         return;
     }
 
@@ -82,13 +83,152 @@ pub(in crate::compile) fn compile_instance(
     // Build a synthetic group carrying the instance origin + cascade and reuse
     // compile_group's translation/opacity logic. The group's own id is the
     // instance id (it emits no command, so the id is only for self-consistency).
-    let synthetic = GroupNode {
+    let synthetic = synthetic_group(instance, children);
+
+    compile_group(
+        &synthetic,
+        cx,
+        commands,
+        diagnostics,
+        connector_strokes,
+        ctx,
+    );
+}
+
+fn compile_imported_instance(
+    instance: &InstanceNode,
+    source: &str,
+    cx: NodeCtx,
+    commands: &mut Vec<SceneCommand>,
+    diagnostics: &mut Vec<Diagnostic>,
+    connector_strokes: &mut Vec<usize>,
+    ctx: RenderCtx,
+) {
+    if !cx.imports.is_enabled() {
+        diagnostics.push(Diagnostic::advisory(
+            "scene.unsupported_import_source",
+            format!(
+                "instance '{}' references imported source '{}' which is not yet expanded by scene compile; the instance is skipped",
+                instance.id, source
+            ),
+            instance.source_span,
+            Some(instance.id.clone()),
+        ));
+        return;
+    }
+
+    let (import_id, component_id) = match parse_import_source(source) {
+        ImportSource::Component {
+            import_id,
+            component_id,
+        } => (import_id, component_id),
+        ImportSource::UnsupportedTarget { import_id, target } => {
+            diagnostics.push(Diagnostic::advisory(
+                "scene.unsupported_import_target",
+                format!(
+                    "instance '{}' references unsupported import target '{}#{}'; the instance is skipped",
+                    instance.id, import_id, target
+                ),
+                instance.source_span,
+                Some(instance.id.clone()),
+            ));
+            return;
+        }
+        ImportSource::Invalid => {
+            diagnostics.push(invalid_import_source(instance, source));
+            return;
+        }
+    };
+
+    let Some(imported) = cx.imports.get(import_id) else {
+        diagnostics.push(Diagnostic::advisory(
+            "scene.unknown_import",
+            format!(
+                "instance '{}' references import '{}' which is not in the scene import graph; the instance is skipped",
+                instance.id, import_id
+            ),
+            instance.source_span,
+            Some(instance.id.clone()),
+        ));
+        return;
+    };
+
+    let Some(component) = imported.components.get(component_id) else {
+        diagnostics.push(Diagnostic::advisory(
+            "scene.unknown_import_component",
+            format!(
+                "instance '{}' references component '{}' in import '{}' but it is not declared; the instance is skipped",
+                instance.id, component_id, import_id
+            ),
+            instance.source_span,
+            Some(instance.id.clone()),
+        ));
+        return;
+    };
+
+    let mut children = component.children.clone();
+    for ov in &instance.overrides {
+        let override_value = remap_import_override(ov, cx);
+        apply_override(&mut children, &override_value);
+    }
+    let prefix = format!("{}/", instance.id);
+    prefix_ids_in_children(&mut children, &prefix);
+
+    let imported_cx = NodeCtx {
+        resolved: &imported.resolved,
+        style_map: &imported.style_map,
+        components: &imported.components,
+        imports: cx.imports,
+        fonts: cx.fonts,
+        engine: cx.engine,
+        chains: cx.chains,
+        flows: cx.flows,
+        anchors: cx.anchors,
+        field_ctx: cx.field_ctx,
+        md_blocks: cx.md_blocks,
+        page_block_styles: &[],
+        doc_block_styles: &imported.document.body.block_styles,
+    };
+
+    let synthetic = synthetic_group(instance, children);
+    compile_group(
+        &synthetic,
+        imported_cx,
+        commands,
+        diagnostics,
+        connector_strokes,
+        ctx,
+    );
+}
+
+fn invalid_import_source(instance: &InstanceNode, source: &str) -> Diagnostic {
+    Diagnostic::advisory(
+        "scene.invalid_import_source",
+        format!(
+            "instance '{}' has malformed import source '{}'; expected import-id#component.component-id and the instance is skipped",
+            instance.id, source
+        ),
+        instance.source_span,
+        Some(instance.id.clone()),
+    )
+}
+
+fn remap_import_override(ov: &Override, cx: NodeCtx) -> Override {
+    let mut remapped = ov.clone();
+    if let Some(PropertyValue::TokenRef(token_id)) = &ov.fill
+        && let Some(token) = cx.resolved.get(token_id)
+        && let Some(hex) = token.value.as_color_hex()
+    {
+        remapped.fill = Some(PropertyValue::Literal(hex.to_owned()));
+    }
+    remapped
+}
+
+fn synthetic_group(instance: &InstanceNode, children: Vec<Node>) -> GroupNode {
+    GroupNode {
         id: instance.id.clone(),
         name: instance.name.clone(),
         role: instance.role.clone(),
-        // InstanceNode `x`/`y` stay `Dimension`; the synthetic group's geometry
-        // is `Option<PropertyValue>`, so wrap each authored origin as a literal
-        // dimension property (resolves to the same px via `resolve_geometry_px`).
         x: instance.x.clone().map(PropertyValue::Dimension),
         y: instance.y.clone().map(PropertyValue::Dimension),
         w: None,
@@ -121,16 +261,7 @@ pub(in crate::compile) fn compile_instance(
         editable_param_ids: Vec::new(),
         source_span: instance.source_span,
         unknown_props: BTreeMap::new(),
-    };
-
-    compile_group(
-        &synthetic,
-        cx,
-        commands,
-        diagnostics,
-        connector_strokes,
-        ctx,
-    );
+    }
 }
 
 /// Apply a single [`Override`] to the first descendant in `children` (descending

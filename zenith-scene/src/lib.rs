@@ -12,6 +12,7 @@
 //! - `ir`      — scene IR types (`Scene`, `SceneCommand`, `Color`, `SceneGlyph`).
 //! - `color`   — sRGB hex parsing → `Color`.
 //! - `compile` — `compile(&Document, &dyn FontProvider) -> CompileResult`.
+//! - `compile_page_with_imports` — compile one page with a caller-owned in-memory import graph.
 //! - `construction_overlay` — opt-in construction guide scene commands.
 //! - `text_outline` — compiled glyph-run commands → editable compound paths.
 //!
@@ -39,7 +40,9 @@ pub mod ir;
 pub mod text_outline;
 
 // Curated flat re-exports.
-pub use compile::{CompileResult, compile, compile_page};
+pub use compile::{
+    CompileResult, ImportGraph, ImportedDocument, compile, compile_page, compile_page_with_imports,
+};
 pub use construction_overlay::append_construction_overlay;
 pub use ir::{
     BlendMode, Color, FillRule, FilterSpec, FitMode, GradientPaint, GradientStop, ImageClip,

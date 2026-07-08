@@ -21,6 +21,7 @@ use super::ComponentMap;
 use super::anchor::AnchorMap;
 use super::chain::ChainAssignments;
 use super::field::FieldCtx;
+use super::imports::ImportScopes;
 use super::markdown_resolve::MdBlockMap;
 use super::table_flow::TableFlowAssignments;
 
@@ -38,6 +39,8 @@ pub(in crate::compile) struct NodeCtx<'a> {
     pub(in crate::compile) style_map: &'a BTreeMap<&'a str, &'a Style>,
     /// Component definitions, for `instance` expansion.
     pub(in crate::compile) components: &'a ComponentMap<'a>,
+    /// In-memory imported document scopes, for `instance source="…"` expansion.
+    pub(in crate::compile) imports: &'a ImportScopes<'a>,
     /// Font provider used to shape text descendants.
     pub(in crate::compile) fonts: &'a dyn FontProvider,
     /// Shaping engine used to shape text descendants.

@@ -14,6 +14,7 @@ use crate::ir::{Paint, SceneCommand};
 use super::super::anchor::AnchorMap;
 use super::super::chain::ChainAssignments;
 use super::super::field::FieldCtx;
+use super::super::imports::ImportScopes;
 use super::super::paint::resolve_property_color;
 use super::super::table_flow::TableFlowAssignments;
 use super::super::text::{MeasureEnv, empty_md_blocks, measure_text_wrapped_height};
@@ -39,6 +40,8 @@ pub(in crate::compile) struct TableEmitCtx<'a> {
     pub(in crate::compile) style_map: &'a BTreeMap<&'a str, &'a Style>,
     /// Component definitions, for descendant `instance` expansion.
     pub(in crate::compile) components: &'a ComponentMap<'a>,
+    /// In-memory imported document scopes, for descendant imported instances.
+    pub(in crate::compile) imports: &'a ImportScopes<'a>,
     /// Font provider used to shape and measure text descendants.
     pub(in crate::compile) fonts: &'a dyn FontProvider,
     /// Shaping engine used to shape and measure text descendants.
@@ -72,6 +75,7 @@ impl<'a> TableEmitCtx<'a> {
             resolved: self.resolved,
             style_map: self.style_map,
             components: self.components,
+            imports: self.imports,
             fonts: self.fonts,
             engine: self.engine,
             chains: self.chains,

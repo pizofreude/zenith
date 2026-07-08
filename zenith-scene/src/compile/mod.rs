@@ -23,9 +23,11 @@ mod crop;
 mod ctx;
 mod data_resolve;
 mod effect;
+mod entry;
 mod field;
 mod footnote;
 mod image;
+mod imports;
 mod leaf;
 mod line_jumps;
 mod markdown_resolve;
@@ -59,6 +61,7 @@ use field::{
     resolve_field_to_text,
 };
 use image::compile_image;
+pub use imports::{ImportGraph, ImportedDocument};
 use leaf::{
     ConnectorEnv, RectEllipseEnv, ShapeCompileEnv, compile_connector, compile_ellipse,
     compile_line, compile_path, compile_polygon, compile_polyline, compile_rect, compile_shape,
@@ -70,6 +73,8 @@ use table::{TableEmitCtx, compile_table};
 use table_flow::resolve_table_flows;
 use text::{TextCompileEnv, compile_code, compile_text, empty_md_blocks};
 use toc::resolve_toc_to_text;
+
+pub use entry::{compile, compile_page, compile_page_with_imports};
 
 /// Compile-time lookup of component definitions by id. Threaded through the
 /// node-compilation dispatch so [`Node::Instance`] can expand its referenced
@@ -171,47 +176,12 @@ pub(super) fn style_prop<'a>(
 
 // ── Entry point ───────────────────────────────────────────────────────────────
 
-/// Compile `doc` into a [`CompileResult`], using `fonts` to shape text nodes.
-///
-/// [`compile_page`] renders a chosen page; this wrapper renders page 0.  If the
-/// document has no pages an empty scene is returned with an advisory diagnostic.
-///
-/// Pass `&zenith_core::default_provider()` to use the bundled Noto Sans
-/// font, which is sufficient for basic text rendering.
-///
-/// # No-panic guarantee
-///
-/// This function never calls `unwrap`, `expect`, `panic!`, `todo!`,
-/// `unimplemented!`, or performs unchecked indexing.  All failure paths push a
-/// diagnostic and continue.
-pub fn compile(doc: &Document, fonts: &dyn FontProvider) -> CompileResult {
-    compile_page(doc, fonts, 0, None)
-}
-
-/// Compile the page at `page_index` (0-based) of `doc` into a [`CompileResult`],
-/// using `fonts` to shape text nodes.
-///
-/// If the document has no pages an empty scene is returned with a
-/// `scene.no_pages` advisory; if `page_index` is out of range (but pages exist)
-/// an empty scene is returned with a `scene.page_out_of_range` advisory.
-///
-/// Pass `&zenith_core::default_provider()` to use the bundled Noto Sans
-/// font, which is sufficient for basic text rendering.
-///
-/// Pass `Some(&data_ctx)` to resolve `(data)"field.path"` property references at
-/// compile time. Pass `None` to skip data binding — a document with no `(data)`
-/// refs and `data: None` is byte-identical to previous behavior.
-///
-/// # No-panic guarantee
-///
-/// This function never calls `unwrap`, `expect`, `panic!`, `todo!`,
-/// `unimplemented!`, or performs unchecked indexing (page lookup uses `.get()`).
-/// All failure paths push a diagnostic and continue.
-pub fn compile_page(
+pub(in crate::compile) fn compile_page_inner(
     doc: &Document,
     fonts: &dyn FontProvider,
     page_index: usize,
     data: Option<&DataContext>,
+    imports: Option<&ImportGraph<'_>>,
 ) -> CompileResult {
     let mut diagnostics: Vec<Diagnostic> = Vec::new();
 
@@ -267,6 +237,10 @@ pub fn compile_page(
     };
     // From here on, compile against the (possibly substituted) document.
     let doc: &Document = owned_doc.as_ref().unwrap_or(doc);
+    let import_scopes = match imports {
+        Some(graph) => imports::ImportScopes::from_graph(graph, &mut diagnostics),
+        None => imports::ImportScopes::disabled(),
+    };
 
     // ── Step 1: resolve tokens ────────────────────────────────────────────
     let token_resolution = resolve_tokens(&doc.tokens);
@@ -526,6 +500,7 @@ pub fn compile_page(
         resolved,
         style_map: &style_map,
         components: &component_map,
+        imports: &import_scopes,
         fonts,
         engine: &engine,
         chains: &chains,
@@ -724,6 +699,7 @@ pub(in crate::compile) fn compile_node(
         resolved,
         style_map,
         components,
+        imports,
         fonts,
         engine,
         chains,
@@ -907,6 +883,7 @@ pub(in crate::compile) fn compile_node(
                     resolved,
                     style_map,
                     components,
+                    imports,
                     fonts,
                     engine,
                     chains,
