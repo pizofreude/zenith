@@ -3,8 +3,12 @@
 //! orientation the routed path leaves/enters through.
 
 use zenith_core::ast::{ConnectorAnchor, parse_connector_anchor};
+use zenith_geometry::{
+    GeometryError, PATH_CONSUMPTION_TOLERANCE, Point2, sample_closed_polyline_perimeter,
+    sample_open_polyline_perimeter, sample_outline_perimeter,
+};
 
-use crate::compile::field::ConnectorTargetKind;
+use crate::compile::field::{ConnectorTargetKind, PathConnectorGeometry};
 
 /// Which edge of a box an anchor sits on, expressed as the orientation the path
 /// must leave/enter through. `Horizontal` = a left/right edge → the path leaves
@@ -16,6 +20,15 @@ use crate::compile::field::ConnectorTargetKind;
 pub(super) enum AnchorSide {
     Horizontal,
     Vertical,
+}
+
+/// Exact outline geometry for divided-anchor sampling on polygon / polyline /
+/// path targets. Named/`auto`/grid anchors ignore this and stay bounds-based.
+#[derive(Clone, Copy)]
+pub(super) enum ExactOutlineRef<'a> {
+    ClosedRing(&'a [Point2]),
+    OpenPolyline(&'a [Point2]),
+    Path(&'a PathConnectorGeometry),
 }
 
 /// Compute the page-absolute anchor point on a `(x, y, w, h)` box, AND the
@@ -34,18 +47,22 @@ pub(super) enum AnchorSide {
 /// by the dominant axis toward `toward` (the OTHER box's center): a larger
 /// horizontal delta picks left/right (`Horizontal`), otherwise top/bottom
 /// (`Vertical`).
+///
+/// Divided anchors (`i/N`) on polygon/polyline/path walk the true outline when
+/// `exact` is present; named/auto/grid always use the bounds box.
 pub(super) fn resolve_anchor(
     boxr: (f64, f64, f64, f64),
     kind: ConnectorTargetKind,
     anchor: &str,
     toward: (f64, f64),
+    exact: Option<ExactOutlineRef<'_>>,
 ) -> ((f64, f64), AnchorSide) {
     let (x, y, w, h) = boxr;
     let cx = x + w / 2.0;
     let cy = y + h / 2.0;
 
     if let Ok(ConnectorAnchor::Divided { index, count }) = parse_connector_anchor(anchor) {
-        return divided_anchor(boxr, kind, index, count);
+        return divided_anchor(boxr, kind, index, count, exact);
     }
 
     if let Some(resolved) = grid_anchor(anchor, boxr) {
@@ -70,21 +87,99 @@ fn divided_anchor(
     kind: ConnectorTargetKind,
     index: usize,
     count: usize,
+    exact: Option<ExactOutlineRef<'_>>,
 ) -> ((f64, f64), AnchorSide) {
     match kind {
-        // `ApproxOutline` (polygon/polyline/path) resolves on the bounds
-        // perimeter EXACTLY like `BoxLike` — the approximation is intentional
-        // and byte-identical to the box fallback.
-        ConnectorTargetKind::BoxLike | ConnectorTargetKind::ApproxOutline => {
-            divided_box_anchor(boxr, index, count)
-        }
+        ConnectorTargetKind::BoxLike => divided_box_anchor(boxr, index, count),
         ConnectorTargetKind::RoundedRect { tl, tr, br, bl } => {
             divided_rounded_rect_anchor(boxr, [tl, tr, br, bl], index, count)
         }
         ConnectorTargetKind::Capsule => divided_capsule_anchor(boxr, index, count),
         ConnectorTargetKind::Diamond => divided_diamond_anchor(boxr, index, count),
         ConnectorTargetKind::Ellipse => divided_ellipse_anchor(boxr, index, count),
+        ConnectorTargetKind::ClosedRing => {
+            if let Some(ExactOutlineRef::ClosedRing(points)) = exact
+                && let Some(pt) = sample_poly_divided(
+                    sample_closed_polyline_perimeter,
+                    points,
+                    index,
+                    count,
+                    boxr,
+                )
+            {
+                return pt;
+            }
+            divided_box_anchor(boxr, index, count)
+        }
+        ConnectorTargetKind::OpenPolyline => {
+            if let Some(ExactOutlineRef::OpenPolyline(points)) = exact
+                && let Some(pt) =
+                    sample_poly_divided(sample_open_polyline_perimeter, points, index, count, boxr)
+            {
+                return pt;
+            }
+            divided_box_anchor(boxr, index, count)
+        }
+        ConnectorTargetKind::PathOutline => {
+            if let Some(ExactOutlineRef::Path(path_geom)) = exact
+                && let Some(pt) = sample_path_divided(path_geom, index, count, boxr)
+            {
+                return pt;
+            }
+            divided_box_anchor(boxr, index, count)
+        }
     }
+}
+
+/// Sample a closed or open polyline perimeter and attach an orthogonal leave
+/// side from the target box center.
+fn sample_poly_divided(
+    sample: fn(&[Point2], usize, usize) -> Result<Point2, GeometryError>,
+    points: &[Point2],
+    index: usize,
+    count: usize,
+    boxr: (f64, f64, f64, f64),
+) -> Option<((f64, f64), AnchorSide)> {
+    let p = sample(points, index, count).ok()?;
+    let center = box_center(boxr);
+    Some(((p.x, p.y), anchor_side_from_center((p.x, p.y), center)))
+}
+
+/// Closed exterior outline when available; otherwise open polyline walk of the
+/// first open flattened contour (open-only paths).
+fn sample_path_divided(
+    path_geom: &PathConnectorGeometry,
+    index: usize,
+    count: usize,
+    boxr: (f64, f64, f64, f64),
+) -> Option<((f64, f64), AnchorSide)> {
+    let center = box_center(boxr);
+    if let Ok(p) = sample_outline_perimeter(
+        &path_geom.geometry,
+        index,
+        count,
+        PATH_CONSUMPTION_TOLERANCE,
+        path_geom.fill_rule,
+    ) {
+        return Some(((p.x, p.y), anchor_side_from_center((p.x, p.y), center)));
+    }
+
+    let flattened = path_geom
+        .geometry
+        .flatten_contours(PATH_CONSUMPTION_TOLERANCE)
+        .ok()?;
+    for contour in flattened {
+        if contour.closed || contour.points.len() < 2 {
+            continue;
+        }
+        let p = sample_open_polyline_perimeter(&contour.points, index, count).ok()?;
+        return Some(((p.x, p.y), anchor_side_from_center((p.x, p.y), center)));
+    }
+    None
+}
+
+fn box_center(boxr: (f64, f64, f64, f64)) -> (f64, f64) {
+    (boxr.0 + boxr.2 / 2.0, boxr.1 + boxr.3 / 2.0)
 }
 
 /// Walk the true rounded-rect perimeter (straight edges + quarter-circle

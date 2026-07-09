@@ -153,7 +153,7 @@ page id="page.cn" w=(px)640 h=(px)360 {
         result.diagnostics
     );
 
-    // Divided anchor on a plain rect + an ellipse: neither is ApproxOutline.
+    // Divided anchor on a plain rect + an ellipse: exact modeled outlines.
     let plain_shapes = r##"zenith version=1 {
   project id="proj.cn" name="CN"
   tokens format="zenith-token-v1" {

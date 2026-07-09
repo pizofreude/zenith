@@ -18,7 +18,9 @@ mod node_boxes;
 mod page_index;
 mod ports;
 
-pub(in crate::compile) use connector_targets::{ConnectorTargetKind, build_connector_targets};
+pub(in crate::compile) use connector_targets::{
+    ConnectorTargetKind, PathConnectorGeometry, build_connector_targets,
+};
 pub(in crate::compile) use live_area::compute_live_area;
 pub(in crate::compile) use node_boxes::build_node_boxes;
 pub(in crate::compile) use page_index::build_page_index_map;

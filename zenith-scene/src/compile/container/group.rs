@@ -4,7 +4,7 @@
 
 use std::collections::BTreeMap;
 
-use zenith_core::{Diagnostic, GroupNode, Node, Point, ResolvedToken, dim_to_px};
+use zenith_core::{Diagnostic, GroupNode, Node, ResolvedToken, dim_to_px};
 
 use crate::ir::SceneCommand;
 
@@ -12,7 +12,7 @@ use super::super::leaf::path_outline_bounds;
 use super::super::paint::{
     NodeEffect, resolve_property_filter, resolve_property_mask, resolve_property_shadow,
 };
-use super::super::util::{blend_mode_ir, resolve_geometry_px, rotation_degrees};
+use super::super::util::{blend_mode_ir, points_bbox, resolve_geometry_px, rotation_degrees};
 use super::super::{NodeCtx, RenderCtx, compile_node};
 use super::wrap::emit_wrapped_container;
 
@@ -365,37 +365,6 @@ fn resolve_group_mask(
     let w = resolve_geometry_px(group.w.as_ref(), cx.resolved)?;
     let h = resolve_geometry_px(group.h.as_ref(), cx.resolved)?;
     resolve_property_mask(prop, cx.resolved, (group_x, group_y, w, h))
-}
-
-/// Compute the axis-aligned bounding box of a `Point` list in authored coords.
-///
-/// Returns `(x_min, y_min, w, h)` in authored (pre-`base_dx`/`base_dy`) space,
-/// or `None` when the list is empty or every point has a missing / unsupported-
-/// unit coordinate.  Used by both the `Polygon` and `Polyline` arms of
-/// [`group_children_center`] to avoid duplicating the accumulation loop.
-fn points_bbox(pts: &[Point]) -> Option<(f64, f64, f64, f64)> {
-    let mut px_min = f64::INFINITY;
-    let mut py_min = f64::INFINITY;
-    let mut px_max = f64::NEG_INFINITY;
-    let mut py_max = f64::NEG_INFINITY;
-    for pt in pts {
-        let (Some(xd), Some(yd)) = (&pt.x, &pt.y) else {
-            continue;
-        };
-        let (Some(px), Some(py)) = (dim_to_px(xd.value, &xd.unit), dim_to_px(yd.value, &yd.unit))
-        else {
-            continue;
-        };
-        px_min = px_min.min(px);
-        py_min = py_min.min(py);
-        px_max = px_max.max(px);
-        py_max = py_max.max(py);
-    }
-    if px_min.is_finite() {
-        Some((px_min, py_min, px_max - px_min, py_max - py_min))
-    } else {
-        None
-    }
 }
 
 /// Compute the device-space center of a group's direct-child union bounding box.

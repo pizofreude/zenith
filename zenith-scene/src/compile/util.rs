@@ -1,14 +1,48 @@
 //! Small pure helpers shared across the scene-compilation submodules:
-//! rotation-angle extraction, unsupported-unit diagnostics, and dimension
-//! property resolution.
+//! point-list bounds, rotation-angle extraction, unsupported-unit diagnostics,
+//! and dimension property resolution.
 
 use std::collections::BTreeMap;
 
 use zenith_core::{
-    Diagnostic, Dimension, PropertyValue, ResolvedToken, ResolvedValue, Span, Unit, dim_to_px,
+    Diagnostic, Dimension, Point, PropertyValue, ResolvedToken, ResolvedValue, Span, Unit,
+    dim_to_px,
 };
 
 use crate::ir::BlendMode;
+
+// ── Point-list bounds ─────────────────────────────────────────────────────────
+
+/// Axis-aligned bounding box `(x_min, y_min, w, h)` of a `Point` list in
+/// authored (local) coordinates.
+///
+/// Skips points whose x/y is missing or uses an unsupported unit. Returns
+/// `None` when no finite point remains. Shared by group child-union bounds and
+/// connector free-form outline boxes so both walks use the same filter.
+pub(super) fn points_bbox(pts: &[Point]) -> Option<(f64, f64, f64, f64)> {
+    let mut px_min = f64::INFINITY;
+    let mut py_min = f64::INFINITY;
+    let mut px_max = f64::NEG_INFINITY;
+    let mut py_max = f64::NEG_INFINITY;
+    for pt in pts {
+        let (Some(xd), Some(yd)) = (&pt.x, &pt.y) else {
+            continue;
+        };
+        let (Some(px), Some(py)) = (dim_to_px(xd.value, &xd.unit), dim_to_px(yd.value, &yd.unit))
+        else {
+            continue;
+        };
+        px_min = px_min.min(px);
+        py_min = py_min.min(py);
+        px_max = px_max.max(px);
+        py_max = py_max.max(py);
+    }
+    if px_min.is_finite() {
+        Some((px_min, py_min, px_max - px_min, py_max - py_min))
+    } else {
+        None
+    }
+}
 
 // ── Rotation helper ───────────────────────────────────────────────────────────
 

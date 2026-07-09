@@ -93,10 +93,11 @@ page id="page.cn" w=(px)640 h=(px)360 {
     );
 }
 
-/// A DIVIDED (`i/N`) anchor on a polygon target warns `connector.unsupported_outline`
-/// (the polygon is `ApproxOutline`); a NAMED anchor on the same polygon does not.
+/// A DIVIDED (`i/N`) anchor on a polygon target no longer warns
+/// `connector.unsupported_outline` (exact closed-ring sampling); a NAMED anchor
+/// on the same polygon also does not warn (bounds semantics, unchanged).
 #[test]
-fn connector_divided_anchor_on_polygon_warns_named_does_not() {
+fn connector_divided_anchor_on_polygon_no_longer_warns_unsupported_outline() {
     let base = |anchor: &str| {
         format!(
             r##"zenith version=1 {{
@@ -123,8 +124,8 @@ page id="page.cn" w=(px)640 h=(px)360 {{
 
     let divided = compile(&parse(&base("1/4")), &default_provider());
     assert!(
-        has_diag(&divided, "connector.unsupported_outline"),
-        "a divided anchor on a polygon must warn; got: {:?}",
+        !has_diag(&divided, "connector.unsupported_outline"),
+        "a divided anchor on a polygon must not warn (exact outline); got: {:?}",
         divided.diagnostics
     );
 

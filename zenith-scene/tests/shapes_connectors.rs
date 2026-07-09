@@ -159,6 +159,8 @@ fn has_diag(result: &zenith_scene::CompileResult, code: &str) -> bool {
 
 #[path = "shapes_connectors/avoid.rs"]
 mod avoid;
+#[path = "shapes_connectors/exact_outline.rs"]
+mod exact_outline;
 #[path = "shapes_connectors/label.rs"]
 mod label;
 #[path = "shapes_connectors/line_jumps.rs"]

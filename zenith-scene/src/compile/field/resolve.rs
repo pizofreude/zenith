@@ -15,11 +15,12 @@
 use std::collections::BTreeMap;
 
 use zenith_core::{FieldNode, Page, TextNode, TextSpan};
+use zenith_geometry::Point2;
 
 use crate::compile::util::px_prop;
 
 use super::folio::format_folio;
-use super::projection::{ConnectorTargetKind, PortTarget};
+use super::projection::{ConnectorTargetKind, PathConnectorGeometry, PortTarget};
 
 /// Per-page context threaded into field resolution.
 ///
@@ -50,15 +51,22 @@ pub(crate) struct FieldCtx<'a> {
     /// on the page has a resolvable box.
     pub(in crate::compile) node_boxes: &'a BTreeMap<String, (f64, f64, f64, f64)>,
     /// This page's node id → connector target shape family. Keys match
-    /// `node_boxes`; connectors use this only for divided anchor perimeter
-    /// resolution.
+    /// `node_boxes` / outline targets; connectors use this for divided anchor
+    /// perimeter resolution.
     pub(in crate::compile) connector_target_kinds: &'a BTreeMap<String, ConnectorTargetKind>,
     /// This page's CONNECTOR-SCOPED outline-box map: node id → ABSOLUTE bounds
     /// rect `(x, y, w, h)` in pixels, for targets whose exact geometry is not a
     /// rectangular `node_boxes` box (polygon/polyline/path). Kept separate from
     /// `node_boxes` so text runaround never gains these entries. Connectors
-    /// consult `node_boxes` first, then this map.
+    /// consult `node_boxes` first, then this map. Named/auto/grid anchors use
+    /// these bounds; divided anchors use the exact geometry maps below.
     pub(in crate::compile) connector_outline_boxes: &'a BTreeMap<String, (f64, f64, f64, f64)>,
+    /// Absolute closed rings for polygon divided-anchor sampling.
+    pub(in crate::compile) connector_closed_rings: &'a BTreeMap<String, Vec<Point2>>,
+    /// Absolute open polylines for polyline divided-anchor sampling.
+    pub(in crate::compile) connector_open_polylines: &'a BTreeMap<String, Vec<Point2>>,
+    /// Absolute path geometry for path divided-anchor sampling.
+    pub(in crate::compile) connector_path_geometries: &'a BTreeMap<String, PathConnectorGeometry>,
     /// This page's node id -> port id -> connector anchor string map. Ports are
     /// page/component metadata used only by connectors that reference `node#port`.
     pub(in crate::compile) port_map: &'a BTreeMap<String, BTreeMap<String, PortTarget>>,
@@ -312,6 +320,9 @@ mod tests {
         let boxes: BTreeMap<String, (f64, f64, f64, f64)> = BTreeMap::new();
         let connector_target_kinds: BTreeMap<String, ConnectorTargetKind> = BTreeMap::new();
         let connector_outline_boxes: BTreeMap<String, (f64, f64, f64, f64)> = BTreeMap::new();
+        let connector_closed_rings: BTreeMap<String, Vec<Point2>> = BTreeMap::new();
+        let connector_open_polylines: BTreeMap<String, Vec<Point2>> = BTreeMap::new();
+        let connector_path_geometries: BTreeMap<String, PathConnectorGeometry> = BTreeMap::new();
         let port_map: BTreeMap<String, BTreeMap<String, PortTarget>> = BTreeMap::new();
         let ctx = FieldCtx {
             page_index_1based: 2,
@@ -323,6 +334,9 @@ mod tests {
             node_boxes: &boxes,
             connector_target_kinds: &connector_target_kinds,
             connector_outline_boxes: &connector_outline_boxes,
+            connector_closed_rings: &connector_closed_rings,
+            connector_open_polylines: &connector_open_polylines,
+            connector_path_geometries: &connector_path_geometries,
             port_map: &port_map,
             total_pages: 5,
             section_page_index: None,
@@ -368,6 +382,21 @@ mod tests {
         EMPTY.get_or_init(BTreeMap::new)
     }
 
+    fn empty_closed_rings() -> &'static BTreeMap<String, Vec<Point2>> {
+        static EMPTY: OnceLock<BTreeMap<String, Vec<Point2>>> = OnceLock::new();
+        EMPTY.get_or_init(BTreeMap::new)
+    }
+
+    fn empty_open_polylines() -> &'static BTreeMap<String, Vec<Point2>> {
+        static EMPTY: OnceLock<BTreeMap<String, Vec<Point2>>> = OnceLock::new();
+        EMPTY.get_or_init(BTreeMap::new)
+    }
+
+    fn empty_path_geometries() -> &'static BTreeMap<String, PathConnectorGeometry> {
+        static EMPTY: OnceLock<BTreeMap<String, PathConnectorGeometry>> = OnceLock::new();
+        EMPTY.get_or_init(BTreeMap::new)
+    }
+
     /// The five section-relative fields, grouped to keep `ctx_with_section`
     /// under the argument-count lint.
     #[derive(Default)]
@@ -396,6 +425,9 @@ mod tests {
             node_boxes: boxes,
             connector_target_kinds: empty_connector_target_kinds(),
             connector_outline_boxes: empty_outline_boxes(),
+            connector_closed_rings: empty_closed_rings(),
+            connector_open_polylines: empty_open_polylines(),
+            connector_path_geometries: empty_path_geometries(),
             port_map: empty_port_map(),
             total_pages: total,
             section_page_index: None,
@@ -603,6 +635,9 @@ mod tests {
             node_boxes: boxes,
             connector_target_kinds: empty_connector_target_kinds(),
             connector_outline_boxes: empty_outline_boxes(),
+            connector_closed_rings: empty_closed_rings(),
+            connector_open_polylines: empty_open_polylines(),
+            connector_path_geometries: empty_path_geometries(),
             port_map: empty_port_map(),
             total_pages: total,
             section_page_index: sec.page_index,

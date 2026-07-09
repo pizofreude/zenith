@@ -1,15 +1,14 @@
 //! The `connector` leaf compiler: resolves both endpoint boxes, routes the
 //! path, and emits the stroke, arrowheads, and optional owned label — surfacing
-//! `connector.anchor_unresolved` and `connector.unsupported_outline` diagnostics
-//! along the way.
+//! `connector.anchor_unresolved` when a target has no geometry.
 
 use std::collections::BTreeMap;
 
-use zenith_core::ast::{ConnectorAnchor, parse_connector_anchor};
 use zenith_core::{ConnectorNode, Diagnostic, FontProvider, ResolvedToken, Style};
+use zenith_geometry::Point2;
 use zenith_layout::RustybuzzEngine;
 
-use crate::compile::field::{ConnectorTargetKind, PortTarget};
+use crate::compile::field::{ConnectorTargetKind, PathConnectorGeometry, PortTarget};
 use crate::ir::{FillRule, Paint, SceneCommand, StrokeAlign};
 
 use super::super::super::RenderCtx;
@@ -20,7 +19,7 @@ use super::super::super::style_prop;
 use super::super::super::util::{resolve_property_dimension_px, rotation_degrees};
 use super::super::poly::flat_points_centroid_center;
 use super::super::routing;
-use super::anchor::resolve_anchor;
+use super::anchor::{ExactOutlineRef, resolve_anchor};
 use super::label::emit_connector_label;
 use super::route::{
     arrowhead_points, loop_side, orthogonal_route, outward_dir, point_at, self_loop_path,
@@ -51,9 +50,16 @@ pub(in crate::compile) struct ConnectorEnv<'a> {
     pub(in crate::compile) node_boxes: &'a BTreeMap<String, (f64, f64, f64, f64)>,
     /// CONNECTOR-SCOPED outline-box fallback: node id → ABSOLUTE bounds rect for
     /// polygon/polyline/path targets not present in `node_boxes`. Consulted only
-    /// after `node_boxes` misses (see [`endpoint_box`]).
+    /// after `node_boxes` misses (see [`endpoint_box`]). Named/auto/grid anchors
+    /// resolve against these bounds.
     pub(in crate::compile) connector_outline_boxes: &'a BTreeMap<String, (f64, f64, f64, f64)>,
     pub(in crate::compile) connector_target_kinds: &'a BTreeMap<String, ConnectorTargetKind>,
+    /// Absolute closed rings for polygon divided anchors.
+    pub(in crate::compile) connector_closed_rings: &'a BTreeMap<String, Vec<Point2>>,
+    /// Absolute open polylines for polyline divided anchors.
+    pub(in crate::compile) connector_open_polylines: &'a BTreeMap<String, Vec<Point2>>,
+    /// Absolute path geometry for path divided anchors.
+    pub(in crate::compile) connector_path_geometries: &'a BTreeMap<String, PathConnectorGeometry>,
     pub(in crate::compile) port_map: &'a BTreeMap<String, BTreeMap<String, PortTarget>>,
     pub(in crate::compile) anchors: &'a AnchorMap,
     pub(in crate::compile) ctx: RenderCtx,
@@ -80,41 +86,6 @@ fn endpoint_target<'a>(
         return (endpoint_node_id, explicit_anchor);
     };
     (target.node_id.as_str(), target.anchor.as_str())
-}
-
-/// Emit `connector.unsupported_outline` (Warning) when a **divided** (`i/N`)
-/// anchor targets a node whose exact outline is not modeled — a
-/// polygon/polyline/path ([`ConnectorTargetKind::ApproxOutline`]).
-/// Rounded rects walk the true perimeter; `shape kind="process"` is BoxLike.
-/// Named/`auto` anchors on ApproxOutline shapes are the intended bounds
-/// semantics and do NOT warn.
-fn warn_unsupported_outline(
-    connector: &ConnectorNode,
-    label: &str,
-    node_id: &str,
-    anchor: &str,
-    kind: ConnectorTargetKind,
-    diagnostics: &mut Vec<Diagnostic>,
-) {
-    if kind != ConnectorTargetKind::ApproxOutline {
-        return;
-    }
-    if !matches!(
-        parse_connector_anchor(anchor),
-        Ok(ConnectorAnchor::Divided { .. })
-    ) {
-        return;
-    }
-    diagnostics.push(Diagnostic::warning(
-        "connector.unsupported_outline",
-        format!(
-            "connector '{}': {label}-anchor '{anchor}' is a divided anchor on node '{node_id}', \
-             whose exact outline is not modeled; approximating on the bounds perimeter",
-            connector.id
-        ),
-        connector.source_span,
-        Some(connector.id.clone()),
-    ));
 }
 
 /// Compile a `connector` leaf node — a semantic arrow whose endpoints are
@@ -148,6 +119,9 @@ pub(in crate::compile) fn compile_connector(
         node_boxes,
         connector_outline_boxes,
         connector_target_kinds,
+        connector_closed_rings,
+        connector_open_polylines,
+        connector_path_geometries,
         port_map,
         ctx,
         ..
@@ -210,22 +184,25 @@ pub(in crate::compile) fn compile_connector(
         .copied()
         .unwrap_or(ConnectorTargetKind::BoxLike);
 
-    // A divided anchor on a node whose true outline is not modeled falls back to
-    // the bounds perimeter — surface that approximation as a Warning (named/auto
-    // anchors on the same shapes are the intended bounds semantics, no warning).
-    warn_unsupported_outline(
-        connector,
-        "from",
-        from_id,
-        from_anchor,
-        from_kind,
-        diagnostics,
-    );
-    warn_unsupported_outline(connector, "to", to_id, to_anchor, to_kind, diagnostics);
-
     // Resolve anchors: each end aims toward the OTHER box's center for "auto".
-    let (f_pt, f_side) = resolve_anchor(from_box, from_kind, from_anchor, to_center);
-    let (t_pt, t_side) = resolve_anchor(to_box, to_kind, to_anchor, from_center);
+    // Divided anchors on polygon/polyline/path use exact outline geometry when
+    // collected; named/auto/grid stay bounds-based (outline_boxes / node_boxes).
+    let from_exact = exact_outline_for(
+        from_id,
+        from_kind,
+        connector_closed_rings,
+        connector_open_polylines,
+        connector_path_geometries,
+    );
+    let to_exact = exact_outline_for(
+        to_id,
+        to_kind,
+        connector_closed_rings,
+        connector_open_polylines,
+        connector_path_geometries,
+    );
+    let (f_pt, f_side) = resolve_anchor(from_box, from_kind, from_anchor, to_center, from_exact);
+    let (t_pt, t_side) = resolve_anchor(to_box, to_kind, to_anchor, from_center, to_exact);
 
     // A self-loop (`from` and `to` name the same node) cannot be a line between
     // two distinct points — it routes as a small rectangular loop off one edge of
@@ -371,6 +348,31 @@ fn endpoint_box<'a>(
     node_boxes
         .get(node_id)
         .or_else(|| connector_outline_boxes.get(node_id))
+}
+
+/// Look up exact outline geometry for divided-anchor sampling on free-form
+/// vector targets. Named/auto resolution ignores this.
+fn exact_outline_for<'a>(
+    node_id: &str,
+    kind: ConnectorTargetKind,
+    closed_rings: &'a BTreeMap<String, Vec<Point2>>,
+    open_polylines: &'a BTreeMap<String, Vec<Point2>>,
+    path_geometries: &'a BTreeMap<String, PathConnectorGeometry>,
+) -> Option<ExactOutlineRef<'a>> {
+    match kind {
+        ConnectorTargetKind::ClosedRing => closed_rings
+            .get(node_id)
+            .map(|pts| ExactOutlineRef::ClosedRing(pts.as_slice())),
+        ConnectorTargetKind::OpenPolyline => open_polylines
+            .get(node_id)
+            .map(|pts| ExactOutlineRef::OpenPolyline(pts.as_slice())),
+        ConnectorTargetKind::PathOutline => path_geometries.get(node_id).map(ExactOutlineRef::Path),
+        ConnectorTargetKind::BoxLike
+        | ConnectorTargetKind::Capsule
+        | ConnectorTargetKind::Diamond
+        | ConnectorTargetKind::Ellipse
+        | ConnectorTargetKind::RoundedRect { .. } => None,
+    }
 }
 
 /// Emit a `connector.anchor_unresolved` (Error) for an endpoint whose target box
