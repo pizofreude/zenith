@@ -23,9 +23,9 @@ use geometry::{
     CoverageShape, RectPx, Rotation, group_offset, local_box, path_bounds, polygon_region, text_box,
 };
 use props::{
-    candidate_has_effect, clip_bounds, container_is_unmodeled, leaf_rotation, node_opacity,
-    node_rotate_deg, node_visible, rect_coverage_shape, resolve_color_property, resolve_font_size,
-    resolve_font_weight, style_property,
+    candidate_has_effect, clip_bounds, container_is_unmodeled, leaf_rotation, node_rotate_deg,
+    rect_coverage_shape, resolve_color_property, resolve_font_size, resolve_font_weight,
+    style_property,
 };
 
 /// Below this APCA magnitude the text is effectively painted into its backdrop,
@@ -130,7 +130,7 @@ fn walk_paint(
     diagnostics: &mut Vec<Diagnostic>,
 ) {
     for node in children {
-        if !node_visible(node) {
+        if !node.is_visible() {
             continue;
         }
         match node {
@@ -284,7 +284,7 @@ fn push_point_backdrop(
     candidates: &mut Vec<BackdropCandidate>,
     env: ContrastEnv<'_>,
 ) {
-    let opacity = ctx.opacity * node_opacity(node).unwrap_or(1.0);
+    let opacity = ctx.opacity * node.opacity().unwrap_or(1.0);
     let Some(paint) = resolve_fill_paint(
         fill,
         style.as_deref(),
@@ -326,7 +326,7 @@ fn push_path_backdrop(
     // Bezier coverage is not modeled, so we advertise its bounding box as an
     // unsampled region rather than approximating it as a solid fill (which would
     // over-cover) or ignoring it (which would silently pass invisible text).
-    let opacity = ctx.opacity * node_opacity(node).unwrap_or(1.0);
+    let opacity = ctx.opacity * node.opacity().unwrap_or(1.0);
     if resolve_fill_paint(
         &path.fill,
         path.style.as_deref(),
@@ -365,7 +365,7 @@ fn push_backdrop(
     candidates: &mut Vec<BackdropCandidate>,
     env: ContrastEnv<'_>,
 ) {
-    let opacity = ctx.opacity * node_opacity(node).unwrap_or(1.0);
+    let opacity = ctx.opacity * node.opacity().unwrap_or(1.0);
     let Some(paint) = resolve_fill_paint(
         fill,
         style.as_deref(),
@@ -406,7 +406,7 @@ fn push_image_backdrop(
     candidates: &mut Vec<BackdropCandidate>,
     env: ContrastEnv<'_>,
 ) {
-    if ctx.opacity * node_opacity(node).unwrap_or(1.0) < MIN_PAINT_ALPHA {
+    if ctx.opacity * node.opacity().unwrap_or(1.0) < MIN_PAINT_ALPHA {
         return;
     }
     let Some(bounds) = absolute_box(node, ctx, env.resolved_tokens) else {

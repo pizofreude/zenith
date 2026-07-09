@@ -4,6 +4,7 @@
 //! submodules and re-exported flat here so the crate's public surface
 //! (`zenith_core::RectNode`, `ast::node::Anchor`, …) is unchanged.
 
+mod accessors;
 mod anchor;
 mod common;
 mod container;

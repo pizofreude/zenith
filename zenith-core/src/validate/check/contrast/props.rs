@@ -12,44 +12,6 @@ use crate::tokens::{ResolvedToken, ResolvedValue};
 
 use super::geometry::{CoverageShape, RectPx, Rotation, resolve_axis_px};
 
-macro_rules! node_option_field {
-    ($node:expr, $field:ident) => {
-        match $node {
-            Node::Rect(n) => n.$field,
-            Node::Ellipse(n) => n.$field,
-            Node::Image(n) => n.$field,
-            Node::Shape(n) => n.$field,
-            Node::Frame(n) => n.$field,
-            Node::Group(n) => n.$field,
-            Node::Text(n) => n.$field,
-            Node::Line(n) => n.$field,
-            Node::Code(n) => n.$field,
-            Node::Polygon(n) => n.$field,
-            Node::Polyline(n) => n.$field,
-            Node::Path(n) => n.$field,
-            Node::Instance(n) => n.$field,
-            Node::Field(n) => n.$field,
-            Node::Footnote(_) => None,
-            Node::Toc(n) => n.$field,
-            Node::Connector(n) => n.$field,
-            Node::Pattern(n) => n.$field,
-            Node::Chart(n) => n.$field,
-            Node::Light(n) => n.$field,
-            Node::Mesh(n) => n.$field,
-            Node::Table(n) => n.$field,
-            Node::Unknown(_) => None,
-        }
-    };
-}
-
-pub(super) fn node_opacity(node: &Node) -> Option<f64> {
-    node_option_field!(node, opacity)
-}
-
-pub(super) fn node_visible(node: &Node) -> bool {
-    node_option_field!(node, visible).unwrap_or(true)
-}
-
 /// The rotation angle (degrees) a leaf/container declares, or `None` when there
 /// is no non-zero rotation. Read directly as the scene compiler does.
 pub(super) fn node_rotate_deg(node: &Node) -> Option<f64> {

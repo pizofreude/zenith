@@ -38,7 +38,7 @@ use crate::ast::document::{Document, Page};
 use crate::ast::value::dim_to_px;
 use crate::diagnostics::Diagnostic;
 
-use super::nodes::{node_bbox, node_id_and_span, node_role};
+use super::nodes::node_bbox;
 
 /// Fully-resolved book live-area rectangle in pixels: `(x, y, w, h)`.
 struct LiveArea {
@@ -147,7 +147,7 @@ pub(super) fn check_margins(
 
     for node in &page.children {
         // Guides intentionally live in the margins; exempt them.
-        if node_role(node) == Some("guide") {
+        if node.role() == Some("guide") {
             continue;
         }
         let Some((nx, ny, nw, nh)) = node_bbox(node, page_w, page_h) else {
@@ -173,7 +173,7 @@ pub(super) fn check_margins(
             continue;
         }
 
-        let (node_id, node_span) = node_id_and_span(node);
+        let (node_id, node_span) = node.id_and_span();
         diagnostics.push(Diagnostic::advisory(
             "margin.violation",
             format!(

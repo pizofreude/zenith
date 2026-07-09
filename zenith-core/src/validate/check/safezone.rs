@@ -15,7 +15,7 @@ use crate::ast::document::{Page, SafeZone, SafeZoneType};
 use crate::ast::value::dim_to_px;
 use crate::diagnostics::Diagnostic;
 
-use super::nodes::{node_bbox, node_id_and_span};
+use super::nodes::node_bbox;
 
 /// Resolve a zone's authored rect to pixels.
 ///
@@ -68,7 +68,7 @@ pub(super) fn check_safe_zones(
             }
 
             let overlaps = intersects(node_rect, zone_rect);
-            let (node_id, node_span) = node_id_and_span(node);
+            let (node_id, node_span) = node.id_and_span();
 
             match zone.zone_type {
                 SafeZoneType::Exclusion => {

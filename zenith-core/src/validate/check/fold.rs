@@ -15,7 +15,7 @@ use crate::ast::document::{Fold, Page};
 use crate::ast::value::dim_to_px;
 use crate::diagnostics::Diagnostic;
 
-use super::nodes::{node_bbox, node_id_and_span};
+use super::nodes::node_bbox;
 
 /// Resolve a fold's authored position to pixels.
 ///
@@ -55,7 +55,7 @@ pub(super) fn check_folds(
             };
 
             if crosses {
-                let (node_id, node_span) = node_id_and_span(node);
+                let (node_id, node_span) = node.id_and_span();
                 let axis = if is_horizontal {
                     "horizontal"
                 } else {

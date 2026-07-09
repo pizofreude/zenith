@@ -18,9 +18,7 @@ use node::shared::{node_rotate_deg, pv_to_dim, resolve_axis};
 
 mod node;
 
-pub(super) use node::shared::{
-    AnchorParentCtx, check_sibling_anchors, node_bbox, node_id_and_span, node_role,
-};
+pub(super) use node::shared::{AnchorParentCtx, check_sibling_anchors, node_bbox};
 
 /// Walk-wide immutable validation context (never changes during a page walk).
 #[derive(Clone, Copy)]
@@ -89,7 +87,7 @@ pub(super) fn walk_node(
         let over_right = nx + nw > fx + fw + EPSILON;
         let over_bottom = ny + nh > fy + fh + EPSILON;
         if over_left || over_top || over_right || over_bottom {
-            let (node_id, node_span) = node_id_and_span(node);
+            let (node_id, node_span) = node.id_and_span();
             diagnostics.push(Diagnostic::advisory(
                 "frame.child_overflow",
                 format!(
@@ -159,7 +157,7 @@ pub(super) fn walk_node(
         };
 
         if ax < 0.0 || ay < 0.0 || ax + aw > page_w || ay + ah > page_h {
-            let (node_id, node_span) = node_id_and_span(node);
+            let (node_id, node_span) = node.id_and_span();
             diagnostics.push(Diagnostic::advisory(
                 "layout.off_canvas",
                 format!(

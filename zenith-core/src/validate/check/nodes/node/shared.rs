@@ -17,9 +17,7 @@ pub(in crate::validate::check) use anchor::{
 pub(in crate::validate::check) use dims::{
     TokenEnv, check_dimension_geom, check_optional_dim, pv_to_dim,
 };
-pub(in crate::validate::check) use geometry::{
-    node_bbox, node_id_and_span, node_role, node_rotate_deg, resolve_axis,
-};
+pub(in crate::validate::check) use geometry::{node_bbox, node_rotate_deg, resolve_axis};
 pub(in crate::validate::check) use style::{
     VisualProps, check_font_alternates, check_font_features, check_spans, check_stroke_join_props,
     check_stroke_linecap_prop, check_style_ref, check_visual_props, is_valid_blend_mode,
