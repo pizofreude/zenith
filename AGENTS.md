@@ -8,13 +8,18 @@ contributors and AI agents alike. Read it before making changes.
 Zenith is a Rust workspace (`edition = "2024"`). Each crate owns one concern and exposes a
 stable contract; `zenith-core` depends on no other Zenith crate.
 
-- `zenith-core/` — KDL parser adapter, semantic AST, canonical formatter, tokens, validation, the full diagnostic set.
-- `zenith-layout/` — text shaping & font metrics (`rustybuzz` + `ttf-parser`); all third-party types confined here.
-- `zenith-scene/` — backend-neutral scene IR and compilation (geometry, text wrap, anchors, opacity/clip).
+- `zenith-core/` — KDL parser adapter, semantic AST, canonical formatter, tokens, validation, the full diagnostic set. Depends on no other Zenith crate.
+- `zenith-geometry/` — pure geometry (paths, contours, booleans). C-free; used by layout, scene, and tx.
+- `zenith-layout/` — text shaping & font metrics (`rustybuzz` + `ttf-parser`); all third-party shaping types confined here.
+- `zenith-raster/` — raster surface, blend modes, adjustments used by perception and render.
+- `zenith-perception/` — visual QA / perception reports over geometry + raster.
+- `zenith-scene/` — backend-neutral scene IR and compilation (geometry, text wrap, anchors, opacity/clip, text outlines).
 - `zenith-render/` — CPU PNG backend (tiny-skia) and vector PDF backend; raster-time determinism rules.
-- `zenith-tx/` — transaction op set, apply/dry-run engine, diffs, audit-record contract.
+- `zenith-tx/` — transaction op set, apply/dry-run engine, diffs, audit-record contract. Pure AST; no scene/layout dependency.
 - `zenith-session/` — local doc identity (ULID), ephemeral session DAG, durable content-addressed version store. Never on the render path.
-- `zenith-cli/` — the `zenith` binary: command dispatch, clap parsing, JSON/human output. `src/main.rs` is thin; logic lives in `src/lib.rs` and `src/commands/`.
+- `zenith-zpx/` — packaged design export (manifest + bake).
+- `zenith-producers/` — higher-level produce/export helpers (SVG native, ZPX bake).
+- `zenith-cli/` — the `zenith` binary (crate package name `zenith-tool`): command dispatch, clap, JSON/human output, MCP. `src/main.rs` is thin; logic lives in `src/lib.rs` and `src/commands/`.
 - `examples/` — runnable `.zen` documents (keep them valid against the current parser).
 - `assets/` — bundled fonts (`assets/fonts/`) and embedded library presets (`assets/libraries/`). **Committed.**
 - `conformance/` — regenerable rendered proof of simulation scenarios. **Gitignored**; never stage it.
