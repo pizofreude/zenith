@@ -184,6 +184,57 @@ fn color_literal(color: Color) -> String {
     }
 }
 
+/// Compile every page of `doc` and collect outline paths for `source_node_id`.
+///
+/// Returns path nodes (unpainted — callers apply source fill/stroke) plus any
+/// compile diagnostics. Outline conversion errors map to a single
+/// `scene.text_outline_failed` error and an empty path list.
+///
+/// Callers that only want outlines for an eligible text/code node should
+/// validate the source **before** calling this (see
+/// `zenith_tx::check_text_outline_source`) so wrong-kind targets do not pay
+/// multi-page compile cost.
+pub fn collect_text_outline_paths(
+    doc: &zenith_core::Document,
+    fonts: &dyn FontProvider,
+    source_node_id: &str,
+    id_prefix: &str,
+) -> (Vec<PathNode>, Vec<zenith_core::Diagnostic>) {
+    use crate::compile::compile_page;
+    use zenith_core::Diagnostic;
+
+    /// Keep in sync with `zenith_tx::SCENE_TEXT_OUTLINE_FAILED`.
+    const SCENE_TEXT_OUTLINE_FAILED: &str = "scene.text_outline_failed";
+
+    let mut paths = Vec::new();
+    let mut diagnostics = Vec::new();
+    for page_index in 0..doc.body.pages.len() {
+        let result = compile_page(doc, fonts, page_index, None);
+        diagnostics.extend(result.diagnostics);
+        match outline_source_glyph_run_commands(
+            source_node_id,
+            id_prefix,
+            &result.scene.commands,
+            fonts,
+        ) {
+            Ok(mut page_paths) => paths.append(&mut page_paths),
+            Err(error) => {
+                diagnostics.push(Diagnostic::error(
+                    SCENE_TEXT_OUTLINE_FAILED,
+                    format!(
+                        "text outline materialization for node '{source_node_id}' failed: {}",
+                        error.message
+                    ),
+                    None,
+                    Some(source_node_id.to_owned()),
+                ));
+                return (Vec::new(), diagnostics);
+            }
+        }
+    }
+    (paths, diagnostics)
+}
+
 #[cfg(test)]
 mod tests {
     use zenith_core::{FontStyle, default_provider};

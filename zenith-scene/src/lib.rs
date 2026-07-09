@@ -50,5 +50,6 @@ pub use ir::{
     ShadowSpec, SrcRect, StrokeAlign, SvgStyle,
 };
 pub use text_outline::{
-    outline_glyph_run_command, outline_glyph_run_commands, outline_source_glyph_run_commands,
+    collect_text_outline_paths, outline_glyph_run_command, outline_glyph_run_commands,
+    outline_source_glyph_run_commands,
 };
