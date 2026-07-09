@@ -1,6 +1,12 @@
 use std::collections::BTreeMap;
 
-use crate::ast::node::{Node, Point, TextNode, anchor_xy, parse_anchor};
+use zenith_geometry::{
+    CompoundFillRule, CompoundPathGeometry, PATH_CONSUMPTION_TOLERANCE,
+    PathAnchor as GeomPathAnchor, PathGeometry, Point2, PointLocation, compound_path_fill_bounds,
+    locate_point_in_compound_path,
+};
+
+use crate::ast::node::{Node, PathNode, Point, TextNode, anchor_xy, parse_anchor};
 use crate::ast::value::{Dimension, PropertyValue, Unit, dim_to_px};
 use crate::tokens::{ResolvedToken, ResolvedValue};
 
@@ -76,6 +82,12 @@ pub(super) enum CoverageShape {
     Diamond,
     Capsule,
     Polygon(Vec<(f64, f64)>),
+    /// Exact filled region of a compound `path` (fill-rule aware). Bounds on the
+    /// candidate are extrema-aware closed-contour fill bounds for early reject.
+    PathFill {
+        geometry: CompoundPathGeometry,
+        rule: CompoundFillRule,
+    },
 }
 
 /// A rigid rotation of a candidate about a fixed center, in degrees. The
@@ -112,8 +124,26 @@ impl CoverageShape {
             CoverageShape::Diamond => point_in_diamond(bounds, x, y),
             CoverageShape::Capsule => point_in_capsule(bounds, x, y),
             CoverageShape::Polygon(points) => point_in_polygon(points, x, y),
+            CoverageShape::PathFill { geometry, rule } => {
+                path_fill_contains_point(geometry, *rule, x, y)
+            }
         }
     }
+}
+
+fn path_fill_contains_point(
+    geometry: &CompoundPathGeometry,
+    rule: CompoundFillRule,
+    x: f64,
+    y: f64,
+) -> bool {
+    let Ok(point) = Point2::new(x, y) else {
+        return false;
+    };
+    matches!(
+        locate_point_in_compound_path(geometry, point, rule, PATH_CONSUMPTION_TOLERANCE),
+        Ok(PointLocation::Inside | PointLocation::Boundary)
+    )
 }
 
 /// Exact rounded-rectangle containment. Assumes the point is already inside
@@ -276,33 +306,97 @@ pub(super) fn polygon_region(
     Some((bounds, CoverageShape::Polygon(resolved)))
 }
 
-/// Axis-aligned bounding box of a `path` node's anchor points, in absolute page
-/// pixels. Anchor coordinates are resolved against the page size (percent-aware)
-/// and shifted by the ancestor translation `(dx, dy)`. Bezier handles are
-/// ignored — the box may under-cover a curve that bows outside its anchors, but
-/// path fills are treated as an indeterminate backdrop anyway.
-pub(super) fn path_bounds(
-    anchors: &[(Option<Dimension>, Option<Dimension>)],
+/// Exact fill region of a `path` for contrast backdrop coverage.
+///
+/// Builds absolute-page [`CompoundPathGeometry`] from `path.effective_subpaths()`,
+/// resolves anchor/handle dimensions with percent-aware page axes and the
+/// ancestor translation `(dx, dy)`, and returns extrema-aware closed-fill bounds
+/// plus a [`CoverageShape::PathFill`].
+///
+/// Returns `None` when geometry is undecidable (mixed partial coordinates),
+/// open/stroke-only (no closed contour), or bounds cannot be computed.
+pub(super) fn path_fill_region(
+    path: &PathNode,
     dx: f64,
     dy: f64,
     page_size: (f64, f64),
-) -> Option<RectPx> {
-    let mut resolved = Vec::with_capacity(anchors.len());
-    for (ax, ay) in anchors {
-        let x = ax
-            .as_ref()
-            .and_then(|dim| resolve_dim_axis(dim, page_size.0))?
-            + dx;
-        let y = ay
-            .as_ref()
-            .and_then(|dim| resolve_dim_axis(dim, page_size.1))?
-            + dy;
-        resolved.push((x, y));
+) -> Option<(RectPx, CoverageShape)> {
+    let mut contours = Vec::new();
+    for sub in path.effective_subpaths() {
+        let closed = sub.closed.unwrap_or(false);
+        let mut anchors = Vec::with_capacity(sub.anchors.len());
+        for anchor in sub.anchors {
+            let point = resolve_abs_point(anchor.x.as_ref(), anchor.y.as_ref(), dx, dy, page_size)?;
+            let in_handle = resolve_optional_abs_point(
+                anchor.in_x.as_ref(),
+                anchor.in_y.as_ref(),
+                dx,
+                dy,
+                page_size,
+            )?;
+            let out_handle = resolve_optional_abs_point(
+                anchor.out_x.as_ref(),
+                anchor.out_y.as_ref(),
+                dx,
+                dy,
+                page_size,
+            )?;
+            let geom_anchor = GeomPathAnchor::new(point, in_handle, out_handle).ok()?;
+            anchors.push(geom_anchor);
+        }
+        let contour = PathGeometry::new(anchors, closed).ok()?;
+        contours.push(contour);
     }
-    if resolved.is_empty() {
-        return None;
+
+    let geometry = CompoundPathGeometry::new(contours);
+    let rule = match path.fill_rule.as_deref() {
+        Some("evenodd") => CompoundFillRule::EvenOdd,
+        Some(_) | None => CompoundFillRule::NonZero,
+    };
+
+    let fill_bounds = match compound_path_fill_bounds(&geometry, PATH_CONSUMPTION_TOLERANCE) {
+        Ok(Some(bounds)) => bounds,
+        Ok(None) | Err(_) => return None,
+    };
+
+    let bounds = RectPx {
+        x: fill_bounds.min_x,
+        y: fill_bounds.min_y,
+        w: fill_bounds.width(),
+        h: fill_bounds.height(),
+    };
+    Some((bounds, CoverageShape::PathFill { geometry, rule }))
+}
+
+/// Resolve a required absolute point: both axes must be present.
+fn resolve_abs_point(
+    x: Option<&Dimension>,
+    y: Option<&Dimension>,
+    dx: f64,
+    dy: f64,
+    page_size: (f64, f64),
+) -> Option<Point2> {
+    let x = resolve_dim_axis(x?, page_size.0)? + dx;
+    let y = resolve_dim_axis(y?, page_size.1)? + dy;
+    Point2::new(x, y).ok()
+}
+
+/// Resolve an optional handle point.
+///
+/// Both axes present → absolute point; both absent → `None` handle; mixed →
+/// undecidable (`None` for the whole path region).
+fn resolve_optional_abs_point(
+    x: Option<&Dimension>,
+    y: Option<&Dimension>,
+    dx: f64,
+    dy: f64,
+    page_size: (f64, f64),
+) -> Option<Option<Point2>> {
+    match (x, y) {
+        (None, None) => Some(None),
+        (Some(_), Some(_)) => Some(Some(resolve_abs_point(x, y, dx, dy, page_size)?)),
+        (Some(_), None) | (None, Some(_)) => None,
     }
-    polygon_bounds(&resolved)
 }
 
 fn resolve_dim_axis(dim: &Dimension, basis: f64) -> Option<f64> {

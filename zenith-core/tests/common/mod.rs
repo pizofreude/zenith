@@ -22,11 +22,11 @@ pub use zenith_core::{
     ActionDef, AnchorKind, AssetBlock, AssetDecl, AssetKind, BrandContract, CodeNode,
     ConnectorNode, ConstructionBlock, Dimension, Document, DocumentBody, EllipseNode, FieldNode,
     FrameNode, GroupNode, ImageNode, LibraryDef, LineNode, MasterDef, Node, Page, PathAnchor,
-    PathNode, Point, PolygonNode, PolylineNode, PropertyValue, ProtectedRegion, ProvenanceDef,
-    RecipeDef, RecipeParam, RectNode, SafeZone, SafeZoneType, SectionDef, Severity, ShapeNode,
-    Style, StyleBlock, TableCell, TableColumn, TableNode, TableRow, TextNode, TextSpan, TocNode,
-    Token, TokenBlock, TokenLiteral, TokenType, TokenValue, Unit, UnknownNode, UnknownStyleProp,
-    ValidationReport, VariantDef, VariantOverride, validate,
+    PathNode, PathSubpath, Point, PolygonNode, PolylineNode, PropertyValue, ProtectedRegion,
+    ProvenanceDef, RecipeDef, RecipeParam, RectNode, SafeZone, SafeZoneType, SectionDef, Severity,
+    ShapeNode, Style, StyleBlock, TableCell, TableColumn, TableNode, TableRow, TextNode, TextSpan,
+    TocNode, Token, TokenBlock, TokenLiteral, TokenType, TokenValue, Unit, UnknownNode,
+    UnknownStyleProp, ValidationReport, VariantDef, VariantOverride, validate,
 };
 pub use zenith_core::{KdlAdapter, KdlSource};
 

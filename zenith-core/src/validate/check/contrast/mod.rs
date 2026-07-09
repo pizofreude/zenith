@@ -14,13 +14,14 @@ use crate::ast::node::{
     ImageNode, Node, PathNode, PolygonNode, PolylineNode, ShapeNode, TableNode, TextNode,
 };
 use crate::ast::style::Style;
-use crate::ast::value::{Dimension, PropertyValue};
+use crate::ast::value::PropertyValue;
 use crate::color::{apca_lc, parse_rgb};
 use crate::diagnostics::Diagnostic;
 use crate::tokens::{ResolvedToken, ResolvedValue};
 
 use geometry::{
-    CoverageShape, RectPx, Rotation, group_offset, local_box, path_bounds, polygon_region, text_box,
+    CoverageShape, RectPx, Rotation, group_offset, local_box, path_fill_region, polygon_region,
+    text_box,
 };
 use props::{
     candidate_has_effect, clip_bounds, container_is_unmodeled, leaf_rotation, node_rotate_deg,
@@ -322,36 +323,34 @@ fn push_path_backdrop(
     candidates: &mut Vec<BackdropCandidate>,
     env: ContrastEnv<'_>,
 ) {
-    // A `path` fill is only ever a conservative INDETERMINATE backdrop: its exact
-    // Bezier coverage is not modeled, so we advertise its bounding box as an
-    // unsampled region rather than approximating it as a solid fill (which would
-    // over-cover) or ignoring it (which would silently pass invisible text).
+    // Solid path fills resolve exact compound fill coverage (doc 24 Unit 2).
+    // Open / stroke-only / undecidable geometry is not a plate; unmodeled
+    // ancestor transforms still force Indeterminate paint with exact shape.
     let opacity = ctx.opacity * node.opacity().unwrap_or(1.0);
-    if resolve_fill_paint(
+    let Some(paint) = resolve_fill_paint(
         &path.fill,
         path.style.as_deref(),
         env.style_map,
         env.resolved_tokens,
         opacity,
-    )
-    .is_none()
-    {
-        return;
-    }
-    let anchors: Vec<(Option<Dimension>, Option<Dimension>)> = path
-        .effective_subpaths()
-        .flat_map(|sub| sub.anchors.iter())
-        .map(|a| (a.x.clone(), a.y.clone()))
-        .collect();
-    let Some(bounds) = path_bounds(&anchors, ctx.dx, ctx.dy, ctx.page_size) else {
+    ) else {
         return;
     };
+    let Some((bounds, shape)) = path_fill_region(path, ctx.dx, ctx.dy, ctx.page_size) else {
+        return;
+    };
+    let paint = if ctx.unmodeled {
+        BackdropPaint::Indeterminate
+    } else {
+        paint
+    };
+    let rotation = leaf_rotation(node, bounds);
     if let Some(bounds) = clip_bounds(ctx.clip, bounds) {
         candidates.push(BackdropCandidate {
-            paint: BackdropPaint::Indeterminate,
+            paint,
             bounds,
-            shape: CoverageShape::Rect,
-            rotation: None,
+            shape,
+            rotation,
         });
     }
 }
@@ -476,7 +475,7 @@ fn check_text_node(
             diagnostics.push(Diagnostic::advisory(
                 "contrast.indeterminate_backdrop",
                 format!(
-                    "text '{}': its backdrop includes an unsampled paint (image, path, or a rotated/masked/blurred/blended fill) and cannot be sampled during validation; add a contrast-bg hint",
+                    "text '{}': its backdrop includes an unsampled paint (image, or a rotated/masked/blurred/blended fill) and cannot be sampled during validation; add a contrast-bg hint",
                     text.id
                 ),
                 text.source_span,

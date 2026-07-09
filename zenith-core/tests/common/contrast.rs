@@ -672,9 +672,9 @@ pub fn rotated_group(id: &str, x: f64, y: f64, deg: f64, children: Vec<Node>) ->
     Node::Group(group)
 }
 
-/// A filled `path` whose anchors trace the rectangle (x,y,w,h).
-pub fn path_box_backdrop(id: &str, fill_token: &str, x: f64, y: f64, w: f64, h: f64) -> Node {
-    let corner = |px_x: f64, px_y: f64| PathAnchor {
+/// Corner-style path anchor at absolute page pixels (no Bezier handles).
+pub fn path_corner(px_x: f64, px_y: f64) -> PathAnchor {
+    PathAnchor {
         x: Some(px(px_x)),
         y: Some(px(px_y)),
         kind: None,
@@ -682,7 +682,32 @@ pub fn path_box_backdrop(id: &str, fill_token: &str, x: f64, y: f64, w: f64, h: 
         in_y: None,
         out_x: None,
         out_y: None,
-    };
+    }
+}
+
+/// Four corner anchors for an axis-aligned rectangle in page pixels.
+pub fn path_rect_anchors(x: f64, y: f64, w: f64, h: f64) -> Vec<PathAnchor> {
+    vec![
+        path_corner(x, y),
+        path_corner(x + w, y),
+        path_corner(x + w, y + h),
+        path_corner(x, y + h),
+    ]
+}
+
+/// A filled `path` whose anchors trace the rectangle (x,y,w,h).
+pub fn path_box_backdrop(id: &str, fill_token: &str, x: f64, y: f64, w: f64, h: f64) -> Node {
+    path_closed_backdrop(id, fill_token, None, path_rect_anchors(x, y, w, h))
+}
+
+/// A filled closed `path` with an explicit fill-rule and anchor list (legacy
+/// single-contour form).
+pub fn path_closed_backdrop(
+    id: &str,
+    fill_token: &str,
+    fill_rule: Option<&str>,
+    anchors: Vec<PathAnchor>,
+) -> Node {
     Node::Path(PathNode {
         id: id.to_owned(),
         name: None,
@@ -695,19 +720,57 @@ pub fn path_box_backdrop(id: &str, fill_token: &str, x: f64, y: f64, w: f64, h: 
         stroke_linejoin: None,
         stroke_linecap: None,
         stroke_miter_limit: None,
-        fill_rule: None,
+        fill_rule: fill_rule.map(|s| s.to_owned()),
         opacity: None,
         visible: None,
         locked: None,
         rotate: None,
         style: None,
-        anchors: vec![
-            corner(x, y),
-            corner(x + w, y),
-            corner(x + w, y + h),
-            corner(x, y + h),
-        ],
+        anchors,
         subpaths: Vec::new(),
+        source_span: None,
+        unknown_props: BTreeMap::new(),
+    })
+}
+
+/// Evenodd compound path: outer closed contour with an inner hole contour.
+pub fn path_evenodd_hole_backdrop(
+    id: &str,
+    fill_token: &str,
+    outer: (f64, f64, f64, f64),
+    hole: (f64, f64, f64, f64),
+) -> Node {
+    let (ox, oy, ow, oh) = outer;
+    let (hx, hy, hw, hh) = hole;
+    Node::Path(PathNode {
+        id: id.to_owned(),
+        name: None,
+        role: None,
+        closed: None,
+        fill: Some(PropertyValue::TokenRef(fill_token.to_owned())),
+        stroke: None,
+        stroke_width: None,
+        stroke_alignment: None,
+        stroke_linejoin: None,
+        stroke_linecap: None,
+        stroke_miter_limit: None,
+        fill_rule: Some("evenodd".to_owned()),
+        opacity: None,
+        visible: None,
+        locked: None,
+        rotate: None,
+        style: None,
+        anchors: Vec::new(),
+        subpaths: vec![
+            PathSubpath {
+                closed: Some(true),
+                anchors: path_rect_anchors(ox, oy, ow, oh),
+            },
+            PathSubpath {
+                closed: Some(true),
+                anchors: path_rect_anchors(hx, hy, hw, hh),
+            },
+        ],
         source_span: None,
         unknown_props: BTreeMap::new(),
     })

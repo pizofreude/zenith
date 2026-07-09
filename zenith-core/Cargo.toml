@@ -21,6 +21,9 @@ serde = { version = "1", features = ["derive"] }
 # NO new crate to the graph. Used to read family/weight/style from local/system
 # font files during the local-font scan.
 ttf-parser = "0.25"
+# Pure geometry (C-free). Used by contrast path-fill containment — exact
+# compound fill locate + extrema-aware bounds (doc 24 Unit 2).
+zenith-geometry = { workspace = true }
 
 [lints]
 workspace = true

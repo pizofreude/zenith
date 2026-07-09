@@ -339,10 +339,12 @@ fn unrotated_group_backdrop_still_samples() {
     );
 }
 
-// ── Item 2d: path fills → indeterminate ────────────────────────────────
+// ── Item 2d: path fills → exact solid coverage (doc 24 Unit 2) ─────────
 
 #[test]
-fn path_fill_backdrop_is_indeterminate() {
+fn path_fill_backdrop_samples_solid_paint() {
+    // Solid closed path fill covering the text: black-on-navy must resolve
+    // real paint (invisible), not indeterminate bbox coverage.
     let doc = backdrop_over_text_doc(path_box_backdrop(
         "backdrop",
         "color.backdrop",
@@ -353,13 +355,100 @@ fn path_fill_backdrop_is_indeterminate() {
     ));
     let report = validate(&doc);
     assert!(
-        has_code(&report, "contrast.indeterminate_backdrop"),
-        "a filled path backdrop must be indeterminate rather than a clean pass; codes: {:?}",
+        has_code(&report, "contrast.invisible"),
+        "a solid path fill covering the text must sample real paint; codes: {:?}",
         codes(&report)
     );
     assert!(
+        !has_code(&report, "contrast.indeterminate_backdrop"),
+        "a solid path fill is not indeterminate; codes: {:?}",
+        codes(&report)
+    );
+}
+
+#[test]
+fn monogram_on_path_fill_flags_invisible_not_indeterminate() {
+    // Logo monogram plate: navy path under black monogram text.
+    let doc = backdrop_over_text_doc(path_box_backdrop(
+        "logo.mark",
+        "color.backdrop",
+        100.0,
+        100.0,
+        240.0,
+        120.0,
+    ));
+    let report = validate(&doc);
+    assert!(
+        has_code(&report, "contrast.invisible") || has_code(&report, "contrast.low"),
+        "monogram on path fill must see the path paint; codes: {:?}",
+        codes(&report)
+    );
+    assert!(
+        !has_code(&report, "contrast.indeterminate_backdrop"),
+        "monogram on solid path fill must not be indeterminate; codes: {:?}",
+        codes(&report)
+    );
+}
+
+#[test]
+fn text_in_path_aabb_outside_fill_uses_page_bg() {
+    // Right triangle covering the lower-left of the AABB; text sits in the
+    // upper-right corner (inside the anchor hull, outside the filled region).
+    // A bbox-only path candidate would falsely cover the text with navy.
+    let triangle = path_closed_backdrop(
+        "backdrop",
+        "color.backdrop",
+        None,
+        vec![
+            path_corner(100.0, 100.0),
+            path_corner(100.0, 220.0),
+            path_corner(340.0, 220.0),
+        ],
+    );
+    let doc = doc_with(
+        base_contrast_tokens(),
+        vec![page_with_bg(
+            "page.one",
+            "color.page",
+            vec![
+                triangle,
+                // Upper-right of the AABB (100..340, 100..220); outside the triangle.
+                text_at("headline", "color.text", 260.0, 110.0, 60.0, 24.0),
+            ],
+        )],
+    );
+    let report = validate(&doc);
+    assert!(
         !has_code(&report, "contrast.invisible"),
-        "a path backdrop must not assert invisible; codes: {:?}",
+        "text outside the path fill must not inherit path paint; codes: {:?}",
+        codes(&report)
+    );
+    assert!(
+        !has_code(&report, "contrast.indeterminate_backdrop"),
+        "outside-fill sample is page bg, not indeterminate; codes: {:?}",
+        codes(&report)
+    );
+}
+
+#[test]
+fn evenodd_hole_text_not_covered_by_path_fill() {
+    // Outer navy plate with evenodd hole over the text sample box — samples
+    // land in the hole and must see the white page, not the path fill.
+    let doc = backdrop_over_text_doc(path_evenodd_hole_backdrop(
+        "backdrop",
+        "color.backdrop",
+        (80.0, 80.0, 280.0, 160.0),
+        (120.0, 120.0, 100.0, 50.0),
+    ));
+    let report = validate(&doc);
+    assert!(
+        !has_code(&report, "contrast.invisible"),
+        "text in an evenodd hole must not see the path fill; codes: {:?}",
+        codes(&report)
+    );
+    assert!(
+        !has_code(&report, "contrast.indeterminate_backdrop"),
+        "evenodd hole sample is page bg, not indeterminate; codes: {:?}",
         codes(&report)
     );
 }

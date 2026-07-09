@@ -3,7 +3,8 @@
 //! Owns the KDL-v2 parser adapter, semantic AST types, canonical formatter,
 //! token types and resolution, validation engine with the full diagnostic set,
 //! AST-based migrations, and deterministic font and asset resolution.
-//! No other Zenith crate is a dependency.
+//! Pure geometry (`zenith-geometry`) is the only other Zenith dependency —
+//! used for exact path-fill contrast containment.
 
 pub mod asset;
 pub mod ast;
