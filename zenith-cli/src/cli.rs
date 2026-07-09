@@ -629,11 +629,24 @@ pub struct OutlineTextArgs {
 }
 
 /// Arguments for `zenith inspect`.
+///
+/// Default form: `zenith inspect <doc.zen> [--node ID] [--json]`.
+/// Path form: `zenith inspect path <doc.zen> <node-id> [--json] [--craft]`.
 #[derive(Debug, Args)]
-#[command(after_help = "EXAMPLE:\n  zenith inspect poster.zen --node hero --json")]
+#[command(
+    subcommand_negates_reqs = true,
+    subcommand_precedence_over_arg = true,
+    args_conflicts_with_subcommands = true,
+    after_help = "EXAMPLES:\n  zenith inspect poster.zen --node hero --json\n  \
+zenith inspect path logo.zen mark --json\n  \
+zenith inspect path logo.zen mark --craft --json"
+)]
 pub struct InspectArgs {
-    /// Path to the `.zen` document.
-    pub path: PathBuf,
+    /// Path to the `.zen` document (required unless a subcommand is used).
+    ///
+    /// Arg id is `doc` so it does not collide with the `path` subcommand name.
+    #[arg(id = "doc", required = true, value_name = "PATH")]
+    pub path: Option<PathBuf>,
 
     /// Inspect only the subtree rooted at this node id.
     #[arg(long, value_name = "ID")]
@@ -642,6 +655,41 @@ pub struct InspectArgs {
     /// Emit machine-readable JSON instead of a human-readable tree.
     #[arg(long)]
     pub json: bool,
+
+    /// Optional inspect subcommand (`path`, …).
+    #[command(subcommand)]
+    pub command: Option<InspectSub>,
+}
+
+/// Subcommands of `zenith inspect`.
+#[derive(Debug, Subcommand)]
+pub enum InspectSub {
+    /// Inspect path topology, bounds, and optional craft for one path node.
+    ///
+    /// Reports subpath/anchor/segment counts, fill-rule, extrema-aware bounds,
+    /// and closed-only fill bounds. Use `--craft` to attach perception craft
+    /// scores and diagnostic codes. Read-only; does not mutate the document.
+    Path(InspectPathArgs),
+}
+
+/// Arguments for `zenith inspect path`.
+#[derive(Debug, Args)]
+#[command(after_help = "EXAMPLE:\n  zenith inspect path logo.zen mark --json --craft")]
+pub struct InspectPathArgs {
+    /// Path to the `.zen` document.
+    pub path: PathBuf,
+
+    /// Id of the path node to inspect.
+    #[arg(value_name = "NODE_ID")]
+    pub node_id: String,
+
+    /// Emit machine-readable JSON (`zenith-inspect-path-v1`).
+    #[arg(long)]
+    pub json: bool,
+
+    /// Include perception craft scores and diagnostic codes.
+    #[arg(long)]
+    pub craft: bool,
 }
 
 /// Arguments for `zenith merge`.

@@ -128,22 +128,49 @@ pub fn run() -> ExitCode {
 
         Command::Render(args) => render::dispatch_render(args),
 
-        Command::Inspect(args) => {
-            let src = match read_file(&args.path) {
-                Ok(s) => s,
-                Err(msg) => return fail(msg, 2),
-            };
-            match commands::inspect::run(&src, args.node.as_deref(), args.json) {
-                Ok(out) => {
-                    println!("{}", out);
-                    ExitCode::SUCCESS
-                }
-                Err(e) => {
-                    eprintln!("{}", e.message);
-                    ExitCode::from(e.exit_code)
+        Command::Inspect(args) => match args.command {
+            Some(cli::InspectSub::Path(path_args)) => {
+                let src = match read_file(&path_args.path) {
+                    Ok(s) => s,
+                    Err(msg) => return fail(msg, 2),
+                };
+                match commands::inspect::path::run(
+                    &src,
+                    &path_args.node_id,
+                    path_args.json,
+                    path_args.craft,
+                ) {
+                    Ok(out) => {
+                        println!("{}", out);
+                        ExitCode::SUCCESS
+                    }
+                    Err(e) => {
+                        eprintln!("{}", e.message);
+                        ExitCode::from(e.exit_code)
+                    }
                 }
             }
-        }
+            None => {
+                let path = match args.path.as_ref() {
+                    Some(p) => p,
+                    None => return fail("error: missing document path", 2),
+                };
+                let src = match read_file(path) {
+                    Ok(s) => s,
+                    Err(msg) => return fail(msg, 2),
+                };
+                match commands::inspect::run(&src, args.node.as_deref(), args.json) {
+                    Ok(out) => {
+                        println!("{}", out);
+                        ExitCode::SUCCESS
+                    }
+                    Err(e) => {
+                        eprintln!("{}", e.message);
+                        ExitCode::from(e.exit_code)
+                    }
+                }
+            }
+        },
 
         Command::Perceive(args) => match args.command {
             cli::PerceiveSub::Vector { path, nodes } => {

@@ -27,6 +27,7 @@ path = "src/main.rs"
 
 [dependencies]
 zenith-core = { workspace = true }
+zenith-geometry = { workspace = true }
 zenith-layout = { workspace = true }
 zenith-tx = { workspace = true }
 zenith-scene = { workspace = true }
