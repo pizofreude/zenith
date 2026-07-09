@@ -147,7 +147,7 @@ fn ancestor_winding_number(
         .sum()
 }
 
-const fn winding_delta(winding: ClosedPolylineWinding) -> i32 {
+pub(crate) const fn winding_delta(winding: ClosedPolylineWinding) -> i32 {
     match winding {
         ClosedPolylineWinding::Clockwise => -1,
         ClosedPolylineWinding::CounterClockwise => 1,

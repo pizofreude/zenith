@@ -16,6 +16,7 @@ pub mod intersection;
 pub mod offset;
 pub mod outline;
 pub mod path;
+pub mod path_consumption;
 pub mod point;
 pub mod polyline;
 pub mod transform;
@@ -72,6 +73,10 @@ pub use outline::{
 };
 pub use path::{
     PathAnchor, PathGeometry, PathJoinVectors, PathProjection, PathSegment, PathTopology,
+};
+pub use path_consumption::{
+    PATH_CONSUMPTION_TOLERANCE, compound_path_fill_bounds, locate_point_in_compound_path,
+    sample_closed_polyline_perimeter, sample_open_polyline_perimeter, sample_outline_perimeter,
 };
 pub use point::{Point2, SegmentProjection};
 pub use polyline::{PolylineProjection, project_onto_polyline, simplify_polyline};

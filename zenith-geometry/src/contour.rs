@@ -391,7 +391,7 @@ fn shared_vertex(points: &[Point2], first_index: usize, second_index: usize) -> 
     }
 }
 
-fn bounds_for(points: &[Point2]) -> Result<RectBounds, GeometryError> {
+pub(crate) fn bounds_for(points: &[Point2]) -> Result<RectBounds, GeometryError> {
     let first = points
         .first()
         .copied()
@@ -403,7 +403,7 @@ fn bounds_for(points: &[Point2]) -> Result<RectBounds, GeometryError> {
     Ok(bounds)
 }
 
-fn signed_area_for(points: &[Point2]) -> Result<f64, GeometryError> {
+pub(crate) fn signed_area_for(points: &[Point2]) -> Result<f64, GeometryError> {
     let mut doubled_area = 0.0;
     for index in 0..points.len() {
         let Some((start, end)) = segment_points(points, index) else {
@@ -423,7 +423,7 @@ fn signed_area_for(points: &[Point2]) -> Result<f64, GeometryError> {
     }
 }
 
-fn segment_points(points: &[Point2], index: usize) -> Option<(Point2, Point2)> {
+pub(crate) fn segment_points(points: &[Point2], index: usize) -> Option<(Point2, Point2)> {
     let start = points.get(index).copied()?;
     let next_index = if index + 1 == points.len() {
         0
