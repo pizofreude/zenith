@@ -1,22 +1,32 @@
-//! Local/system font discovery for the CLI.
+//! Font discovery and read-only OpenType craft inspection for the CLI.
 //!
-//! Enumerates the per-OS directories where the operating system keeps installed
-//! fonts. This OS-specific path enumeration lives in the CLI — NOT in
-//! `zenith-core` — so the core stays free of machine-specific assumptions: it
-//! only ever reads font files from a directory list the caller hands it.
+//! - `list` enumerates bundled + local/system families (same discovery as render).
+//! - `features` / `alternates` resolve a face and expose GSUB/GPOS table data
+//!   via [`zenith_layout::list_layout_features`] /
+//!   [`zenith_layout::list_glyph_alternates`].
 //!
-//! The render path uses these dirs as a LAST-RESORT font source: a face found
-//! here is registered with `FontSource::Local` and trips a `font.local`
-//! advisory, because output that depends on a machine-local font is not
-//! guaranteed deterministic across machines.
+//! OS-specific font-directory enumeration lives here — NOT in `zenith-core` —
+//! so the core stays free of machine-specific assumptions.
 
 use std::collections::BTreeMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
-use zenith_core::{FontProvider, default_provider, scan_font_dirs};
+use zenith_core::{
+    AssetKind, BytesFontProvider, FontProvider, FontSource, FontStyle, KdlAdapter, KdlSource,
+    default_provider, scan_font_dirs,
+};
+use zenith_layout::{FeatureList, GlyphAlternates, list_glyph_alternates, list_layout_features};
 
 use crate::commands::serialize_pretty;
-use crate::json_types::FontsOutput;
+use crate::json_types::{
+    FontsAlternatesOutput, FontsFeatureEntry, FontsFeaturesOutput, FontsOutput,
+};
+
+const FEATURES_SCHEMA: &str = "zenith-fonts-features-v1";
+const ALTERNATES_SCHEMA: &str = "zenith-fonts-alternates-v1";
+
+// ── list ──────────────────────────────────────────────────────────────────────
 
 /// List available fonts in two sections: bundled (portable) and local (this
 /// machine only).
@@ -104,6 +114,322 @@ another machine and trip a `font.local` advisory."
     }
 }
 
+// ── features / alternates ─────────────────────────────────────────────────────
+
+/// `zenith fonts features <target>`.
+///
+/// Returns `(output, exit_code)`. Exit 2 on resolution/parse errors.
+pub fn features(
+    target: &str,
+    weight: u16,
+    style: &str,
+    doc: Option<&Path>,
+    json: bool,
+) -> (String, u8) {
+    let style_enum = match parse_style(style) {
+        Ok(s) => s,
+        Err(msg) => return (msg, 2),
+    };
+    let resolved = match resolve_target(target, weight, style_enum, doc) {
+        Ok(r) => r,
+        Err(msg) => return (msg, 2),
+    };
+    let list = match list_layout_features(&resolved.bytes, resolved.face_index) {
+        Ok(l) => l,
+        Err(e) => return (format!("error[font.parse]: {e}"), 2),
+    };
+
+    let style_label = style_str(style_enum);
+    if json {
+        let out = FontsFeaturesOutput {
+            schema: FEATURES_SCHEMA,
+            target: resolved.label,
+            weight: resolved.weight,
+            style: style_label,
+            has_kern_table: list.has_kern_table,
+            features: list
+                .features
+                .into_iter()
+                .map(|f| FontsFeatureEntry {
+                    tag: f.tag,
+                    tables: f.tables,
+                })
+                .collect(),
+        };
+        (serialize_pretty(&out), 0)
+    } else {
+        (
+            render_features_human(&resolved.label, resolved.weight, style_label, &list),
+            0,
+        )
+    }
+}
+
+/// `zenith fonts alternates <target> [--char …]`.
+///
+/// Returns `(output, exit_code)`. Exit 2 on resolution/parse errors.
+pub fn alternates(
+    target: &str,
+    char_arg: &str,
+    weight: u16,
+    style: &str,
+    doc: Option<&Path>,
+    json: bool,
+) -> (String, u8) {
+    let style_enum = match parse_style(style) {
+        Ok(s) => s,
+        Err(msg) => return (msg, 2),
+    };
+    let ch = match parse_char_arg(char_arg) {
+        Ok(c) => c,
+        Err(msg) => return (msg, 2),
+    };
+    let resolved = match resolve_target(target, weight, style_enum, doc) {
+        Ok(r) => r,
+        Err(msg) => return (msg, 2),
+    };
+    let alts = match list_glyph_alternates(&resolved.bytes, resolved.face_index, ch) {
+        Ok(a) => a,
+        Err(e) => return (format!("error[font.parse]: {e}"), 2),
+    };
+
+    let style_label = style_str(style_enum);
+    let codepoint = format!("U+{:04X}", u32::from(ch));
+    if json {
+        let out = FontsAlternatesOutput {
+            schema: ALTERNATES_SCHEMA,
+            target: resolved.label,
+            weight: resolved.weight,
+            style: style_label,
+            char: ch.to_string(),
+            codepoint,
+            glyph_index: alts.glyph_index,
+            alternate_glyph_ids: alts.alternate_glyph_ids,
+            limits: alts.limits,
+        };
+        (serialize_pretty(&out), 0)
+    } else {
+        (
+            render_alternates_human(&resolved.label, resolved.weight, style_label, &alts),
+            0,
+        )
+    }
+}
+
+// ── target resolution ─────────────────────────────────────────────────────────
+
+struct ResolvedFace {
+    bytes: Arc<[u8]>,
+    face_index: u32,
+    /// Display label: family name or path string.
+    label: String,
+    /// Effective weight used for family resolution (or metadata weight for paths).
+    weight: u16,
+}
+
+/// Resolve `target` as a `.ttf`/`.otf` path, else as a font family.
+///
+/// Family resolution uses [`default_provider`] plus project fonts when `doc` is
+/// set. Local/system fonts are not scanned here.
+fn resolve_target(
+    target: &str,
+    weight: u16,
+    style: FontStyle,
+    doc: Option<&Path>,
+) -> Result<ResolvedFace, String> {
+    if is_font_file_target(target) {
+        let path = Path::new(target);
+        let bytes = std::fs::read(path).map_err(|e| {
+            format!(
+                "error[font.missing]: could not read font file '{}': {e}",
+                path.display()
+            )
+        })?;
+        // Prefer metadata weight when available; fall back to the requested weight.
+        let meta_weight = zenith_layout::face_metadata(&bytes, 0)
+            .map(|m| m.weight)
+            .unwrap_or(weight);
+        return Ok(ResolvedFace {
+            bytes: Arc::from(bytes),
+            face_index: 0,
+            label: target.to_owned(),
+            weight: meta_weight,
+        });
+    }
+
+    let provider = build_family_provider(doc)?;
+    let families = [target.to_owned()];
+    let face = provider.resolve(&families, weight, style).ok_or_else(|| {
+        format!(
+            "error[font.unresolved]: no face for family '{target}' \
+(weight={weight}, style={}); use a bundled family, a .ttf/.otf path, \
+or --doc with a project font asset",
+            style_str(style)
+        )
+    })?;
+
+    Ok(ResolvedFace {
+        bytes: face.bytes,
+        face_index: face.index,
+        label: target.to_owned(),
+        weight,
+    })
+}
+
+fn build_family_provider(doc: Option<&Path>) -> Result<BytesFontProvider, String> {
+    let mut provider = default_provider();
+    if let Some(path) = doc {
+        register_doc_project_fonts(&mut provider, path)?;
+    }
+    Ok(provider)
+}
+
+/// Register `font`-kind assets from a document into `provider` as project faces.
+fn register_doc_project_fonts(
+    provider: &mut BytesFontProvider,
+    doc_path: &Path,
+) -> Result<(), String> {
+    let src = std::fs::read_to_string(doc_path).map_err(|e| {
+        format!(
+            "error[io]: could not read document '{}': {e}",
+            doc_path.display()
+        )
+    })?;
+    let doc = KdlAdapter
+        .parse(src.as_bytes())
+        .map_err(|e| format!("error[parse.error]: {}", e.message))?;
+    let dir = doc_path.parent().unwrap_or_else(|| Path::new("."));
+
+    for decl in &doc.assets.assets {
+        if decl.kind != AssetKind::Font {
+            continue;
+        }
+        let path = dir.join(&decl.src);
+        let bytes = match std::fs::read(&path) {
+            Ok(b) => b,
+            Err(_) => continue,
+        };
+        if let Ok(meta) = zenith_layout::face_metadata(&bytes, 0) {
+            provider.register(
+                &meta.family,
+                meta.weight,
+                meta.style,
+                Arc::from(bytes),
+                0,
+                FontSource::Project,
+            );
+        }
+    }
+    Ok(())
+}
+
+fn is_font_file_target(target: &str) -> bool {
+    let lower = target.to_ascii_lowercase();
+    lower.ends_with(".ttf") || lower.ends_with(".otf")
+}
+
+fn parse_style(style: &str) -> Result<FontStyle, String> {
+    match style {
+        "normal" => Ok(FontStyle::Normal),
+        "italic" => Ok(FontStyle::Italic),
+        other => Err(format!(
+            "error[arg]: invalid --style '{other}'; expected normal or italic"
+        )),
+    }
+}
+
+fn style_str(style: FontStyle) -> &'static str {
+    match style {
+        FontStyle::Normal => "normal",
+        FontStyle::Italic => "italic",
+    }
+}
+
+/// Parse `--char U+0041` or a single scalar like `A`.
+fn parse_char_arg(s: &str) -> Result<char, String> {
+    let trimmed = s.trim();
+    if let Some(hex) = trimmed
+        .strip_prefix("U+")
+        .or_else(|| trimmed.strip_prefix("u+"))
+    {
+        if hex.is_empty() {
+            return Err("error[arg]: --char U+ form requires hex digits (e.g. U+0041)".to_owned());
+        }
+        let cp = u32::from_str_radix(hex, 16).map_err(|_| {
+            format!("error[arg]: invalid --char codepoint 'U+{hex}'; expected hex digits")
+        })?;
+        return char::from_u32(cp).ok_or_else(|| {
+            format!("error[arg]: --char U+{hex:0>4} is not a valid Unicode scalar value")
+        });
+    }
+
+    let mut chars = trimmed.chars();
+    match (chars.next(), chars.next()) {
+        (Some(c), None) => Ok(c),
+        (None, _) => Err("error[arg]: --char must not be empty".to_owned()),
+        (Some(_), Some(_)) => Err(format!(
+            "error[arg]: --char '{trimmed}' must be a single character or U+XXXX form"
+        )),
+    }
+}
+
+// ── human rendering ───────────────────────────────────────────────────────────
+
+fn render_features_human(target: &str, weight: u16, style: &str, list: &FeatureList) -> String {
+    let mut lines = Vec::new();
+    lines.push(format!("Font features — {target} ({weight}, {style})"));
+    lines.push("────────────────────────────────────────".to_owned());
+    lines.push(format!(
+        "Classic kern table: {}",
+        if list.has_kern_table { "yes" } else { "no" }
+    ));
+    if list.features.is_empty() {
+        lines.push("Features: (none)".to_owned());
+    } else {
+        lines.push(format!("Features ({}):", list.features.len()));
+        for entry in &list.features {
+            let tables = entry.tables.join("+");
+            lines.push(format!("  {:4}  [{}]", entry.tag, tables));
+        }
+    }
+    lines.join("\n")
+}
+
+fn render_alternates_human(
+    target: &str,
+    weight: u16,
+    style: &str,
+    alts: &GlyphAlternates,
+) -> String {
+    let mut lines = Vec::new();
+    let cp = format!("U+{:04X}", u32::from(alts.codepoint));
+    lines.push(format!(
+        "Font alternates — {target} ({weight}, {style}) char={} ({cp})",
+        alts.codepoint
+    ));
+    lines.push("────────────────────────────────────────".to_owned());
+    match alts.glyph_index {
+        Some(gid) => lines.push(format!("Glyph index: {gid}")),
+        None => lines.push("Glyph index: (not in cmap)".to_owned()),
+    }
+    if alts.alternate_glyph_ids.is_empty() {
+        lines.push("Alternate glyph IDs: (none)".to_owned());
+    } else {
+        lines.push(format!(
+            "Alternate glyph IDs ({}):",
+            alts.alternate_glyph_ids.len()
+        ));
+        for gid in &alts.alternate_glyph_ids {
+            lines.push(format!("  {gid}"));
+        }
+    }
+    lines.push(String::new());
+    lines.push(format!("Limits: {}", alts.limits));
+    lines.join("\n")
+}
+
+// ── OS font dirs ──────────────────────────────────────────────────────────────
+
 /// Resolve `$HOME` as a [`PathBuf`].
 ///
 /// Mirrors the pattern used by the plugin-paths module: `var_os` returns `None`
@@ -168,6 +494,8 @@ pub fn os_font_dirs() -> Vec<PathBuf> {
     Vec::new()
 }
 
+// ── Tests ─────────────────────────────────────────────────────────────────────
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -225,5 +553,79 @@ mod tests {
             parsed["local"].is_array(),
             "'local' key must be present and be an array"
         );
+    }
+
+    #[test]
+    fn features_json_for_bundled_family() {
+        let (output, code) = features("Noto Sans", 400, "normal", None, true);
+        assert_eq!(code, 0, "features must succeed: {output}");
+        let parsed: serde_json::Value =
+            serde_json::from_str(&output).expect("features --json must be valid JSON");
+        assert_eq!(parsed["schema"], FEATURES_SCHEMA);
+        assert_eq!(parsed["target"], "Noto Sans");
+        assert_eq!(parsed["weight"], 400);
+        assert_eq!(parsed["style"], "normal");
+        assert!(parsed["has_kern_table"].is_boolean());
+        assert!(parsed["features"].is_array(), "features must be an array");
+    }
+
+    #[test]
+    fn features_unresolved_family_exits_2() {
+        let (output, code) = features("DefinitelyNotARealFontFamilyXYZ", 400, "normal", None, true);
+        assert_eq!(code, 2);
+        assert!(
+            output.contains("font.unresolved"),
+            "expected unresolved error, got: {output}"
+        );
+    }
+
+    #[test]
+    fn alternates_json_for_bundled_family() {
+        let (output, code) = alternates("Noto Sans", "A", 400, "normal", None, true);
+        assert_eq!(code, 0, "alternates must succeed: {output}");
+        let parsed: serde_json::Value =
+            serde_json::from_str(&output).expect("alternates --json must be valid JSON");
+        assert_eq!(parsed["schema"], ALTERNATES_SCHEMA);
+        assert_eq!(parsed["char"], "A");
+        assert_eq!(parsed["codepoint"], "U+0041");
+        assert!(parsed["glyph_index"].is_number() || parsed["glyph_index"].is_null());
+        assert!(parsed["alternate_glyph_ids"].is_array());
+        assert!(
+            parsed["limits"]
+                .as_str()
+                .is_some_and(|s| s.contains("AlternateSubstitution")),
+            "limits must mention AlternateSubstitution"
+        );
+    }
+
+    #[test]
+    fn parse_char_accepts_u_plus_and_scalar() {
+        assert_eq!(parse_char_arg("A").unwrap(), 'A');
+        assert_eq!(parse_char_arg("U+0041").unwrap(), 'A');
+        assert_eq!(parse_char_arg("u+0041").unwrap(), 'A');
+        assert_eq!(parse_char_arg("U+1F600").unwrap(), '😀');
+        assert!(parse_char_arg("AB").is_err());
+        assert!(parse_char_arg("U+").is_err());
+        assert!(parse_char_arg("U+ZZZZ").is_err());
+    }
+
+    #[test]
+    fn is_font_file_target_detects_extensions() {
+        assert!(is_font_file_target("Foo.ttf"));
+        assert!(is_font_file_target("/path/Bar.OTF"));
+        assert!(!is_font_file_target("Noto Sans"));
+        assert!(!is_font_file_target("something.ttc"));
+    }
+
+    #[test]
+    fn features_from_ttf_path() {
+        let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../zenith-core/assets/fonts/NotoSans-Regular.ttf");
+        let path_str = path.to_string_lossy();
+        let (output, code) = features(&path_str, 400, "normal", None, true);
+        assert_eq!(code, 0, "path features must succeed: {output}");
+        let parsed: serde_json::Value = serde_json::from_str(&output).expect("json");
+        assert_eq!(parsed["schema"], FEATURES_SCHEMA);
+        assert!(parsed["features"].is_array());
     }
 }

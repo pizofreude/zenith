@@ -220,9 +220,9 @@ pub enum Command {
     /// (requires the `http` build feature).
     Mcp(McpArgs),
 
-    /// List fonts available to the renderer — bundled (portable) and local/system.
+    /// List fonts available to the renderer, or inspect OpenType features/alternates.
     ///
-    /// Discovers fonts in two clearly-separated sections:
+    /// Bare `zenith fonts` discovers fonts in two clearly-separated sections:
     ///
     ///   Bundled (portable) — fonts shipped in the binary. Using these keeps
     ///   renders byte-identical across machines.
@@ -231,12 +231,19 @@ pub enum Command {
     ///   Using these is NOT portable: renders may differ on another machine,
     ///   and they trip a `font.local` advisory.
     ///
+    /// Subcommands:
+    ///   `features <target>` — GSUB/GPOS feature tags for a family or .ttf/.otf
+    ///   `alternates <target>` — GSUB AlternateSubstitution glyphs for one char
+    ///
     /// Uses the same discovery code as the renderer so there is no drift.
     /// Scanning reads every system font file on disk, so the command may take a
     /// moment on machines with many fonts installed (similar to `fc-list`).
     #[command(after_help = "EXAMPLES:\n  \
-zenith fonts            # human-readable, two-section listing\n  \
-zenith fonts --json     # machine-readable JSON ({ \"schema\": \"zenith-fonts-v1\", ... })")]
+zenith fonts                              # human-readable, two-section listing\n  \
+zenith fonts --json                       # machine-readable JSON (zenith-fonts-v1)\n  \
+zenith fonts features \"Noto Sans\" --json  # GSUB/GPOS feature tags\n  \
+zenith fonts alternates \"Noto Sans\" --char A --json\n  \
+zenith fonts features ./MyFont.ttf")]
     Fonts(FontsArgs),
 
     /// Describe the Zenith document schema (node kinds, attributes, tx ops, and non-node surfaces).
@@ -548,11 +555,98 @@ pub struct FmtArgs {
 }
 
 /// Arguments for `zenith fonts`.
+///
+/// Default form: `zenith fonts [--json]` lists bundled + local families.
+/// Subcommands: `features`, `alternates`.
 #[derive(Debug, Args)]
+#[command(args_conflicts_with_subcommands = true)]
 pub struct FontsArgs {
     /// Emit machine-readable JSON instead of a human-readable listing.
+    ///
+    /// Applies to bare `zenith fonts` only; subcommands take their own `--json`.
     #[arg(long)]
     pub json: bool,
+
+    /// Optional fonts subcommand (`features`, `alternates`).
+    #[command(subcommand)]
+    pub command: Option<FontsSub>,
+}
+
+/// Subcommands of `zenith fonts`.
+#[derive(Debug, Subcommand)]
+pub enum FontsSub {
+    /// List OpenType layout feature tags (GSUB/GPOS) for a face.
+    ///
+    /// Resolves `<target>` as a `.ttf`/`.otf` path, otherwise as a font family
+    /// via the bundled default provider (plus project fonts when `--doc` is set).
+    /// Read-only table exposure — does not change shaping or authoring.
+    Features(FontsFeaturesArgs),
+
+    /// List GSUB AlternateSubstitution glyphs for one character on a face.
+    ///
+    /// Only lookup type 3 (`AlternateSubstitution`) is enumerated; other
+    /// substitution kinds and feature-tag binding are reported as limits, not
+    /// invented. Read-only.
+    Alternates(FontsAlternatesArgs),
+}
+
+/// Arguments for `zenith fonts features`.
+#[derive(Debug, Args)]
+#[command(after_help = "EXAMPLES:\n  \
+zenith fonts features \"Noto Sans\"\n  \
+zenith fonts features \"Noto Sans\" --json --weight 700 --style italic\n  \
+zenith fonts features ./Brand.otf --json\n  \
+zenith fonts features Oswald --doc poster.zen --json")]
+pub struct FontsFeaturesArgs {
+    /// Font family name, or path to a `.ttf` / `.otf` file.
+    pub target: String,
+
+    /// Emit machine-readable JSON (`zenith-fonts-features-v1`).
+    #[arg(long)]
+    pub json: bool,
+
+    /// Face weight to resolve when `target` is a family (default: 400).
+    #[arg(long, default_value_t = 400, value_name = "N")]
+    pub weight: u16,
+
+    /// Face style to resolve when `target` is a family: `normal` or `italic`.
+    #[arg(long, default_value = "normal", value_parser = ["normal", "italic"])]
+    pub style: String,
+
+    /// Optional `.zen` document — project `font` assets are registered for family resolution.
+    #[arg(long, value_name = "PATH")]
+    pub doc: Option<PathBuf>,
+}
+
+/// Arguments for `zenith fonts alternates`.
+#[derive(Debug, Args)]
+#[command(after_help = "EXAMPLES:\n  \
+zenith fonts alternates \"Noto Sans\" --char A\n  \
+zenith fonts alternates \"Noto Sans\" --char U+0041 --json\n  \
+zenith fonts alternates ./Brand.otf --char a --json")]
+pub struct FontsAlternatesArgs {
+    /// Font family name, or path to a `.ttf` / `.otf` file.
+    pub target: String,
+
+    /// Character to query: a single Unicode scalar (`A`) or `U+XXXX` form.
+    #[arg(long = "char", default_value = "A", value_name = "U+XXXX|CHAR")]
+    pub ch: String,
+
+    /// Emit machine-readable JSON (`zenith-fonts-alternates-v1`).
+    #[arg(long)]
+    pub json: bool,
+
+    /// Face weight to resolve when `target` is a family (default: 400).
+    #[arg(long, default_value_t = 400, value_name = "N")]
+    pub weight: u16,
+
+    /// Face style to resolve when `target` is a family: `normal` or `italic`.
+    #[arg(long, default_value = "normal", value_parser = ["normal", "italic"])]
+    pub style: String,
+
+    /// Optional `.zen` document — project `font` assets are registered for family resolution.
+    #[arg(long, value_name = "PATH")]
+    pub doc: Option<PathBuf>,
 }
 
 /// Arguments for `zenith tokens`.

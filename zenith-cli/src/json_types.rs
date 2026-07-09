@@ -437,13 +437,55 @@ pub struct SchemaBrandDiagCode {
 #[derive(Debug, Serialize)]
 pub struct FontsOutput {
     pub schema: &'static str,
-    /// Family names bundled in the binary (lowercase, sorted). These are portable:
-    /// any machine with this Zenith binary will resolve them identically.
+    /// Family names bundled in the binary (name-table case), sorted
+    /// case-insensitively. These are portable: any machine with this Zenith
+    /// binary will resolve them identically.
     pub bundled: Vec<String>,
-    /// Family names found on this machine only (lowercase, sorted), after excluding
-    /// any family already in `bundled`. Using these trips a `font.local` advisory
-    /// and renders may differ on another machine.
+    /// Family names found on this machine only (name-table case), sorted
+    /// case-insensitively, after excluding any family already in `bundled`.
+    /// Using these trips a `font.local` advisory and renders may differ on
+    /// another machine.
     pub local: Vec<String>,
+}
+
+/// One feature tag entry in [`FontsFeaturesOutput`].
+#[derive(Debug, Serialize)]
+pub struct FontsFeatureEntry {
+    pub tag: String,
+    /// Tables advertising this tag: `"GSUB"` and/or `"GPOS"`.
+    pub tables: Vec<&'static str>,
+}
+
+/// Top-level JSON envelope for `zenith fonts features --json`.
+#[derive(Debug, Serialize)]
+pub struct FontsFeaturesOutput {
+    pub schema: &'static str,
+    /// Resolved target label (family name or font path).
+    pub target: String,
+    pub weight: u16,
+    pub style: &'static str,
+    pub has_kern_table: bool,
+    pub features: Vec<FontsFeatureEntry>,
+}
+
+/// Top-level JSON envelope for `zenith fonts alternates --json`.
+#[derive(Debug, Serialize)]
+pub struct FontsAlternatesOutput {
+    pub schema: &'static str,
+    /// Resolved target label (family name or font path).
+    pub target: String,
+    pub weight: u16,
+    pub style: &'static str,
+    /// Queried character as a single-char string.
+    pub char: String,
+    /// Codepoint in `U+XXXX` form.
+    pub codepoint: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub glyph_index: Option<u16>,
+    /// Alternate glyph IDs from GSUB AlternateSubstitution (sorted).
+    pub alternate_glyph_ids: Vec<u16>,
+    /// Honest enumeration limits.
+    pub limits: String,
 }
 
 // ── Recipe inspect JSON types ─────────────────────────────────────────────────

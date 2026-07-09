@@ -691,11 +691,44 @@ pub fn run() -> ExitCode {
             None => ExitCode::from(mcp::run()),
         },
 
-        Command::Fonts(args) => {
-            let (output, code) = commands::fonts::list(args.json);
-            println!("{}", output);
-            ExitCode::from(code)
-        }
+        Command::Fonts(args) => match args.command {
+            None => {
+                let (output, code) = commands::fonts::list(args.json);
+                println!("{output}");
+                ExitCode::from(code)
+            }
+            Some(cli::FontsSub::Features(a)) => {
+                let (output, code) = commands::fonts::features(
+                    &a.target,
+                    a.weight,
+                    &a.style,
+                    a.doc.as_deref(),
+                    a.json,
+                );
+                if code == 0 {
+                    println!("{output}");
+                } else {
+                    eprintln!("{output}");
+                }
+                ExitCode::from(code)
+            }
+            Some(cli::FontsSub::Alternates(a)) => {
+                let (output, code) = commands::fonts::alternates(
+                    &a.target,
+                    &a.ch,
+                    a.weight,
+                    &a.style,
+                    a.doc.as_deref(),
+                    a.json,
+                );
+                if code == 0 {
+                    println!("{output}");
+                } else {
+                    eprintln!("{output}");
+                }
+                ExitCode::from(code)
+            }
+        },
 
         Command::Schema(args) => {
             let json = args.json;
