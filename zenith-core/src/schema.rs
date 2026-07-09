@@ -32,6 +32,7 @@ pub use attributes::{
 pub use content::{NodeContentDescriptor, node_content};
 pub use kinds::{node_example, node_kinds, node_summary};
 pub use surfaces::{
-    VariantDescriptor, diagnostic_codes, diagnostics_summary, diagnostics_verbs, variant_descriptor,
+    PortsDescriptor, VariantDescriptor, diagnostic_codes, diagnostics_summary, diagnostics_verbs,
+    ports_descriptor, variant_descriptor,
 };
 pub use tokens::{TokenTypeDescriptor, token_type_descriptor, token_type_summary, token_types};

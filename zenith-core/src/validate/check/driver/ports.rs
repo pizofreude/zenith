@@ -40,8 +40,8 @@ pub(super) fn build_ports_by_node(
         match parse_connector_anchor(&port.anchor) {
             Ok(_) => {}
             Err(ConnectorAnchorParseError::ZeroCount) => {
-                diagnostics.push(Diagnostic::warning(
-                    "connector.invalid_anchor",
+                diagnostics.push(Diagnostic::error(
+                    "connector.anchor_division_zero",
                     format!(
                         "port '{}#{}': anchor '{}' has a divided anchor count of 0",
                         port.node, port.id, port.anchor
@@ -51,8 +51,8 @@ pub(super) fn build_ports_by_node(
                 ));
             }
             Err(ConnectorAnchorParseError::IndexOutOfRange { index, count }) => {
-                diagnostics.push(Diagnostic::warning(
-                    "connector.invalid_anchor",
+                diagnostics.push(Diagnostic::error(
+                    "connector.anchor_index_out_of_range",
                     format!(
                         "port '{}#{}': anchor '{}' has index {index} outside divided anchor count {count}",
                         port.node, port.id, port.anchor
@@ -62,7 +62,7 @@ pub(super) fn build_ports_by_node(
                 ));
             }
             Err(ConnectorAnchorParseError::InvalidSyntax) => {
-                diagnostics.push(Diagnostic::warning(
+                diagnostics.push(Diagnostic::error(
                     "connector.invalid_anchor",
                     format!(
                         "port '{}#{}': anchor '{}' is not 'auto', a divided anchor like '4/16', or a nine-point anchor (top/center/bottom × left/center/right, e.g. bottom-right)",

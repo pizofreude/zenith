@@ -74,6 +74,80 @@ pub fn variant_descriptor() -> VariantDescriptor {
     }
 }
 
+// ── Ports surface ─────────────────────────────────────────────────────────────
+
+/// Full schema descriptor for the `ports` / `port` connector-anchor surface.
+pub struct PortsDescriptor {
+    /// One-line summary of the surface.
+    pub summary: &'static str,
+    /// Where a `ports { … }` block may be declared.
+    pub placement: &'static str,
+    /// Description of the `ports { port … }` block and `port` entry structure.
+    pub block_structure: &'static str,
+    /// Recognised attributes on a `port` entry, as `(name, type, required)` tuples.
+    pub port_props: &'static [(&'static str, &'static str, bool)],
+    /// A worked example of a `ports` block feeding a connector endpoint.
+    pub example: &'static str,
+}
+
+/// Return the descriptor for the `ports` / `port` surface.
+///
+/// This surface is not a node kind (it is authored metadata that resolves a
+/// connector endpoint's target and anchor), so it does not appear in
+/// `node_kinds()` or `node_summary()`. It is discoverable via
+/// `zenith schema ports`.
+pub fn ports_descriptor() -> PortsDescriptor {
+    PortsDescriptor {
+        summary: "Named connector ports — stable attachment points on a node that a connector \
+            endpoint references as `node#port`, decoupling the connector from a raw anchor value.",
+        placement: "A `ports { … }` block may appear at PAGE scope (a child of `page id=… { … }`) \
+            and at COMPONENT scope (a child of a `component id=… { … }` definition, so each \
+            instance re-exposes the ports on its own id). A connector then names an endpoint as \
+            `from=\"<node>#<port>\"` / `to=\"<node>#<port>\"` instead of a bare node id.",
+        block_structure: "ports {\n\
+            \x20 port node=\"<node-id>\" id=\"<port-id>\" anchor=\"<anchor>\"\n\
+            \x20 port node=\"<node-id>\" id=\"<port-id>\" anchor=\"<anchor>\"\n\
+            }\n\
+            \n\
+            Each `port` entry binds a port id (local to the target node) to a resolved anchor on \
+            that node. When a connector endpoint is written `node#port`, the port's `node` and \
+            `anchor` replace the endpoint's own node/anchor. Port ids must be unique per node \
+            (a duplicate emits `connector.port_duplicate`); a `node` that matches no local node \
+            emits `connector.port_invalid_target`; a connector referencing an undeclared port \
+            emits `connector.unknown_port`.",
+        port_props: &[
+            (
+                "node",
+                "string — the id of the node this port sits on",
+                true,
+            ),
+            (
+                "id",
+                "string — the port id, local to that node, used as `node#id`",
+                true,
+            ),
+            (
+                "anchor",
+                "string — where on the node the port attaches: `auto`, a nine-point grid anchor \
+                 (top/center/bottom × left/center/right, e.g. `bottom-right`), or a divided \
+                 anchor `i/N`",
+                true,
+            ),
+        ],
+        example: concat!(
+            "page id=\"pg\" w=(px)800 h=(px)400 {\n",
+            "  rect id=\"box.a\" x=(px)80  y=(px)160 w=(px)160 h=(px)80\n",
+            "  rect id=\"box.b\" x=(px)560 y=(px)160 w=(px)160 h=(px)80\n",
+            "  ports {\n",
+            "    port node=\"box.a\" id=\"out\" anchor=\"center-right\"\n",
+            "    port node=\"box.b\" id=\"in\"  anchor=\"center-left\"\n",
+            "  }\n",
+            "  connector id=\"edge\" from=\"box.a#out\" to=\"box.b#in\" marker-end=\"arrow\"\n",
+            "}",
+        ),
+    }
+}
+
 // ── Diagnostics surface ────────────────────────────────────────────────────────
 
 /// One-line description of the `diagnostics` surface (the root `diagnostics { … }`

@@ -117,9 +117,24 @@ pub(super) const CODES: &[DiagnosticCodeInfo] = &[
         "Instance references an undeclared component id.",
     ),
     info(
+        "connector.anchor_division_zero",
+        Severity::Error,
+        "A connector or port divided anchor declares a division count of 0.",
+    ),
+    info(
+        "connector.anchor_index_out_of_range",
+        Severity::Error,
+        "A connector or port divided anchor index is greater than or equal to its division count.",
+    ),
+    info(
+        "connector.anchor_unresolved",
+        Severity::Error,
+        "A connector endpoint could not be resolved to a target box (unknown node or no authored geometry).",
+    ),
+    info(
         "connector.invalid_anchor",
-        Severity::Warning,
-        "Connector anchor value is not recognized or a divided anchor is out of range.",
+        Severity::Error,
+        "Connector anchor value is not a recognized syntax (auto / nine-point grid / divided `i/N`).",
     ),
     info(
         "connector.invalid_marker",
@@ -148,13 +163,18 @@ pub(super) const CODES: &[DiagnosticCodeInfo] = &[
     ),
     info(
         "connector.unknown_port",
-        Severity::Warning,
+        Severity::Error,
         "Connector endpoint references an unknown port on a target node.",
     ),
     info(
         "connector.unknown_target",
         Severity::Warning,
         "Connector `from`/`to` references an unknown node.",
+    ),
+    info(
+        "connector.unsupported_outline",
+        Severity::Warning,
+        "A divided anchor targets a node whose exact outline is not modeled; the point is approximated on the bounds perimeter.",
     ),
     info(
         "import.asset_missing",

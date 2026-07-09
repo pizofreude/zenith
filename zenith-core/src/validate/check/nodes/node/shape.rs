@@ -347,8 +347,8 @@ pub(in crate::validate::check) fn check_connector(
             match parse_connector_anchor(a) {
                 Ok(_) => {}
                 Err(ConnectorAnchorParseError::ZeroCount) => {
-                    diagnostics.push(Diagnostic::warning(
-                        "connector.invalid_anchor",
+                    diagnostics.push(Diagnostic::error(
+                        "connector.anchor_division_zero",
                         format!(
                             "connector '{}': {label} '{a}' has a divided anchor count of 0",
                             c.id
@@ -358,8 +358,8 @@ pub(in crate::validate::check) fn check_connector(
                     ));
                 }
                 Err(ConnectorAnchorParseError::IndexOutOfRange { index, count }) => {
-                    diagnostics.push(Diagnostic::warning(
-                        "connector.invalid_anchor",
+                    diagnostics.push(Diagnostic::error(
+                        "connector.anchor_index_out_of_range",
                         format!(
                             "connector '{}': {label} '{a}' has index {index} outside divided anchor count {count}",
                             c.id
@@ -369,7 +369,7 @@ pub(in crate::validate::check) fn check_connector(
                     ));
                 }
                 Err(ConnectorAnchorParseError::InvalidSyntax) => {
-                    diagnostics.push(Diagnostic::warning(
+                    diagnostics.push(Diagnostic::error(
                         "connector.invalid_anchor",
                         format!(
                             "connector '{}': {label} '{a}' is not 'auto', a divided anchor like '4/16', or a nine-point anchor (top/center/bottom × left/center/right, e.g. bottom-right)",
@@ -438,7 +438,7 @@ fn check_connector_endpoint(
             .get(node_id)
             .is_some_and(|ports| ports.contains(port_id))
     {
-        diagnostics.push(Diagnostic::warning(
+        diagnostics.push(Diagnostic::error(
             "connector.unknown_port",
             format!(
                 "connector '{}': {label} '{}' references unknown port '{}' on node '{}'",

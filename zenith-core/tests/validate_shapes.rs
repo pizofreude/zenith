@@ -528,7 +528,7 @@ fn connector_divided_anchors_are_valid() {
 }
 
 #[test]
-fn connector_divided_anchor_zero_count_warns() {
+fn connector_divided_anchor_zero_count_errors() {
     let doc = doc_with(
         vec![],
         vec![minimal_page(
@@ -548,18 +548,19 @@ fn connector_divided_anchor_zero_count_warns() {
         )],
     );
     let report = validate(&doc);
-    assert!(
-        report
-            .diagnostics
-            .iter()
-            .any(|d| d.code == "connector.invalid_anchor" && d.message.contains("count of 0")),
-        "diagnostics: {:?}",
-        report.diagnostics
-    );
+    let diag = report
+        .diagnostics
+        .iter()
+        .find(|d| d.code == "connector.anchor_division_zero")
+        .unwrap_or_else(|| panic!("diagnostics: {:?}", report.diagnostics));
+    assert!(diag.message.contains("count of 0"));
+    assert_eq!(diag.severity, Severity::Error);
+    // The zero-count failure must NOT be reported under the generic syntax code.
+    assert!(!has_code(&report, "connector.invalid_anchor"));
 }
 
 #[test]
-fn connector_divided_anchor_out_of_range_warns() {
+fn connector_divided_anchor_out_of_range_errors() {
     let doc = doc_with(
         vec![],
         vec![minimal_page(
@@ -579,14 +580,49 @@ fn connector_divided_anchor_out_of_range_warns() {
         )],
     );
     let report = validate(&doc);
-    assert!(
-        report.diagnostics.iter().any(|d| {
-            d.code == "connector.invalid_anchor"
-                && d.message.contains("outside divided anchor count")
-        }),
-        "diagnostics: {:?}",
-        report.diagnostics
+    let diag = report
+        .diagnostics
+        .iter()
+        .find(|d| d.code == "connector.anchor_index_out_of_range")
+        .unwrap_or_else(|| panic!("diagnostics: {:?}", report.diagnostics));
+    assert!(diag.message.contains("outside divided anchor count"));
+    assert_eq!(diag.severity, Severity::Error);
+    // An out-of-range index is distinct from a zero division and from syntax.
+    assert!(!has_code(&report, "connector.anchor_division_zero"));
+    assert!(!has_code(&report, "connector.invalid_anchor"));
+}
+
+/// A pure-syntax anchor error (`sideways`) keeps the `connector.invalid_anchor`
+/// code and is now an Error, distinct from the divided-anchor codes.
+#[test]
+fn connector_invalid_syntax_anchor_is_error() {
+    let doc = doc_with(
+        vec![],
+        vec![minimal_page(
+            "page.one",
+            vec![
+                minimal_rect("a", None),
+                minimal_rect("b", None),
+                make_connector(ConnectorSpec {
+                    id: "c1",
+                    from: Some("a"),
+                    to: Some("b"),
+                    route: None,
+                    marker_end: None,
+                    from_anchor: Some("sideways"),
+                }),
+            ],
+        )],
     );
+    let report = validate(&doc);
+    let diag = report
+        .diagnostics
+        .iter()
+        .find(|d| d.code == "connector.invalid_anchor")
+        .unwrap_or_else(|| panic!("diagnostics: {:?}", report.diagnostics));
+    assert_eq!(diag.severity, Severity::Error);
+    assert!(!has_code(&report, "connector.anchor_division_zero"));
+    assert!(!has_code(&report, "connector.anchor_index_out_of_range"));
 }
 
 fn validate_source(src: &str) -> ValidationReport {
@@ -627,7 +663,7 @@ page id="page.ports" w=(px)640 h=(px)360 {
 }
 
 #[test]
-fn connector_unknown_port_warns() {
+fn connector_unknown_port_errors() {
     let report = validate_source(
         r##"zenith version=1 {
   project id="proj.ports" name="Ports"
@@ -646,15 +682,16 @@ page id="page.ports" w=(px)640 h=(px)360 {
 }
 "##,
     );
-    assert!(
-        has_code(&report, "connector.unknown_port"),
-        "codes: {:?}",
-        codes(&report)
-    );
+    let diag = report
+        .diagnostics
+        .iter()
+        .find(|d| d.code == "connector.unknown_port")
+        .unwrap_or_else(|| panic!("codes: {:?}", codes(&report)));
+    assert_eq!(diag.severity, Severity::Error);
 }
 
 #[test]
-fn duplicate_and_invalid_port_declarations_warn() {
+fn duplicate_and_invalid_port_declarations_report() {
     let report = validate_source(
         r##"zenith version=1 {
   project id="proj.ports" name="Ports"
@@ -673,13 +710,16 @@ page id="page.ports" w=(px)640 h=(px)360 {
 }
 "##,
     );
+    // Port `anchor="4/4"` has index 4 outside its count of 4 → the dedicated
+    // `connector.anchor_index_out_of_range` code, NOT the generic syntax code.
     assert!(
         has_code(&report, "connector.port_duplicate")
             && has_code(&report, "connector.port_invalid_target")
-            && has_code(&report, "connector.invalid_anchor"),
+            && has_code(&report, "connector.anchor_index_out_of_range"),
         "codes: {:?}",
         codes(&report)
     );
+    assert!(!has_code(&report, "connector.invalid_anchor"));
 }
 
 // ── polygon: point with missing y → node.missing_geometry ─────────────
