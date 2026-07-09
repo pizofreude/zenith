@@ -430,10 +430,7 @@ fn imported_instance_unknown_fit_emits_advisory_and_skips() {
 
     let result = compile_page_with_imports(&host, &default_provider(), 0, None, &imports);
 
-    assert_eq!(
-        diagnostic_codes(&result),
-        vec!["scene.unsupported_import_target"]
-    );
+    assert_eq!(diagnostic_codes(&result), vec!["scene.unsupported_fit"]);
     assert!(fill_rects(&result).is_empty());
     assert!(scale_translates(&result).is_empty());
 }

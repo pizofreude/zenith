@@ -8,6 +8,7 @@ use zenith_core::{Diagnostic, GroupNode, Node, Point, ResolvedToken, dim_to_px};
 
 use crate::ir::SceneCommand;
 
+use super::super::leaf::path_outline_bounds;
 use super::super::paint::{
     NodeEffect, resolve_property_filter, resolve_property_mask, resolve_property_shadow,
 };
@@ -578,6 +579,16 @@ fn group_children_minmax(
                     expand!(base_dx + x, base_dy + y, w, h);
                 }
             }
+            // A `path` carries no x/y/w/h: its extent is its outline. Use the
+            // extrema-aware bounds (true cubic extrema, not the anchor hull), in
+            // the same LOCAL coordinates as polygon/polyline points. Without
+            // this, a component made only of paths — every icon — has no
+            // resolvable bounds, so `instance` `w`/`h`/`fit` silently do nothing.
+            Node::Path(n) => {
+                if let Some((x, y, w, h)) = path_outline_bounds(n) {
+                    expand!(base_dx + x, base_dy + y, w, h);
+                }
+            }
             Node::Group(n) => {
                 // Nested group: use its declared w/h if available, else skip.
                 let (Some(xd), Some(yd), Some(wd), Some(hd)) = (&n.x, &n.y, &n.w, &n.h) else {
@@ -656,7 +667,6 @@ fn group_children_minmax(
             | Node::Field(_)
             | Node::Toc(_)
             | Node::Footnote(_)
-            | Node::Path(_)
             | Node::Connector(_)
             | Node::Pattern(_)
             | Node::Chart(_)

@@ -84,19 +84,57 @@ pub(in crate::compile) fn compile_instance(
     let prefix = format!("{}/", instance.id);
     prefix_ids_in_children(&mut children, &prefix);
 
-    // Build a synthetic group carrying the instance origin + cascade and reuse
-    // compile_group's translation/opacity logic. The group's own id is the
-    // instance id (it emits no command, so the id is only for self-consistency).
-    let synthetic = synthetic_group(instance, children);
-
-    compile_group(
-        &synthetic,
-        cx,
-        commands,
-        diagnostics,
-        connector_strokes,
-        ctx,
-    );
+    // Resolve `w`/`h`/`fit`. With a positive box the component subtree is scaled
+    // into it (an icon component is all `path` nodes, whose extent is its
+    // outline); with no box the translate-only path is preserved exactly.
+    match fit_outcome(instance, &children, cx.resolved, cx, ctx, diagnostics) {
+        FitOutcome::Skip => {}
+        FitOutcome::Transform { sx, sy, tx, ty } => {
+            let mut synthetic = synthetic_group(instance, children);
+            // The transform carries all positioning; the synthetic group compiles
+            // its children at the local origin (0,0).
+            synthetic.x = None;
+            synthetic.y = None;
+            let local_ctx = RenderCtx {
+                opacity: ctx.opacity,
+                dx: 0.0,
+                dy: 0.0,
+                baseline_grid: ctx.baseline_grid,
+            };
+            if is_identity_transform(sx, sy, tx, ty) {
+                compile_group(
+                    &synthetic,
+                    cx,
+                    commands,
+                    diagnostics,
+                    connector_strokes,
+                    local_ctx,
+                );
+            } else {
+                commands.push(SceneCommand::PushScaleTranslate { sx, sy, tx, ty });
+                compile_group(
+                    &synthetic,
+                    cx,
+                    commands,
+                    diagnostics,
+                    connector_strokes,
+                    local_ctx,
+                );
+                commands.push(SceneCommand::PopTransform);
+            }
+        }
+        FitOutcome::Translate => {
+            let synthetic = synthetic_group(instance, children);
+            compile_group(
+                &synthetic,
+                cx,
+                commands,
+                diagnostics,
+                connector_strokes,
+                ctx,
+            );
+        }
+    }
 }
 
 fn compile_imported_instance(
@@ -284,15 +322,20 @@ enum FitOutcome {
     Skip,
 }
 
-/// Resolve the imported-instance fit transform.
+/// Resolve an instance's `w`/`h`/`fit` transform.
 ///
-/// `w`/`h`/`x`/`y` resolve against the HOST token scope (`cx.resolved`); the
-/// source bounds resolve against the imported scope (`imported_resolved`), since
-/// the children carry imported-scope geometry. Mirrors `page_source::fit_transform`.
+/// Shared by the LOCAL component path and the IMPORTED component path. `w`/`h`/
+/// `x`/`y` always resolve against the HOST token scope (`cx.resolved`); the
+/// subtree's own bounds resolve against `children_resolved`, which is the host
+/// scope for a local component and the imported scope for an imported one (its
+/// children carry imported-scope geometry). Mirrors `page_source::fit_transform`.
+///
+/// With no positive `w`/`h` box this returns [`FitOutcome::Translate`], so an
+/// instance that does not use the feature renders byte-identically.
 fn fit_outcome(
     instance: &InstanceNode,
     children: &[Node],
-    imported_resolved: &BTreeMap<String, ResolvedToken>,
+    children_resolved: &BTreeMap<String, ResolvedToken>,
     cx: NodeCtx,
     ctx: RenderCtx,
     diagnostics: &mut Vec<Diagnostic>,
@@ -308,7 +351,7 @@ fn fit_outcome(
     }
 
     let Some((smin_x, smin_y, sw, sh)) =
-        group_children_bounds(children, 0.0, 0.0, imported_resolved)
+        group_children_bounds(children, 0.0, 0.0, children_resolved)
     else {
         return FitOutcome::Translate;
     };
@@ -331,9 +374,10 @@ fn fit_outcome(
         "none" => (1.0, 1.0, 0.0, 0.0),
         other => {
             diagnostics.push(Diagnostic::advisory(
-                "scene.unsupported_import_target",
+                "scene.unsupported_fit",
                 format!(
-                    "instance '{}' uses unsupported fit '{}'; the instance is skipped",
+                    "instance '{}' uses unsupported fit '{}' (expected contain|fill|none); \
+                     the instance is skipped",
                     instance.id, other
                 ),
                 instance.source_span,

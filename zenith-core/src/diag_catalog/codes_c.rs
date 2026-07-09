@@ -102,6 +102,11 @@ pub(super) const CODES: &[DiagnosticCodeInfo] = &[
         "A paint references a token that could not be resolved at compile time.",
     ),
     info(
+        "scene.unsupported_fit",
+        Severity::Advisory,
+        "An instance uses a `fit` value the scene compiler does not support; the instance is skipped.",
+    ),
+    info(
         "scene.unsupported_import_source",
         Severity::Advisory,
         "An imported composition source is not yet supported by scene compilation.",

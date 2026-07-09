@@ -285,3 +285,127 @@ page id="page.uk" w=(px)320 h=(px)200 {
         result.diagnostics
     );
 }
+
+// ── `w`/`h`/`fit` on a LOCAL component instance ──────────────────────────────
+//
+// An icon component is made only of `path` nodes. Before these paths contributed
+// to `group_children_bounds`, an icon instance had no resolvable extent, so
+// `w`/`h`/`fit` parsed, validated clean, and silently did nothing.
+
+/// A 0,0..24,24 icon component — the shape every converted SVG icon takes.
+const ICON_SRC: &str = r##"zenith version=1 {
+  project id="proj.icon-fit" name="Icon Fit"
+  tokens format="zenith-token-v1" {
+    token id="color.ink" type="color" value="#111827"
+    token id="size.stroke" type="dimension" value=(px)2
+  }
+  styles {}
+  components {
+    component id="icon" {
+      path id="icon.0" stroke=(token)"color.ink" stroke-width=(token)"size.stroke" {
+        subpath closed=#false {
+          anchor x=(px)0 y=(px)0
+          anchor x=(px)24 y=(px)0
+          anchor x=(px)24 y=(px)24
+          anchor x=(px)0 y=(px)24
+        }
+      }
+    }
+  }
+  document id="doc.icon-fit" title="Icon Fit" {
+    page id="page.icon-fit" w=(px)400 h=(px)200 {
+      BODY
+    }
+  }
+}
+"##;
+
+fn compile_icon_body(body: &str) -> zenith_scene::CompileResult {
+    let doc = parse(&ICON_SRC.replace("BODY", body));
+    compile(&doc, &default_provider())
+}
+
+/// The single `PushScaleTranslate` emitted, if any.
+fn scale_transform(result: &zenith_scene::CompileResult) -> Option<(f64, f64, f64, f64)> {
+    result.scene.commands.iter().find_map(|c| match c {
+        SceneCommand::PushScaleTranslate { sx, sy, tx, ty } => Some((*sx, *sy, *tx, *ty)),
+        _ => None,
+    })
+}
+
+/// The feature is absent ⇒ no transform, byte-identical to the translate-only path.
+#[test]
+fn local_instance_without_w_h_emits_no_transform() {
+    let result = compile_icon_body(r#"instance id="i" component="icon" x=(px)10 y=(px)20"#);
+    assert!(result.diagnostics.is_empty(), "{:?}", result.diagnostics);
+    assert_eq!(scale_transform(&result), None);
+}
+
+/// `contain` scales the 24×24 icon uniformly into the box and centers it.
+#[test]
+fn local_instance_w_h_scales_an_all_path_component() {
+    let result = compile_icon_body(
+        r#"instance id="i" component="icon" x=(px)10 y=(px)20 w=(px)96 h=(px)96 fit="contain""#,
+    );
+    assert!(result.diagnostics.is_empty(), "{:?}", result.diagnostics);
+    let (sx, sy, tx, ty) = scale_transform(&result).expect("a scale transform must be emitted");
+    assert_eq!((sx, sy), (4.0, 4.0), "24px icon into a 96px box");
+    // Square icon in a square box: no centering slack, so the transform is the origin.
+    assert_eq!((tx, ty), (10.0, 20.0));
+}
+
+/// `fit` defaults to `contain` whenever a positive `w`/`h` box is present.
+#[test]
+fn local_instance_w_h_defaults_to_contain() {
+    let with = compile_icon_body(
+        r#"instance id="i" component="icon" x=(px)0 y=(px)0 w=(px)48 h=(px)48 fit="contain""#,
+    );
+    let without =
+        compile_icon_body(r#"instance id="i" component="icon" x=(px)0 y=(px)0 w=(px)48 h=(px)48"#);
+    assert_eq!(scale_transform(&with), scale_transform(&without));
+}
+
+/// `contain` preserves aspect and centers on the slack axis; `fill` stretches.
+#[test]
+fn local_instance_contain_centers_and_fill_stretches() {
+    let contain = compile_icon_body(
+        r#"instance id="i" component="icon" x=(px)0 y=(px)0 w=(px)96 h=(px)48 fit="contain""#,
+    );
+    let (sx, sy, tx, ty) = scale_transform(&contain).expect("transform");
+    assert_eq!((sx, sy), (2.0, 2.0), "uniform scale = min(96/24, 48/24)");
+    assert_eq!((tx, ty), (24.0, 0.0), "centered on the slack (x) axis");
+
+    let fill = compile_icon_body(
+        r#"instance id="i" component="icon" x=(px)0 y=(px)0 w=(px)96 h=(px)48 fit="fill""#,
+    );
+    let (sx, sy, _, _) = scale_transform(&fill).expect("transform");
+    assert_eq!((sx, sy), (4.0, 2.0), "non-uniform stretch");
+}
+
+/// `none` keeps the natural size even inside a box.
+#[test]
+fn local_instance_fit_none_does_not_scale() {
+    let result = compile_icon_body(
+        r#"instance id="i" component="icon" x=(px)5 y=(px)5 w=(px)96 h=(px)96 fit="none""#,
+    );
+    let (sx, sy, _, _) = scale_transform(&result).expect("transform");
+    assert_eq!((sx, sy), (1.0, 1.0));
+}
+
+/// An unknown `fit` is diagnosed against its own code, not the import code.
+#[test]
+fn local_instance_unknown_fit_emits_advisory_and_skips() {
+    let result = compile_icon_body(
+        r#"instance id="i" component="icon" x=(px)0 y=(px)0 w=(px)96 h=(px)96 fit="cover""#,
+    );
+    let codes: Vec<&str> = result.diagnostics.iter().map(|d| d.code.as_str()).collect();
+    assert_eq!(codes, vec!["scene.unsupported_fit"]);
+    assert!(
+        !result
+            .scene
+            .commands
+            .iter()
+            .any(|c| matches!(c, SceneCommand::StrokePath { .. })),
+        "the instance is skipped entirely"
+    );
+}

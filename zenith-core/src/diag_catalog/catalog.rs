@@ -150,6 +150,7 @@ mod tests {
             ("scene.unknown_import_component", Severity::Advisory),
             ("scene.unknown_import_page", Severity::Advisory),
             ("scene.unresolved_token", Severity::Advisory),
+            ("scene.unsupported_fit", Severity::Advisory),
             ("scene.unsupported_import_source", Severity::Advisory),
             ("scene.unsupported_import_target", Severity::Advisory),
             ("scene.unsupported_node", Severity::Advisory),
