@@ -172,6 +172,25 @@ pub fn run() -> ExitCode {
             }
         },
 
+        Command::Imports(args) => match args.command {
+            cli::ImportsSub::List(a) => {
+                let src = match read_file(&a.path) {
+                    Ok(s) => s,
+                    Err(msg) => return fail(msg, 2),
+                };
+                match commands::composition_imports::list_imports(&src, &a.path, a.json) {
+                    Ok(out) => {
+                        println!("{out}");
+                        ExitCode::SUCCESS
+                    }
+                    Err(e) => {
+                        eprintln!("{}", e.message);
+                        ExitCode::from(e.exit_code)
+                    }
+                }
+            }
+        },
+
         Command::Perceive(args) => match args.command {
             cli::PerceiveSub::Vector { path, nodes } => {
                 let src = match read_file(&path) {

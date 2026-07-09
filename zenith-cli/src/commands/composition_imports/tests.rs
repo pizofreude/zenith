@@ -3,6 +3,7 @@ use std::fs;
 use zenith_core::{Document, KdlAdapter, KdlSource};
 
 use super::load_import_graph;
+use super::loaded::ImportEdgeStatus;
 
 const EMPTY_DOC: &str = r#"zenith version=1 {
   project id="proj.empty" name="Empty"
@@ -90,6 +91,14 @@ fn load_import_graph_resolves_relative_imports() {
     let graph = load_import_graph(&root, Some(dir.path()));
 
     assert!(graph.diagnostics.is_empty(), "{:?}", graph.diagnostics);
+    assert_eq!(graph.edges().len(), 1);
+    let edge = &graph.edges()[0];
+    assert_eq!(edge.id, "child");
+    assert_eq!(edge.status, ImportEdgeStatus::Ok);
+    assert_eq!(edge.depth, 0);
+    assert!(edge.importer.is_none());
+    assert!(edge.resolved_path.is_some());
+    assert!(edge.sha256_actual.is_some());
 }
 
 #[test]
@@ -97,8 +106,12 @@ fn load_import_graph_reports_missing_import() {
     let dir = tempfile::tempdir().expect("tempdir");
     let root = root_with_import("missing.zen", "");
 
-    let diagnostics = load_import_graph(&root, Some(dir.path())).into_diagnostics();
+    let graph = load_import_graph(&root, Some(dir.path()));
+    assert_eq!(graph.edges().len(), 1);
+    assert_eq!(graph.edges()[0].status, ImportEdgeStatus::Missing);
+    assert!(graph.edges()[0].resolved_path.is_some());
 
+    let diagnostics = graph.into_diagnostics();
     assert_eq!(diagnostics.len(), 1);
     assert_eq!(diagnostics[0].code, "import.missing");
     assert_eq!(diagnostics[0].subject_id.as_deref(), Some("child"));
@@ -126,8 +139,11 @@ fn load_import_graph_reports_parse_error() {
     fs::write(dir.path().join("bad.zen"), "not zenith").expect("write bad child");
     let root = root_with_import("bad.zen", "");
 
-    let diagnostics = load_import_graph(&root, Some(dir.path())).into_diagnostics();
+    let graph = load_import_graph(&root, Some(dir.path()));
+    assert_eq!(graph.edges()[0].status, ImportEdgeStatus::ParseError);
+    assert!(graph.edges()[0].sha256_actual.is_some());
 
+    let diagnostics = graph.into_diagnostics();
     assert_eq!(diagnostics.len(), 1);
     assert_eq!(diagnostics[0].code, "import.parse_error");
 }
@@ -138,8 +154,14 @@ fn load_import_graph_reports_hash_mismatch() {
     fs::write(dir.path().join("child.zen"), EMPTY_DOC).expect("write child");
     let root = root_with_import("child.zen", r#" sha256="0000""#);
 
-    let diagnostics = load_import_graph(&root, Some(dir.path())).into_diagnostics();
+    let graph = load_import_graph(&root, Some(dir.path()));
+    assert_eq!(graph.edges()[0].status, ImportEdgeStatus::HashMismatch);
+    assert_eq!(graph.edges()[0].sha256_declared.as_deref(), Some("0000"));
+    assert!(graph.edges()[0].sha256_actual.is_some());
+    // Hash mismatch still loads the document for render soft-fail paths.
+    assert!(graph.documents.contains_key("child"));
 
+    let diagnostics = graph.into_diagnostics();
     assert_eq!(diagnostics.len(), 1);
     assert_eq!(diagnostics[0].code, "import.hash_mismatch");
 }
@@ -153,8 +175,13 @@ fn load_import_graph_reports_hash_mismatch_for_cached_alias() {
     import id="second" kind="zen" src="./shared.zen" sha256="0000""#,
     );
 
-    let diagnostics = load_import_graph(&root, Some(dir.path())).into_diagnostics();
+    let graph = load_import_graph(&root, Some(dir.path()));
+    assert_eq!(graph.edges().len(), 2);
+    assert_eq!(graph.edges()[0].status, ImportEdgeStatus::Ok);
+    assert_eq!(graph.edges()[1].status, ImportEdgeStatus::HashMismatch);
+    assert_eq!(graph.edges()[1].id, "second");
 
+    let diagnostics = graph.into_diagnostics();
     assert_eq!(diagnostics.len(), 1);
     assert_eq!(diagnostics[0].code, "import.hash_mismatch");
     assert_eq!(diagnostics[0].subject_id.as_deref(), Some("second"));
@@ -193,10 +220,78 @@ fn load_import_graph_reports_cycles() {
     .expect("write b");
     let root = root_with_import("a.zen", "");
 
-    let diagnostics = load_import_graph(&root, Some(dir.path())).into_diagnostics();
+    let graph = load_import_graph(&root, Some(dir.path()));
+    let statuses: Vec<_> = graph.edges().iter().map(|e| e.status).collect();
+    assert!(
+        statuses.contains(&ImportEdgeStatus::Cycle),
+        "edges: {:?}",
+        graph.edges()
+    );
+    let cycle = graph
+        .edges()
+        .iter()
+        .find(|e| e.status == ImportEdgeStatus::Cycle)
+        .expect("cycle edge");
+    assert_eq!(cycle.depth, 2);
+    assert!(cycle.importer.is_some());
 
+    let diagnostics = graph.into_diagnostics();
     assert_eq!(diagnostics.len(), 1);
     assert_eq!(diagnostics[0].code, "import.cycle");
+}
+
+#[test]
+fn load_import_graph_records_skipped_kind_and_unresolvable() {
+    let root = root_with_imports(
+        r#"    import id="pic" kind="image" src="x.png"
+    import id="child" kind="zen" src="child.zen""#,
+    );
+
+    let graph = load_import_graph(&root, None);
+    assert_eq!(graph.edges().len(), 2);
+    assert_eq!(graph.edges()[0].status, ImportEdgeStatus::SkippedKind);
+    assert_eq!(graph.edges()[0].id, "pic");
+    assert_eq!(graph.edges()[1].status, ImportEdgeStatus::Unresolvable);
+    assert_eq!(graph.edges()[1].id, "child");
+    assert!(graph.edges()[1].resolved_path.is_none());
+}
+
+#[test]
+fn load_import_graph_records_nested_importer_and_depth() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    fs::write(
+        dir.path().join("mid.zen"),
+        r#"zenith version=1 {
+  project id="proj.mid" name="Mid"
+  imports {
+    import id="leaf" kind="zen" src="leaf.zen"
+  }
+  document id="doc.mid" title="Mid" {
+    page id="page.mid" w=(px)100 h=(px)100
+  }
+}
+"#,
+    )
+    .expect("write mid");
+    fs::write(dir.path().join("leaf.zen"), EMPTY_DOC).expect("write leaf");
+    let root = root_with_import("mid.zen", "");
+
+    let graph = load_import_graph(&root, Some(dir.path()));
+    assert!(graph.diagnostics.is_empty(), "{:?}", graph.diagnostics);
+    assert_eq!(graph.edges().len(), 2);
+    assert_eq!(graph.edges()[0].id, "child");
+    assert_eq!(graph.edges()[0].depth, 0);
+    assert!(graph.edges()[0].importer.is_none());
+    assert_eq!(graph.edges()[1].id, "leaf");
+    assert_eq!(graph.edges()[1].depth, 1);
+    assert!(
+        graph.edges()[1]
+            .importer
+            .as_ref()
+            .is_some_and(|p| p.ends_with("mid.zen")),
+        "importer: {:?}",
+        graph.edges()[1].importer
+    );
 }
 
 #[test]

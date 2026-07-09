@@ -125,6 +125,16 @@ pub enum Command {
     /// writing a `tx` edit, to see which recipes a document declares, or to confirm what it contains.
     Inspect(InspectArgs),
 
+    /// Inspect composition import edges for a `.zen` document (read-only).
+    ///
+    /// Walks the host document's import graph (the same loader used by
+    /// `validate` / `render`) and lists each edge: resolved path, declared and
+    /// actual sha256, and status (`ok`, `missing`, `hash_mismatch`,
+    /// `parse_error`, `cycle`, `unresolvable`, `skipped_kind`). Does not
+    /// materialize or mutate source. Graph failures are reported on edges and
+    /// still exit 0; only a host parse/IO failure is non-zero.
+    Imports(ImportsArgs),
+
     /// Run read-only perception metrics over a `.zen` document.
     ///
     /// Perception reports deterministic, substrate-level signals such as anchor economy,
@@ -764,6 +774,41 @@ pub enum InspectSub {
     /// and closed-only fill bounds. Use `--craft` to attach perception craft
     /// scores and diagnostic codes. Read-only; does not mutate the document.
     Path(InspectPathArgs),
+}
+
+/// Arguments for `zenith imports`.
+#[derive(Debug, Args)]
+#[command(after_help = "EXAMPLES:\n  \
+zenith imports list deck.zen\n  \
+zenith imports list deck.zen --json")]
+pub struct ImportsArgs {
+    #[command(subcommand)]
+    pub command: ImportsSub,
+}
+
+/// Subcommands of `zenith imports`.
+#[derive(Debug, Subcommand)]
+pub enum ImportsSub {
+    /// List composition import graph edges (resolved paths, hashes, status).
+    ///
+    /// Read-only dump of every import declaration reachable from the host
+    /// document. Edge failures (missing file, hash mismatch, cycle, parse
+    /// error) appear as edge `status` values and optional diagnostics; the
+    /// command still exits 0. Host parse failure exits 2. Does not materialize
+    /// imports into the host.
+    List(ImportsListArgs),
+}
+
+/// Arguments for `zenith imports list`.
+#[derive(Debug, Args)]
+#[command(after_help = "EXAMPLE:\n  zenith imports list deck.zen --json")]
+pub struct ImportsListArgs {
+    /// Path to the host `.zen` document.
+    pub path: PathBuf,
+
+    /// Emit machine-readable JSON (`zenith-imports-list-v1`).
+    #[arg(long)]
+    pub json: bool,
 }
 
 /// Arguments for `zenith inspect path`.
