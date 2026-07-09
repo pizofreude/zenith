@@ -83,11 +83,11 @@ fn endpoint_target<'a>(
 }
 
 /// Emit `connector.unsupported_outline` (Warning) when a **divided** (`i/N`)
-/// anchor targets a node whose exact outline is not modeled — a rounded rect,
-/// a `shape kind="process"`, or a polygon/polyline/path ([`ConnectorTargetKind::
-/// ApproxOutline`]). The divided point is approximated on the bounds perimeter;
-/// named/`auto` anchors on these shapes are the intended bounds semantics and do
-/// NOT warn.
+/// anchor targets a node whose exact outline is not modeled — a
+/// polygon/polyline/path ([`ConnectorTargetKind::ApproxOutline`]).
+/// Rounded rects walk the true perimeter; `shape kind="process"` is BoxLike.
+/// Named/`auto` anchors on ApproxOutline shapes are the intended bounds
+/// semantics and do NOT warn.
 fn warn_unsupported_outline(
     connector: &ConnectorNode,
     label: &str,

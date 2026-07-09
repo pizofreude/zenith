@@ -1,3 +1,5 @@
+// Starter layout only. Prefer `zenith new doc.zen --theme <name>` (or a project brand kit)
+// so tokens match a real dialect — then copy structure, not these ad-hoc color ids.
 zenith version=1 {
   project id="proj.social" name="Social Square Starter"
   tokens format="zenith-token-v1" {

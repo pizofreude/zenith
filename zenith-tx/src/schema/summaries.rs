@@ -70,10 +70,21 @@ pub fn op_summary(name: &str) -> Option<&'static str> {
         "distribute_nodes" => {
             Some("Evenly space a set of nodes along a horizontal or vertical axis.")
         }
-        "create_token" => Some("Create a new scalar design token in the tokens block."),
+        "create_token" => Some(
+            "Create a design token (scalar via value; shadow/filter/gradient/mask via structured fields).",
+        ),
         "update_token_value" => Some("Replace the literal value of an existing design token."),
         "set_style_property" => {
             Some("Set a recognized visual property on a named style to a token reference.")
+        }
+        "create_style" => Some("Create a named style in the document styles block."),
+        "delete_style" => Some("Remove a named style from the document styles block."),
+        "create_master" => {
+            Some("Create an empty master-page definition (shared chrome); populate via add_node.")
+        }
+        "delete_master" => Some("Remove a master-page definition from the masters block."),
+        "set_page_master" => {
+            Some("Assign or clear a page's master attribute (shared chrome projection).")
         }
         "set_text_direction" => Some("Set the text direction (ltr or rtl) of a text node."),
         "find_replace_text" => Some("Literal find-and-replace across text and shape label spans."),

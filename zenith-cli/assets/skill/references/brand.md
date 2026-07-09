@@ -4,6 +4,10 @@ Two layers work together: a **human/agent-facing brief** (`.zenith/brand.md`) th
 agent how to design on-brand, and a **machine brand kit** (a `.zen` library pack of tokens +
 re-skin actions) the CLI can apply.
 
+**Dialect:** brand kits use *project* role ids (commonly `color.brand`, `color.ink`, …). Embedded
+themes use a different contract (`color.primary`, `color.base.100`, … — see `themes.md`). Pick one
+dialect per document; don't mix without an explicit map.
+
 ## 1. The project brief — `.zenith/brand.md`
 
 A markdown file in (or above) the project that the skill loads before authoring. It captures

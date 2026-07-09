@@ -316,4 +316,60 @@ pub fn block(json: bool) -> (String, u8) {
     }
 }
 
+/// `zenith schema style`: named styles block, recognized keys, and tx ops.
+///
+/// Returns `(stdout, exit_code)`.
+pub fn style(json: bool) -> (String, u8) {
+    const SUMMARY: &str = "Named visual styles — reusable fill/type/spacing bundles referenced \
+        by `style` / `text-style` on nodes (and shape/connector labels).";
+
+    const PLACEMENT: &str = "Top-level `styles { style id=\"…\" { … } }` block, sibling of \
+        `tokens` and `document`.";
+
+    let keys: Vec<&str> = zenith_core::STYLE_RECOGNIZED_KEYS.to_vec();
+
+    const TX: &str = "create_style  — create a style with optional properties map (key → token id)\n\
+        set_style_property  — set one recognized key to a token id\n\
+        delete_style  — remove a style by id\n\
+        (see `zenith schema op create_style`)";
+
+    const EXAMPLE: &str = concat!(
+        "styles {\n",
+        "  style id=\"cta.label\" {\n",
+        "    font-family (token)\"font.body\"\n",
+        "    font-size (token)\"size.body\"\n",
+        "    fill (token)\"color.primary.content\"\n",
+        "  }\n",
+        "}\n",
+        "shape id=\"cta\" kind=\"process\" text-style=\"cta.label\" { span \"Go\" }\n",
+        "\n",
+        "# or via tx:\n",
+        "# {\"ops\":[{\"op\":\"create_style\",\"id\":\"cta.label\",\"properties\":{\
+\"font-family\":\"font.body\",\"font-size\":\"size.body\",\"fill\":\"color.primary.content\"}}]}\n"
+    );
+
+    if json {
+        let out = serde_json::json!({
+            "schema": "zenith-schema-v1",
+            "surface": "style",
+            "summary": SUMMARY,
+            "placement": PLACEMENT,
+            "recognized_keys": keys,
+            "tx_ops": ["create_style", "set_style_property", "delete_style"],
+            "example": EXAMPLE,
+        });
+        (crate::commands::serialize_pretty(&out), 0)
+    } else {
+        let mut text = format!("style: {SUMMARY}\n");
+        text.push_str(&format!("\nPlacement:\n  {PLACEMENT}\n"));
+        text.push_str("\nRecognized property keys (underscore spellings accepted in tx):\n");
+        for k in &keys {
+            text.push_str(&format!("  - {k}\n"));
+        }
+        text.push_str(&format!("\nTransaction ops:\n  {TX}\n"));
+        text.push_str(&format!("\nExample:\n  {}", EXAMPLE.replace('\n', "\n  ")));
+        (text, 0)
+    }
+}
+
 // ── Internal helpers ──────────────────────────────────────────────────────────

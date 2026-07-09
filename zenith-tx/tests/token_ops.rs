@@ -38,6 +38,17 @@ fn create_token_color_accepted() {
             token_type: "color".to_owned(),
             value: "#e11d48".to_owned(),
             set: None,
+            layers: vec![],
+            filter_ops: vec![],
+            stops: vec![],
+            angle: None,
+            radial: None,
+            center_x: None,
+            center_y: None,
+            radius: None,
+            shape: None,
+            feather: None,
+            invert: None,
         }],
         permissions: Permissions::default(),
     };
@@ -88,6 +99,17 @@ fn create_token_dimension_accepted() {
             token_type: "dimension".to_owned(),
             value: "(px)40".to_owned(),
             set: None,
+            layers: vec![],
+            filter_ops: vec![],
+            stops: vec![],
+            angle: None,
+            radial: None,
+            center_x: None,
+            center_y: None,
+            radius: None,
+            shape: None,
+            feather: None,
+            invert: None,
         }],
         permissions: Permissions::default(),
     };
@@ -125,6 +147,17 @@ fn create_token_duplicate_id_rejected() {
             token_type: "color".to_owned(),
             value: "#ffffff".to_owned(),
             set: None,
+            layers: vec![],
+            filter_ops: vec![],
+            stops: vec![],
+            angle: None,
+            radial: None,
+            center_x: None,
+            center_y: None,
+            radius: None,
+            shape: None,
+            feather: None,
+            invert: None,
         }],
         permissions: Permissions::default(),
     };
@@ -147,29 +180,84 @@ fn create_token_duplicate_id_rejected() {
     assert_eq!(result.source_after, result.source_before);
 }
 
-// ── create_token: gradient type → Rejected ────────────────────────────────────
+// ── create_token: gradient / mask structured forms ───────────────────────────
 
-/// (d) create_token with `type="gradient"` → Rejected (tx.invalid_value).
+/// (d) create_token with a linear gradient (stops + angle) is accepted.
 #[test]
-fn create_token_gradient_type_rejected() {
+fn create_token_gradient_linear_accepted() {
+    use zenith_tx::GradientStopInput;
     let doc = parse(TOKEN_DOC);
     let tx = Transaction {
         ops: vec![Op::CreateToken {
-            id: "grad.new".to_owned(),
+            id: "grad.sky".to_owned(),
             token_type: "gradient".to_owned(),
-            value: "#ff0000".to_owned(),
+            value: String::new(),
             set: None,
+            layers: vec![],
+            filter_ops: vec![],
+            stops: vec![
+                GradientStopInput {
+                    offset: 0.0,
+                    color: "color.accent".to_owned(),
+                },
+                GradientStopInput {
+                    offset: 1.0,
+                    color: "color.accent".to_owned(),
+                },
+            ],
+            angle: Some(90.0),
+            radial: None,
+            center_x: None,
+            center_y: None,
+            radius: None,
+            shape: None,
+            feather: None,
+            invert: None,
         }],
         permissions: Permissions::default(),
     };
     let result = run_transaction(&doc, &tx).expect("run_transaction should not error");
-
     assert_eq!(
         result.status,
-        TxStatus::Rejected,
-        "expected Rejected; diagnostics: {:?}",
+        TxStatus::Accepted,
+        "diagnostics: {:?}",
         result.diagnostics
     );
+    assert!(
+        result.source_after.contains("grad.sky"),
+        "source must declare grad.sky; got:\n{}",
+        result.source_after
+    );
+    assert!(result.source_after.contains("type=\"gradient\""));
+    assert!(result.source_after.contains("stop "));
+}
+
+/// create_token with type=gradient but no stops is rejected.
+#[test]
+fn create_token_gradient_missing_stops_rejected() {
+    let doc = parse(TOKEN_DOC);
+    let tx = Transaction {
+        ops: vec![Op::CreateToken {
+            id: "grad.bad".to_owned(),
+            token_type: "gradient".to_owned(),
+            value: String::new(),
+            set: None,
+            layers: vec![],
+            filter_ops: vec![],
+            stops: vec![],
+            angle: Some(90.0),
+            radial: None,
+            center_x: None,
+            center_y: None,
+            radius: None,
+            shape: None,
+            feather: None,
+            invert: None,
+        }],
+        permissions: Permissions::default(),
+    };
+    let result = run_transaction(&doc, &tx).expect("run_transaction should not error");
+    assert_eq!(result.status, TxStatus::Rejected);
     assert!(
         result
             .diagnostics
@@ -178,7 +266,41 @@ fn create_token_gradient_type_rejected() {
         "expected tx.invalid_value; got: {:?}",
         result.diagnostics
     );
-    assert_eq!(result.source_after, result.source_before);
+}
+
+/// create_token mask ellipse with feather is accepted.
+#[test]
+fn create_token_mask_ellipse_accepted() {
+    let doc = parse(TOKEN_DOC);
+    let tx = Transaction {
+        ops: vec![Op::CreateToken {
+            id: "mask.portrait".to_owned(),
+            token_type: "mask".to_owned(),
+            value: String::new(),
+            set: None,
+            layers: vec![],
+            filter_ops: vec![],
+            stops: vec![],
+            angle: None,
+            radial: None,
+            center_x: None,
+            center_y: None,
+            radius: None,
+            shape: Some("ellipse".to_owned()),
+            feather: Some(48.0),
+            invert: None,
+        }],
+        permissions: Permissions::default(),
+    };
+    let result = run_transaction(&doc, &tx).expect("run_transaction should not error");
+    assert_eq!(
+        result.status,
+        TxStatus::Accepted,
+        "diagnostics: {:?}",
+        result.diagnostics
+    );
+    assert!(result.source_after.contains("mask.portrait"));
+    assert!(result.source_after.contains("ellipse"));
 }
 
 // ── create_token: unparseable dimension → Rejected ────────────────────────────
@@ -194,6 +316,17 @@ fn create_token_unparseable_dimension_rejected() {
             token_type: "dimension".to_owned(),
             value: "not-a-dimension".to_owned(),
             set: None,
+            layers: vec![],
+            filter_ops: vec![],
+            stops: vec![],
+            angle: None,
+            radial: None,
+            center_x: None,
+            center_y: None,
+            radius: None,
+            shape: None,
+            feather: None,
+            invert: None,
         }],
         permissions: Permissions::default(),
     };
@@ -229,6 +362,17 @@ fn create_token_unparseable_number_rejected() {
             token_type: "number".to_owned(),
             value: "NaN".to_owned(),
             set: None,
+            layers: vec![],
+            filter_ops: vec![],
+            stops: vec![],
+            angle: None,
+            radial: None,
+            center_x: None,
+            center_y: None,
+            radius: None,
+            shape: None,
+            feather: None,
+            invert: None,
         }],
         permissions: Permissions::default(),
     };
@@ -462,6 +606,17 @@ fn create_token_with_set_is_applied() {
             token_type: "color".to_owned(),
             value: "#123456".to_owned(),
             set: Some("@zenith/theme.cobalt".to_owned()),
+            layers: vec![],
+            filter_ops: vec![],
+            stops: vec![],
+            angle: None,
+            radial: None,
+            center_x: None,
+            center_y: None,
+            radius: None,
+            shape: None,
+            feather: None,
+            invert: None,
         }],
         permissions: Permissions::default(),
     };
@@ -490,5 +645,136 @@ fn create_token_with_set_is_applied() {
         created.set.as_deref(),
         Some("@zenith/theme.cobalt"),
         "applied doc token must carry the set id"
+    );
+}
+
+// ── create_token: shadow + filter structured forms ───────────────────────────
+
+#[test]
+fn create_token_shadow_with_layers_accepted() {
+    use zenith_tx::ShadowLayerInput;
+    let doc = parse(TOKEN_DOC);
+    let tx = Transaction {
+        ops: vec![Op::CreateToken {
+            id: "shadow.depth".to_owned(),
+            token_type: "shadow".to_owned(),
+            value: String::new(),
+            set: None,
+            layers: vec![ShadowLayerInput {
+                dx: 0.0,
+                dy: 8.0,
+                blur: 24.0,
+                color: "color.accent".to_owned(),
+            }],
+            filter_ops: vec![],
+            stops: vec![],
+            angle: None,
+            radial: None,
+            center_x: None,
+            center_y: None,
+            radius: None,
+            shape: None,
+            feather: None,
+            invert: None,
+        }],
+        permissions: Permissions::default(),
+    };
+    let result = run_transaction(&doc, &tx).expect("run_transaction should not error");
+    assert_eq!(
+        result.status,
+        TxStatus::Accepted,
+        "diagnostics: {:?}",
+        result.diagnostics
+    );
+    assert!(
+        result.source_after.contains("shadow.depth"),
+        "source must declare shadow.depth; got:\n{}",
+        result.source_after
+    );
+    assert!(result.source_after.contains("type=\"shadow\""));
+}
+
+#[test]
+fn create_token_filter_noise_accepted() {
+    use zenith_tx::FilterOpInput;
+    let doc = parse(TOKEN_DOC);
+    let tx = Transaction {
+        ops: vec![Op::CreateToken {
+            id: "filter.grain".to_owned(),
+            token_type: "filter".to_owned(),
+            value: String::new(),
+            set: None,
+            layers: vec![],
+            filter_ops: vec![FilterOpInput {
+                kind: "noise".to_owned(),
+                amount: Some(0.06),
+                seed: Some(1),
+                scale: Some(1.0),
+                shadow: None,
+                highlight: None,
+            }],
+            stops: vec![],
+            angle: None,
+            radial: None,
+            center_x: None,
+            center_y: None,
+            radius: None,
+            shape: None,
+            feather: None,
+            invert: None,
+        }],
+        permissions: Permissions::default(),
+    };
+    let result = run_transaction(&doc, &tx).expect("run_transaction should not error");
+    assert_eq!(
+        result.status,
+        TxStatus::Accepted,
+        "diagnostics: {:?}",
+        result.diagnostics
+    );
+    assert!(result.source_after.contains("filter.grain"));
+    assert!(result.source_after.contains("noise"));
+}
+
+#[test]
+fn create_token_duotone_missing_colors_rejected() {
+    use zenith_tx::FilterOpInput;
+    let doc = parse(TOKEN_DOC);
+    let tx = Transaction {
+        ops: vec![Op::CreateToken {
+            id: "filter.duo".to_owned(),
+            token_type: "filter".to_owned(),
+            value: String::new(),
+            set: None,
+            layers: vec![],
+            filter_ops: vec![FilterOpInput {
+                kind: "duotone".to_owned(),
+                amount: Some(1.0),
+                seed: None,
+                scale: None,
+                shadow: None,
+                highlight: None,
+            }],
+            stops: vec![],
+            angle: None,
+            radial: None,
+            center_x: None,
+            center_y: None,
+            radius: None,
+            shape: None,
+            feather: None,
+            invert: None,
+        }],
+        permissions: Permissions::default(),
+    };
+    let result = run_transaction(&doc, &tx).expect("run_transaction should not error");
+    assert_eq!(result.status, TxStatus::Rejected);
+    assert!(
+        result
+            .diagnostics
+            .iter()
+            .any(|d| d.code == "tx.invalid_value"),
+        "expected tx.invalid_value; got: {:?}",
+        result.diagnostics
     );
 }

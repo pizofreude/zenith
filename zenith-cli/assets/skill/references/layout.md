@@ -47,6 +47,10 @@ Default is the page. Precedence when more than one is present: **zone > sibling 
   }
   ```
   Keeps content off the bleed/margins — anchor relative to the safe area, not the page edge.
+  **Decorative chrome** (1–8px brand bars flush to the page edge) may emit
+  `safe_zone.violation` while copy stays inside the zone — that advisory is expected; do not
+  move the CTA out of the safe area to silence it. Suppress only when intentional
+  (`diagnostics { allow "safe_zone.violation" }` or CLI `--allow`).
 - **Parent container** — `anchor-parent=#true` anchors within the node's direct `frame`/`group`
   box instead of the page (e.g. a label pinned to the corner of its card).
 - **Sibling** — `anchor-sibling="<id>"` anchors relative to a sibling node's box in the same

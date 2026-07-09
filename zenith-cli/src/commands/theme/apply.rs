@@ -230,6 +230,17 @@ fn plan_ops(
                     token_type: type_str.to_owned(),
                     value: value_str,
                     set: Some(pack_id.to_owned()),
+                    layers: vec![],
+                    filter_ops: vec![],
+                    stops: vec![],
+                    angle: None,
+                    radial: None,
+                    center_x: None,
+                    center_y: None,
+                    radius: None,
+                    shape: None,
+                    feather: None,
+                    invert: None,
                 });
                 added.push(theme_token.id.clone());
             }
@@ -435,7 +446,7 @@ mod tests {
         assert_eq!(ops.len(), 1);
         assert!(matches!(
             &ops[0],
-            Op::CreateToken { id, token_type, value, set }
+            Op::CreateToken { id, token_type, value, set, .. }
                 if id == "color.new" && token_type == "color" && value == "#333333"
                     && set.as_deref() == Some(TEST_PACK_ID)
         ));

@@ -79,6 +79,12 @@ pub(super) fn op_lock_targets(op: &Op) -> Vec<&str> {
         | Op::UpdateTokenValue { .. }
         // Style ops mutate the styles block, not the node tree; no per-node lock target.
         | Op::SetStyleProperty { .. }
+        | Op::CreateStyle { .. }
+        | Op::DeleteStyle { .. }
+        // Master ops mutate the masters block / page attributes, not locked nodes.
+        | Op::CreateMaster { .. }
+        | Op::DeleteMaster { .. }
+        | Op::SetPageMaster { .. }
         // Recipe ops mutate the recipes block, not the node tree; no per-node lock target.
         | Op::CreateRecipe { .. }
         | Op::UpdateRecipe { .. }
@@ -125,6 +131,11 @@ pub(super) fn node_is_locked(doc: &Document, id: &str) -> bool {
         .pages
         .iter()
         .find_map(|page| find_node_shared(&page.children, id))
+        .or_else(|| {
+            doc.masters
+                .iter()
+                .find_map(|master| find_node_shared(&master.children, id))
+        })
         .and_then(locked_of)
         == Some(true)
 }

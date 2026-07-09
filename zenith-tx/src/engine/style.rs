@@ -427,6 +427,81 @@ pub(super) fn apply_set_opacity(
     }
 }
 
+// ── CreateStyle / DeleteStyle ────────────────────────────────────────────────
+
+/// Create a named style in `doc.styles.styles`.
+///
+/// Rejects with `tx.duplicate_id` if a style with `id` already exists.
+/// Each key in `properties` must be a recognized style key (underscore forms
+/// accepted); values are stored as `PropertyValue::TokenRef`.
+pub(super) fn apply_create_style(
+    id: &str,
+    properties: &std::collections::BTreeMap<String, String>,
+    doc: &mut Document,
+    diagnostics: &mut Vec<Diagnostic>,
+    affected: &mut Vec<String>,
+) {
+    if doc.styles.styles.iter().any(|s| s.id == id) {
+        diagnostics.push(Diagnostic::error(
+            "tx.duplicate_id",
+            format!("create_style: a style with id {:?} already exists", id),
+            None,
+            Some(id.to_owned()),
+        ));
+        return;
+    }
+
+    let mut props = std::collections::BTreeMap::new();
+    for (key, token_id) in properties {
+        let Some(canonical) = canonicalize_style_key(key) else {
+            diagnostics.push(Diagnostic::error(
+                "tx.unsupported_property",
+                format!(
+                    "create_style: property {:?} is not a recognized style key",
+                    key
+                ),
+                None,
+                Some(id.to_owned()),
+            ));
+            return;
+        };
+        props.insert(
+            canonical.to_owned(),
+            PropertyValue::TokenRef(token_id.clone()),
+        );
+    }
+
+    doc.styles.styles.push(zenith_core::Style {
+        id: id.to_owned(),
+        properties: props,
+        unknown_props: std::collections::BTreeMap::new(),
+        source_span: None,
+    });
+    record_affected(id, affected);
+}
+
+/// Remove a named style from `doc.styles.styles`.
+///
+/// Rejects with `tx.unknown_style` if no style with `id` exists.
+pub(super) fn apply_delete_style(
+    id: &str,
+    doc: &mut Document,
+    diagnostics: &mut Vec<Diagnostic>,
+    affected: &mut Vec<String>,
+) {
+    let Some(idx) = doc.styles.styles.iter().position(|s| s.id == id) else {
+        diagnostics.push(Diagnostic::error(
+            "tx.unknown_style",
+            format!("delete_style: style {:?} not found in document", id),
+            None,
+            Some(id.to_owned()),
+        ));
+        return;
+    };
+    doc.styles.styles.remove(idx);
+    record_affected(id, affected);
+}
+
 // ── SetStyleProperty ─────────────────────────────────────────────────────────
 
 /// Set one recognized visual property on a named style to a token reference.

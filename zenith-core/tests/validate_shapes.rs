@@ -82,6 +82,8 @@ fn make_connector(spec: ConnectorSpec) -> Node {
         rotate: None,
         style: None,
         text_style: None,
+        label_offset_x: None,
+        label_offset_y: None,
         spans: Vec::new(),
         source_span: None,
         unknown_props: BTreeMap::new(),

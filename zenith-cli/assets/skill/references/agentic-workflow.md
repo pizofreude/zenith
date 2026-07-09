@@ -15,8 +15,9 @@ The `.zen` holds ONLY final content. Process state — scratch candidates, their
 Start a fresh document with `zenith new doc.zen --name "…"` (a minimal valid scaffold with a
 `doc-id`), adding `--theme <name>` when no project brand exists (`references/themes.md`), or open
 any existing `.zen` — identity and the workspace store attach transparently on the first edit, so
-`zenith workspace scratch new` works immediately with no prior `tx`. There is no in-file brief
-block; keep the plan in the work itself.
+`zenith workspace scratch new` works immediately with no prior `tx`. Keep the brief out of the
+deliverable page: a short `note` / `role="guide"` node is fine for intent; process state (scratch
+candidates, lifecycle) lives only in the workspace store — never hand-edit it into the `.zen`.
 
 - Give every node a stable `id` so each edit is a precise transaction.
 - Give each layer group a `semantic-role` (+ optional `layer-priority`/`intensity`) so layers stay

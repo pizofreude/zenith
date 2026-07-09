@@ -514,3 +514,53 @@ fn distribute_unknown_axis_rejected() {
         result.diagnostics
     );
 }
+
+// ── Instance geometry: align/distribute write path ───────────────────────────
+
+const TWO_INSTANCES_DOC: &str = r##"zenith version=1 {
+  project id="proj" name="Test"
+  tokens format="zenith-token-v1" { }
+  styles {}
+  components {
+    component id="badge" {
+      rect id="shape" x=(px)0 y=(px)0 w=(px)24 h=(px)24
+    }
+  }
+  document id="doc1" title="T" {
+    page id="pg1" w=(px)400 h=(px)300 {
+      instance id="icon.a" component="badge" x=(px)10 y=(px)20 w=(px)48 h=(px)48
+      instance id="icon.b" component="badge" x=(px)100 y=(px)80 w=(px)48 h=(px)48
+    }
+  }
+}"##;
+
+#[test]
+fn align_left_selection_moves_instances() {
+    let doc = parse(TWO_INSTANCES_DOC);
+    let tx = Transaction {
+        ops: vec![Op::AlignNodes {
+            node_ids: vec!["icon.a".to_owned(), "icon.b".to_owned()],
+            align: "left".to_owned(),
+            anchor: "selection".to_owned(),
+        }],
+        permissions: Permissions::default(),
+    };
+    let result = run_transaction(&doc, &tx).expect("run_transaction must not error");
+    assert_eq!(
+        result.status,
+        TxStatus::Accepted,
+        "diagnostics: {:?}",
+        result.diagnostics
+    );
+    assert!(result.affected_node_ids.contains(&"icon.a".to_owned()));
+    assert!(result.affected_node_ids.contains(&"icon.b".to_owned()));
+    for id in ["icon.a", "icon.b"] {
+        let x = extract_px_attr(&result.source_after, id, "x")
+            .unwrap_or_else(|| panic!("could not extract x for {id}"));
+        assert!(
+            (x - 10.0).abs() < 1e-9,
+            "expected instance {id} x=10 after align, got {x}; source:\n{}",
+            result.source_after
+        );
+    }
+}

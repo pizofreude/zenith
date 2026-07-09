@@ -5,6 +5,14 @@ id contract, so any document built on the contract can be re-skinned by swapping
 Themes ship as 10 embedded packs (`@zenith/theme.<name>`) built into the CLI — no files to
 find or copy; reach them via `zenith new --theme <name>` and `zenith theme apply <name> <doc>`.
 
+Pick canvas + primitives for the brief in `references/by-kind.md`, then apply a theme — theme
+alone does not choose layout.
+
+**Dark themes** (`pine`, `ember`, `harbor`, `sunset`): captions/page numbers use
+`color.base.content` (+ opacity), not `base.200`/`base.300` as text fill. Lucide icons need an
+immediate recolor after add (`references/icons.md`). **Dual-series charts:** if
+`zenith tokens` shows `secondary` ≈ `primary`, pair `primary` with `accent` or `info`.
+
 > Provenance: these are converted from daisyUI themes. daisyUI uses `oklch`; **Zenith colors
 > are sRGB hex / CMYK only**, so values are converted to hex. A theme is a full contract, so a
 > document rarely uses every member — that rolls up into one `token.set_partially_used`
@@ -69,10 +77,12 @@ This scaffolds the full contract below into `tokens { … }` and points the page
 `color.base.100`, so every node you add can build on the role tokens directly:
 
 ```kdl
+// styles { style id="cta.label" { fill (token)"color.primary.content" font-family (token)"font.body" font-size (token)"size.body" } }
 rect id="card" x=(px)80 y=(px)120 w=(px)600 h=(px)360 fill=(token)"color.base.200" radius=(token)"radius.box" shadow=(token)"shadow.depth"
 text id="title" x=(px)112 y=(px)152 w=(px)536 h=(px)80 fill=(token)"color.base.content" font-family=(token)"font.heading" font-size=(token)"size.h1" { span "On-theme" }
-rect id="cta"  x=(px)112 y=(px)400 w=(px)220 h=(px)64 fill=(token)"color.primary" radius=(token)"radius.field"
-text id="cta.t" x=(px)112 y=(px)416 w=(px)220 h=(px)40 fill=(token)"color.primary.content" font-family=(token)"font.body" font-size=(token)"size.body" { span "Get started" }
+shape id="cta" kind="process" x=(px)112 y=(px)400 w=(px)220 h=(px)64 fill=(token)"color.primary" radius=(token)"radius.field" text-style="cta.label" h-align="center" v-align="middle" {
+  span "Get started"
+}
 ```
 
 Because everything references the contract, putting `color.primary` text on `color.primary`
@@ -105,5 +115,6 @@ swapping the token values). Pair a light theme with a dark one for the two modes
 
 To make a theme the project default, note it in `.zenith/brand.md` (`references/brand.md`) so
 new documents start with `zenith new --theme <name>` and existing ones get `theme apply <name>`.
-Don't rely on an engine default — Zenith intentionally ships only default _fonts_, not a
-default palette; themes are explicit.
+If you later adopt a full brand kit with different role ids, re-skin deliberately — don't leave
+half the document on theme ids and half on brand ids. Don't rely on an engine default palette;
+themes are explicit.

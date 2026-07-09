@@ -18,6 +18,6 @@ mod surfaces;
 #[cfg(test)]
 mod tests;
 
-pub use brand::{block, brand};
+pub use brand::{block, brand, style};
 pub use listings::{node_detail, nodes, op_detail, ops, overview, token_detail, tokens};
 pub use surfaces::{asset, diagnostics, document, page, ports, variant};

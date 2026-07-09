@@ -72,16 +72,139 @@ fn divided_anchor(
     count: usize,
 ) -> ((f64, f64), AnchorSide) {
     match kind {
-        // `ApproxOutline` (rounded rect, `process` shape, polygon/polyline/path)
-        // resolves on the bounds perimeter EXACTLY like `BoxLike` — the outline
-        // approximation is intentional and byte-identical to the box fallback.
+        // `ApproxOutline` (polygon/polyline/path) resolves on the bounds
+        // perimeter EXACTLY like `BoxLike` — the approximation is intentional
+        // and byte-identical to the box fallback.
         ConnectorTargetKind::BoxLike | ConnectorTargetKind::ApproxOutline => {
             divided_box_anchor(boxr, index, count)
+        }
+        ConnectorTargetKind::RoundedRect { tl, tr, br, bl } => {
+            divided_rounded_rect_anchor(boxr, [tl, tr, br, bl], index, count)
         }
         ConnectorTargetKind::Capsule => divided_capsule_anchor(boxr, index, count),
         ConnectorTargetKind::Diamond => divided_diamond_anchor(boxr, index, count),
         ConnectorTargetKind::Ellipse => divided_ellipse_anchor(boxr, index, count),
     }
+}
+
+/// Walk the true rounded-rect perimeter (straight edges + quarter-circle
+/// corners), starting at top-center — same origin convention as
+/// [`divided_box_anchor`].
+///
+/// Corner radii are `(tl, tr, br, bl)` and clamped so adjacent corners never
+/// exceed the shared edge length and never exceed `min(w, h) / 2`.
+fn divided_rounded_rect_anchor(
+    boxr: (f64, f64, f64, f64),
+    radii: [f64; 4],
+    index: usize,
+    count: usize,
+) -> ((f64, f64), AnchorSide) {
+    let (x, y, w, h) = boxr;
+    let cx = x + w / 2.0;
+    let cy = y + h / 2.0;
+    if w <= 0.0 || h <= 0.0 {
+        return ((cx, y), AnchorSide::Vertical);
+    }
+
+    // Clamp each radius to half-min dimension, then scale pairs that share an
+    // edge so they never exceed that edge length.
+    let max_r = (w.min(h) / 2.0).max(0.0);
+    let mut tl = radii[0].clamp(0.0, max_r);
+    let mut tr = radii[1].clamp(0.0, max_r);
+    let mut br = radii[2].clamp(0.0, max_r);
+    let mut bl = radii[3].clamp(0.0, max_r);
+    if tl + tr > w && w > 0.0 {
+        let s = w / (tl + tr);
+        tl *= s;
+        tr *= s;
+    }
+    if bl + br > w && w > 0.0 {
+        let s = w / (bl + br);
+        bl *= s;
+        br *= s;
+    }
+    if tl + bl > h && h > 0.0 {
+        let s = h / (tl + bl);
+        tl *= s;
+        bl *= s;
+    }
+    if tr + br > h && h > 0.0 {
+        let s = h / (tr + br);
+        tr *= s;
+        br *= s;
+    }
+
+    // Segments in walk order starting at top-center:
+    // 0 top mid→right, 1 TR arc, 2 right, 3 BR arc, 4 bottom, 5 BL arc, 6 left, 7 TL arc, 8 top left→mid
+    let top_right = (w / 2.0 - tr).max(0.0);
+    let right = (h - tr - br).max(0.0);
+    let bottom = (w - br - bl).max(0.0);
+    let left = (h - bl - tl).max(0.0);
+    let top_left = (w / 2.0 - tl).max(0.0);
+    let arc = |r: f64| std::f64::consts::FRAC_PI_2 * r;
+    let segs = [
+        top_right,
+        arc(tr),
+        right,
+        arc(br),
+        bottom,
+        arc(bl),
+        left,
+        arc(tl),
+        top_left,
+    ];
+    let perimeter: f64 = segs.iter().sum();
+    if perimeter <= 0.0 {
+        return ((cx, y), AnchorSide::Vertical);
+    }
+
+    let mut distance = perimeter * (index as f64 / count as f64);
+    for (i, &len) in segs.iter().enumerate() {
+        if len <= 0.0 {
+            continue;
+        }
+        if distance > len {
+            distance -= len;
+            continue;
+        }
+        let t = distance / len;
+        return match i {
+            0 => ((cx + t * top_right, y), AnchorSide::Vertical),
+            1 => {
+                // TR arc center (x+w-tr, y+tr); angle runs from −π/2 (top) to 0 (right).
+                let angle = -std::f64::consts::FRAC_PI_2 + t * std::f64::consts::FRAC_PI_2;
+                let px = x + w - tr + tr * angle.cos();
+                let py = y + tr + tr * angle.sin();
+                ((px, py), anchor_side_from_center((px, py), (cx, cy)))
+            }
+            2 => ((x + w, y + tr + t * right), AnchorSide::Horizontal),
+            3 => {
+                // BR: 0…π/2
+                let angle = t * std::f64::consts::FRAC_PI_2;
+                let px = x + w - br + br * angle.cos();
+                let py = y + h - br + br * angle.sin();
+                ((px, py), anchor_side_from_center((px, py), (cx, cy)))
+            }
+            4 => ((x + w - br - t * bottom, y + h), AnchorSide::Vertical),
+            5 => {
+                // BL: π/2…π
+                let angle = std::f64::consts::FRAC_PI_2 + t * std::f64::consts::FRAC_PI_2;
+                let px = x + bl + bl * angle.cos();
+                let py = y + h - bl + bl * angle.sin();
+                ((px, py), anchor_side_from_center((px, py), (cx, cy)))
+            }
+            6 => ((x, y + h - bl - t * left), AnchorSide::Horizontal),
+            7 => {
+                // TL: π…3π/2
+                let angle = std::f64::consts::PI + t * std::f64::consts::FRAC_PI_2;
+                let px = x + tl + tl * angle.cos();
+                let py = y + tl + tl * angle.sin();
+                ((px, py), anchor_side_from_center((px, py), (cx, cy)))
+            }
+            _ => ((x + tl + t * top_left, y), AnchorSide::Vertical),
+        };
+    }
+    ((cx, y), AnchorSide::Vertical)
 }
 
 fn divided_ellipse_anchor(

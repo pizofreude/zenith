@@ -100,6 +100,13 @@ pub fn op_example(name: &str) -> Option<&'static str> {
         "create_token" => {
             Some(r##"{"op":"create_token","id":"color.brand","type":"color","value":"#e11d48"}"##)
         }
+        "create_style" => Some(
+            r#"{"op":"create_style","id":"cta.label","properties":{"font-family":"font.body","font-size":"size.body","fill":"color.primary.content"}}"#,
+        ),
+        "delete_style" => Some(r#"{"op":"delete_style","id":"cta.label"}"#),
+        "create_master" => Some(r#"{"op":"create_master","id":"m.deck"}"#),
+        "delete_master" => Some(r#"{"op":"delete_master","id":"m.deck"}"#),
+        "set_page_master" => Some(r#"{"op":"set_page_master","page":"page.1","master":"m.deck"}"#),
         "update_token_value" => {
             Some(r##"{"op":"update_token_value","id":"color.brand","value":"#3b82f6"}"##)
         }

@@ -4,6 +4,10 @@ Zenith embeds the full Lucide set (~1745 icons) as `@zenith/icons-lucide`. Icons
 materialize as **editable native `path` nodes** — not images — so they take tokens,
 overrides, and transactions like any other geometry.
 
+For which document kinds should pull icons (architecture, feature lists, etc.), see
+`references/by-kind.md`. Other packs: `@zenith/flowchart`, `@zenith/filters`, `@zenith/masks`
+via `zenith library list`.
+
 This file is judgment and recipes. For attributes and valid values, ask the CLI:
 `zenith schema node instance`, `zenith schema node text`. For which icons exist:
 `zenith library search`.
@@ -62,6 +66,50 @@ Use a **plain bullet** (`text bullet="•" bullet-gap=(px)12`, or `format="markd
 Mixed lists are fine: give icons to the rows that have real referents and leave the rest
 plain — but keep the left edge of the labels aligned across all rows.
 
+## After `library add` — size + recolor before first render
+
+```bash
+zenith library add @zenith/icons-lucide#database --into doc.zen --page page.1 --at 120,200 --id icon.db
+zenith library show @zenith/icons-lucide#database   # path count for overrides
+```
+
+### Resize the instance (`set_geometry` or source)
+
+`library add --at X,Y` places the instance; it does **not** set a display box. Prefer tx:
+
+```json
+{"ops":[{"op":"set_geometry","node":"icon.db","x":120,"y":200,"w":40,"h":48}]}
+```
+
+Or edit the node in the `.zen` with **raw px** `w`/`h`:
+
+```kdl
+instance id="icon.db" component="lib.zenith.icons-lucide.database" \
+    x=(px)120 y=(px)200 w=(px)40 h=(px)40 { … }
+```
+
+Geometry stays raw px (not `(token)"size.icon"`). Visuals (stroke/fill) stay tokens.
+Without `w`/`h` the icon draws at natural ~24px. `rotate` is not supported on instances.
+
+### Dark themes: default stroke is near-black
+
+Lucide ships `lib.icons.stroke` ≈ `#111827`. On dark themes (`pine`, `ember`, `harbor`,
+`sunset`, …) that is **invisible** until you recolor. Do this **before** the first PNG:
+
+**Fast path (most Lucide icons share one stroke token):**
+
+```bash
+# after add, tokens include lib.icons.stroke — point it at a theme role
+zenith tx doc.zen recolor.json --apply
+# {"ops":[{"op":"update_token_value","id":"lib.icons.stroke","value":"#00d390"}]}
+# use a theme hex from `zenith tokens` (e.g. color.primary's value), or add a color token
+# and override paths to (token)"color.primary" instead.
+```
+
+**Explicit path (always correct when you need multi-color or per-icon ink):** override
+**every** path `icon.0 … icon.N-1` to `(token)"color.primary"` (or accent). Get `N` from
+`library show`. Multi-path icons left half-default look "broken" but still validate clean.
+
 ## The icon-row recipe
 
 Icons are 24×24 at natural size. Give the instance a `w`/`h` box and it scales into it;
@@ -84,10 +132,10 @@ Vertically center the icon against the text box: `icon.y = text.y + (line_height
 
 ## Three gotchas that will bite you
 
-1. **Recoloring means overriding EVERY path.** An icon is `icon.0 … icon.N-1`, and `N`
-   varies per icon: `zap` has 1 path, `lock-keyhole` has 3. An `override ref="icon.0"`
-   alone recolors part of the icon and leaves the rest at its default ink — it renders,
-   validates clean, and looks broken. Get the count from the CLI before writing overrides:
+1. **Recoloring means overriding EVERY path** (or updating the shared `lib.icons.stroke`
+   token when every path already references it). An icon is `icon.0 … icon.N-1`, and `N`
+   varies: `zap` has 1 path, `lock-keyhole` has 3, some icons have 10+. Partial overrides
+   render, validate clean, and look broken. Get the count from:
 
    ```bash
    zenith library show @zenith/icons-lucide#lock-keyhole   # → nodes : path(3)
@@ -97,10 +145,9 @@ Vertically center the icon against the text box: `icon.y = text.y + (line_height
    96px. Blow an icon up and it turns into a fat cartoon. Override `stroke-width` on each
    path to hold the optical weight you want.
 
-3. **Visual properties must be tokens.** `font-size=(px)16` is an Error
-   (`token.raw_visual_literal`). Geometry (`x`/`y`/`w`/`h`) may be raw px; color, size,
-   and stroke must be `(token)"…"`. Tokenize the icon's ink and size once
-   (`color.accent`, `size.icon`) and a palette swap moves every icon.
+3. **Visual properties must be tokens; instance geometry is raw px.** `font-size=(px)16` is
+   an Error (`token.raw_visual_literal`). Color/stroke use `(token)"…"`. Instance `w`/`h`
+   stay `(px)N` — do not expect a size token on the instance box.
 
 ## Bring your own icon set
 

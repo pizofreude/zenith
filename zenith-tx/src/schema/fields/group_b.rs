@@ -315,17 +315,126 @@ pub(super) fn op_fields(name: &str) -> Option<&'static [OpFieldSchema]> {
                 },
                 OpFieldSchema {
                     name: "type",
-                    ty: "enum: color|dimension|number|fontFamily|fontWeight",
+                    ty: "enum: color|dimension|number|fontFamily|fontWeight|shadow|filter|gradient|mask",
                     required: true,
                 },
                 OpFieldSchema {
                     name: "value",
-                    ty: "string",
-                    required: true,
+                    ty: "string (required for scalar types)",
+                    required: false,
                 },
                 OpFieldSchema {
                     name: "set",
                     ty: "string",
+                    required: false,
+                },
+                OpFieldSchema {
+                    name: "layers",
+                    ty: "array of {dx,dy,blur,color} (shadow only)",
+                    required: false,
+                },
+                OpFieldSchema {
+                    name: "filter_ops",
+                    ty: "array of {kind,…} (filter only)",
+                    required: false,
+                },
+                OpFieldSchema {
+                    name: "stops",
+                    ty: "array of {offset,color} (gradient; ≥2)",
+                    required: false,
+                },
+                OpFieldSchema {
+                    name: "angle",
+                    ty: "number degrees (linear gradient)",
+                    required: false,
+                },
+                OpFieldSchema {
+                    name: "radial",
+                    ty: "bool (gradient)",
+                    required: false,
+                },
+                OpFieldSchema {
+                    name: "center_x",
+                    ty: "number 0..1 (radial gradient)",
+                    required: false,
+                },
+                OpFieldSchema {
+                    name: "center_y",
+                    ty: "number 0..1 (radial gradient)",
+                    required: false,
+                },
+                OpFieldSchema {
+                    name: "radius",
+                    ty: "number (radial fraction or rounded-mask px)",
+                    required: false,
+                },
+                OpFieldSchema {
+                    name: "shape",
+                    ty: "enum: rect|rounded|ellipse (mask)",
+                    required: false,
+                },
+                OpFieldSchema {
+                    name: "feather",
+                    ty: "number px (mask)",
+                    required: false,
+                },
+                OpFieldSchema {
+                    name: "invert",
+                    ty: "bool (mask)",
+                    required: false,
+                },
+            ];
+            Some(F)
+        }
+        "create_style" => {
+            static F: &[OpFieldSchema] = &[
+                OpFieldSchema {
+                    name: "id",
+                    ty: "string",
+                    required: true,
+                },
+                OpFieldSchema {
+                    name: "properties",
+                    ty: "map of style-key → token id",
+                    required: false,
+                },
+            ];
+            Some(F)
+        }
+        "delete_style" => {
+            static F: &[OpFieldSchema] = &[OpFieldSchema {
+                name: "id",
+                ty: "string",
+                required: true,
+            }];
+            Some(F)
+        }
+        "create_master" => {
+            static F: &[OpFieldSchema] = &[OpFieldSchema {
+                name: "id",
+                ty: "string",
+                required: true,
+            }];
+            Some(F)
+        }
+        "delete_master" => {
+            static F: &[OpFieldSchema] = &[OpFieldSchema {
+                name: "id",
+                ty: "string",
+                required: true,
+            }];
+            Some(F)
+        }
+        "set_page_master" => {
+            static F: &[OpFieldSchema] = &[
+                OpFieldSchema {
+                    name: "page",
+                    ty: "string",
+                    required: true,
+                },
+                OpFieldSchema {
+                    name: "master",
+                    ty: "string or null",
                     required: false,
                 },
             ];

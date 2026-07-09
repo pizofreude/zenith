@@ -3,6 +3,9 @@
 Project brand brief for the Zenith agent. Place at `.zenith/brand.md`. The `zenith` skill reads
 this before authoring and conforms to it. Keep it concrete and token-oriented.
 
+These role ids are the **project brand dialect**. If docs already use an embedded theme
+(`color.primary`, `color.base.*`), either keep that dialect or re-skin via the brand kit — don't mix.
+
 ## Palette (roles, not just hues)
 
 - color.brand = #**\_\_** (primary brand color)

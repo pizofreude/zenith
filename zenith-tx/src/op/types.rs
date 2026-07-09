@@ -13,6 +13,60 @@ pub struct OpPoint {
     pub y: f64,
 }
 
+/// One shadow layer for [`super::Op::CreateToken`] when `type` is `"shadow"`.
+///
+/// JSON shape: `{"dx":0,"dy":8,"blur":24,"color":"color.shadow"}`.
+#[derive(serde::Serialize, serde::Deserialize, Debug, Clone, PartialEq)]
+pub struct ShadowLayerInput {
+    /// Horizontal offset in pixels.
+    pub dx: f64,
+    /// Vertical offset in pixels.
+    pub dy: f64,
+    /// Blur radius in pixels.
+    pub blur: f64,
+    /// Color token id this layer samples.
+    pub color: String,
+}
+
+/// One filter op for [`super::Op::CreateToken`] when `type` is `"filter"`.
+///
+/// JSON shape examples:
+/// - `{"kind":"noise","amount":0.06,"seed":1,"scale":1}`
+/// - `{"kind":"grayscale","amount":1}`
+/// - `{"kind":"duotone","shadow":"color.a","highlight":"color.b","amount":1}`
+#[derive(serde::Serialize, serde::Deserialize, Debug, Clone, PartialEq)]
+pub struct FilterOpInput {
+    /// Filter kind name (`noise`, `grayscale`, `invert`, `sepia`, `saturate`,
+    /// `brightness`, `contrast`, `hue-rotate`, `duotone`).
+    pub kind: String,
+    /// Optional amount (meaning depends on kind).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub amount: Option<f64>,
+    /// Noise seed (noise only).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub seed: Option<i64>,
+    /// Noise cell size in px (noise only).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub scale: Option<f64>,
+    /// Duotone shadow color token id.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub shadow: Option<String>,
+    /// Duotone highlight color token id.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub highlight: Option<String>,
+}
+
+/// One gradient stop for [`super::Op::CreateToken`] when `type` is `"gradient"`.
+///
+/// JSON shape: `{"offset":0.0,"color":"color.sky.top"}`.
+#[derive(serde::Serialize, serde::Deserialize, Debug, Clone, PartialEq)]
+pub struct GradientStopInput {
+    /// Position along the gradient axis in `0.0..=1.0`.
+    pub offset: f64,
+    /// Color token id this stop samples.
+    pub color: String,
+}
+
 /// A path anchor used by [`super::Op::SetPathAnchors`], expressed in pixels.
 ///
 /// JSON shape: `{"x": 50.0, "y": 80.0, "kind": "smooth", "in_x": 40.0, "in_y": 80.0, "out_x": 60.0, "out_y": 80.0}`.

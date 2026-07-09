@@ -29,10 +29,19 @@ pub(in crate::engine) fn apply_reorder(
     diagnostics: &mut Vec<Diagnostic>,
     affected: &mut Vec<String>,
 ) {
-    for page in doc.body.pages.iter_mut() {
-        match reorder_in(&mut page.children, node_id, kind) {
+    // Try each page, then each master (chrome lives on masters).
+    let mut hosts: Vec<&mut [Node]> = doc
+        .body
+        .pages
+        .iter_mut()
+        .map(|p| p.children.as_mut_slice())
+        .collect();
+    hosts.extend(doc.masters.iter_mut().map(|m| m.children.as_mut_slice()));
+
+    for children in hosts {
+        match reorder_in(children, node_id, kind) {
             MoveOutcome::NotFound => {
-                // Try the next page.
+                // Try the next host.
             }
             MoveOutcome::Moved => {
                 record_affected(node_id, affected);
@@ -58,7 +67,7 @@ pub(in crate::engine) fn apply_reorder(
             }
         }
     }
-    // No page contained the node.
+    // No page or master contained the node.
     diagnostics.push(Diagnostic::error(
         "tx.unknown_node",
         format!("node {:?} not found in document", node_id),

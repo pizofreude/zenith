@@ -133,6 +133,12 @@ pub struct ConnectorNode {
     /// Style ref applied to the owned label text (mirrors `ShapeNode::text_style`).
     /// `None` when no label style is authored (label inherits document defaults).
     pub text_style: Option<String>,
+    /// Horizontal offset in px applied to the label after midpoint placement.
+    /// Positive shifts right. `None` = 0.
+    pub label_offset_x: Option<Dimension>,
+    /// Vertical offset in px applied to the label after midpoint placement.
+    /// Positive shifts down. `None` = 0.
+    pub label_offset_y: Option<Dimension>,
     /// The owned label spans rendered at the connector's midpoint. Empty (the
     /// default) means no label — the connector renders exactly as a span-less
     /// connector. Same model as `ShapeNode::spans` and `TextNode::spans`.

@@ -132,7 +132,7 @@ fn insert_node(
             diagnostics.push(Diagnostic::error(
                 "tx.invalid_parent",
                 format!(
-                    "no container node with id {:?} (parent must be a page, group, or frame)",
+                    "no container with id {:?} (parent must be a page, master, group, or frame)",
                     parent
                 ),
                 None,
@@ -220,6 +220,12 @@ pub(in crate::engine) fn apply_remove_node(
 ) {
     for page in doc.body.pages.iter_mut() {
         if remove_node_by_id(&mut page.children, node_id).is_some() {
+            record_affected(node_id, affected);
+            return;
+        }
+    }
+    for master in doc.masters.iter_mut() {
+        if remove_node_by_id(&mut master.children, node_id).is_some() {
             record_affected(node_id, affected);
             return;
         }

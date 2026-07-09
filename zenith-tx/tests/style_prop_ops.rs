@@ -163,3 +163,58 @@ fn set_style_property_preserves_other_props() {
         "source_after should still contain the pre-existing font-size property"
     );
 }
+
+// ── create_style / delete_style ───────────────────────────────────────────────
+
+#[test]
+fn create_style_accepted() {
+    let doc = parse(STYLE_PROP_DOC);
+    let mut properties = std::collections::BTreeMap::new();
+    properties.insert("fill".to_owned(), "color.accent".to_owned());
+    properties.insert("font-size".to_owned(), "size.md".to_owned());
+    let tx = Transaction {
+        ops: vec![Op::CreateStyle {
+            id: "s.cta".to_owned(),
+            properties,
+        }],
+        permissions: Permissions::default(),
+    };
+    let result = run_transaction(&doc, &tx).expect("run_transaction should not error");
+    assert_eq!(result.status, TxStatus::Accepted);
+    assert!(result.source_after.contains("s.cta"));
+    assert!(result.source_after.contains("color.accent"));
+}
+
+#[test]
+fn create_style_duplicate_rejected() {
+    let doc = parse(STYLE_PROP_DOC);
+    let tx = Transaction {
+        ops: vec![Op::CreateStyle {
+            id: "s.heading".to_owned(),
+            properties: std::collections::BTreeMap::new(),
+        }],
+        permissions: Permissions::default(),
+    };
+    let result = run_transaction(&doc, &tx).expect("run_transaction should not error");
+    assert_eq!(result.status, TxStatus::Rejected);
+    assert!(
+        result
+            .diagnostics
+            .iter()
+            .any(|d| d.code == "tx.duplicate_id")
+    );
+}
+
+#[test]
+fn delete_style_accepted() {
+    let doc = parse(STYLE_PROP_DOC);
+    let tx = Transaction {
+        ops: vec![Op::DeleteStyle {
+            id: "s.heading".to_owned(),
+        }],
+        permissions: Permissions::default(),
+    };
+    let result = run_transaction(&doc, &tx).expect("run_transaction should not error");
+    assert_eq!(result.status, TxStatus::Accepted);
+    assert!(!result.source_after.contains("s.heading"));
+}

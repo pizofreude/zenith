@@ -248,6 +248,7 @@ pub fn node_content(kind: &str) -> Option<NodeContentDescriptor> {
             description: "Optional `span` children form a text label rendered at the \
                 connector's geometric midpoint (the mid-point of the routed polyline). \
                 Use `text-style` on the connector node to apply a style ref to the label. \
+                Nudge the label with `label-offset-x` / `label-offset-y` (px) off the midpoint. \
                 Connectors can target semantic ports with `from=\"node#port\"`; declare \
                 page/component ports in a sibling `ports { port node=\"...\" id=\"...\" \
                 anchor=\"...\" }` metadata block. Omit the block entirely (or author no \

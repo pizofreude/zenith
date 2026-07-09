@@ -16,7 +16,7 @@ pub mod schema;
 pub use engine::{TextOutlineRequest, materialize_text_outlines, run_transaction};
 pub use merge::{merge_candidate_page, reconcile_candidate_tokens};
 pub use op::{
-    AddAssetMetadata, Op, OpPathBooleanOperation, OpPathHandle, OpPoint, OpSpan, Permissions,
-    Position, Transaction,
+    AddAssetMetadata, FilterOpInput, GradientStopInput, Op, OpPathBooleanOperation, OpPathHandle,
+    OpPoint, OpSpan, Permissions, Position, ShadowLayerInput, Transaction,
 };
 pub use result::{TxError, TxResult, TxStatus};

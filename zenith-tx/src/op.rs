@@ -25,6 +25,7 @@ mod types;
 pub use ops::Op;
 pub use transaction::Transaction;
 pub use types::{
-    AddAssetMetadata, OpPathAnchor, OpPathBooleanOperation, OpPathHandle, OpPathSubpath,
-    OpPathTransform, OpPoint, OpSpan, Permissions, Position,
+    AddAssetMetadata, FilterOpInput, GradientStopInput, OpPathAnchor, OpPathBooleanOperation,
+    OpPathHandle, OpPathSubpath, OpPathTransform, OpPoint, OpSpan, Permissions, Position,
+    ShadowLayerInput,
 };

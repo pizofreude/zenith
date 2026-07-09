@@ -4,13 +4,44 @@ zenith version=1 {
   libraries {
     library id="@brand/kit" version="1.0.0"
   }
+  tokens format="zenith-token-v1" {
+    token id="color.brand" type="color" value="#e11d48"
+    token id="color.accent" type="color" value="#3b82f6"
+    token id="color.ink" type="color" value="#0f172a"
+    token id="color.bg" type="color" value="#ffffff"
+    token id="color.muted" type="color" value="#64748b"
+    token id="font.heading" type="fontFamily" value="Noto Sans"
+    token id="font.body" type="fontFamily" value="Noto Sans"
+    token id="size.h1" type="dimension" value=(px)64
+    token id="size.h2" type="dimension" value=(px)40
+    token id="size.body" type="dimension" value=(px)28
+  }
   actions {
     action id="apply-brand" label="Apply brand palette" version="1.0.0" {
-      tx "{\"ops\":[{\"op\":\"update_token_value\",\"id\":\"color.brand\",\"value\":\"#e11d48\"},{\"op\":\"update_token_value\",\"id\":\"color.accent\",\"value\":\"#3b82f6\"},{\"op\":\"update_token_value\",\"id\":\"color.ink\",\"value\":\"#0f172a\"}]}"
+      tx "{\"ops\":[{\"op\":\"update_token_value\",\"id\":\"color.brand\",\"value\":\"#e11d48\"},{\"op\":\"update_token_value\",\"id\":\"color.accent\",\"value\":\"#3b82f6\"},{\"op\":\"update_token_value\",\"id\":\"color.ink\",\"value\":\"#0f172a\"},{\"op\":\"update_token_value\",\"id\":\"color.bg\",\"value\":\"#ffffff\"}]}"
     }
   }
-  styles {}
+  styles {
+    style id="preview.label" {
+      font-family (token)"font.body"
+      font-size (token)"size.body"
+      fill (token)"color.ink"
+    }
+  }
   document id="pack.preview" title="Brand Kit" {
-    page id="pack.pg" name="Preview" w=(px)100 h=(px)100 {}
+    page id="pack.pg" name="Preview" w=(px)320 h=(px)200 background=(token)"color.bg" {
+      rect id="swatch.brand" x=(px)24 y=(px)24 w=(px)56 h=(px)56 fill=(token)"color.brand"
+      rect id="swatch.accent" x=(px)96 y=(px)24 w=(px)56 h=(px)56 fill=(token)"color.accent"
+      rect id="swatch.muted" x=(px)168 y=(px)24 w=(px)56 h=(px)56 fill=(token)"color.muted"
+      text id="preview.h" x=(px)24 y=(px)100 w=(px)272 h=(px)40 fill=(token)"color.ink" font-family=(token)"font.heading" font-size=(token)"size.h1" {
+        span "Brand"
+      }
+      text id="preview.sub" x=(px)160 y=(px)156 w=(px)140 h=(px)28 fill=(token)"color.muted" font-family=(token)"font.body" font-size=(token)"size.h2" {
+        span "kit"
+      }
+      shape id="preview.cta" kind="process" x=(px)24 y=(px)148 w=(px)120 h=(px)36 fill=(token)"color.brand" text-style="preview.label" h-align="center" v-align="middle" {
+        span "Apply"
+      }
+    }
   }
 }

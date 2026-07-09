@@ -12,19 +12,27 @@ use crate::compile::leaf::path_outline_bounds;
 use crate::compile::util::resolve_geometry_px;
 
 /// Shape family for connector divided-anchor perimeter resolution.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub(in crate::compile) enum ConnectorTargetKind {
     BoxLike,
     Capsule,
     Diamond,
     Ellipse,
+    /// A rounded rectangle with corner radii `(tl, tr, br, bl)` in pixels.
+    /// Divided anchors walk the true perimeter (straight edges + circular
+    /// corner arcs). Radii are clamped to `min(w, h) / 2` at resolution time.
+    RoundedRect {
+        tl: f64,
+        tr: f64,
+        br: f64,
+        bl: f64,
+    },
     /// A node whose exact outline is not modeled by the divided-anchor router
-    /// (rounded rect, `shape kind="process"`, polygon/polyline/path). Divided
-    /// anchors on these resolve on the bounds PERIMETER exactly like
-    /// [`ConnectorTargetKind::BoxLike`] — the approximation is intentional and
-    /// byte-identical to the pre-existing box fallback. The distinct variant
-    /// exists only so the connector compiler can surface a
-    /// `connector.unsupported_outline` warning for a divided anchor here.
+    /// (polygon/polyline/path). Divided anchors on these resolve on the bounds
+    /// PERIMETER exactly like [`ConnectorTargetKind::BoxLike`] — the
+    /// approximation is intentional and byte-identical to the pre-existing box
+    /// fallback. The distinct variant exists so the connector compiler can
+    /// surface a `connector.unsupported_outline` warning for a divided anchor.
     ApproxOutline,
 }
 
@@ -104,7 +112,7 @@ fn collect_connector_targets(
                 targets
                     .kinds
                     .entry(id.to_owned())
-                    .or_insert(connector_target_kind(child));
+                    .or_insert(connector_target_kind(child, resolved));
             } else if let Some((x, y, w, h)) = connector_outline_rect(child, resolved) {
                 // Not in node_boxes but has a free-form outline: register its
                 // ABSOLUTE bounds box and its (ApproxOutline) kind, for the
@@ -116,7 +124,7 @@ fn collect_connector_targets(
                 targets
                     .kinds
                     .entry(id.to_owned())
-                    .or_insert(connector_target_kind(child));
+                    .or_insert(connector_target_kind(child, resolved));
             }
         }
         match child {
@@ -226,33 +234,37 @@ fn points_bounds(points: &[Point]) -> Option<(f64, f64, f64, f64)> {
     Some((min_x, min_y, max_x - min_x, max_y - min_y))
 }
 
-fn connector_target_kind(node: &Node) -> ConnectorTargetKind {
+fn connector_target_kind(
+    node: &Node,
+    resolved: &BTreeMap<String, ResolvedToken>,
+) -> ConnectorTargetKind {
     match node {
         Node::Ellipse(_) => ConnectorTargetKind::Ellipse,
         Node::Shape(n) if n.kind.as_deref() == Some("decision") => ConnectorTargetKind::Diamond,
         Node::Shape(n) if n.kind.as_deref() == Some("terminator") => ConnectorTargetKind::Capsule,
         Node::Shape(n) if n.kind.as_deref() == Some("ellipse") => ConnectorTargetKind::Ellipse,
-        // A `process` shape is a rounded rect whose exact outline is not modeled;
-        // divided anchors approximate on the bounds perimeter (see ApproxOutline).
+        // A `process` shape is a (possibly rounded) rect. When radius > 0, walk
+        // the true rounded perimeter; otherwise BoxLike (sharp bounds).
         Node::Shape(n) if n.kind.as_deref() == Some("process") => {
-            ConnectorTargetKind::ApproxOutline
+            match shape_uniform_radius(n, resolved) {
+                Some(r) if r > 0.0 => ConnectorTargetKind::RoundedRect {
+                    tl: r,
+                    tr: r,
+                    br: r,
+                    bl: r,
+                },
+                _ => ConnectorTargetKind::BoxLike,
+            }
         }
-        // A rect with ANY corner radius (uniform or per-corner) is a rounded rect:
-        // its true outline is not modeled, so divided anchors approximate.
-        Node::Rect(n)
-            if n.radius.is_some()
-                || n.radius_tl.is_some()
-                || n.radius_tr.is_some()
-                || n.radius_br.is_some()
-                || n.radius_bl.is_some() =>
-        {
-            ConnectorTargetKind::ApproxOutline
-        }
+        // A rect with any positive corner radius walks the true rounded perimeter.
+        Node::Rect(n) => match rect_corner_radii(n, resolved) {
+            Some((tl, tr, br, bl)) => ConnectorTargetKind::RoundedRect { tl, tr, br, bl },
+            None => ConnectorTargetKind::BoxLike,
+        },
         // Free-form vector outlines are not modeled; divided anchors approximate
         // on the bounding-box perimeter.
         Node::Polygon(_) | Node::Polyline(_) | Node::Path(_) => ConnectorTargetKind::ApproxOutline,
-        Node::Rect(_)
-        | Node::Text(_)
+        Node::Text(_)
         | Node::Code(_)
         | Node::Frame(_)
         | Node::Group(_)
@@ -271,6 +283,39 @@ fn connector_target_kind(node: &Node) -> ConnectorTargetKind {
         | Node::Light(_)
         | Node::Unknown(_) => ConnectorTargetKind::BoxLike,
     }
+}
+
+/// Resolve uniform radius on a process shape (px). `None` when absent/unresolvable.
+fn shape_uniform_radius(
+    shape: &zenith_core::ShapeNode,
+    resolved: &BTreeMap<String, ResolvedToken>,
+) -> Option<f64> {
+    resolve_geometry_px(shape.radius.as_ref(), resolved)
+}
+
+/// Resolve corner radii for a rect. Returns `Some((tl, tr, br, bl))` when at
+/// least one corner is positive; `None` for a sharp box (all corners 0 / absent).
+fn rect_corner_radii(
+    rect: &zenith_core::RectNode,
+    resolved: &BTreeMap<String, ResolvedToken>,
+) -> Option<(f64, f64, f64, f64)> {
+    let has_any = rect.radius.is_some()
+        || rect.radius_tl.is_some()
+        || rect.radius_tr.is_some()
+        || rect.radius_br.is_some()
+        || rect.radius_bl.is_some();
+    if !has_any {
+        return None;
+    }
+    let uniform = resolve_geometry_px(rect.radius.as_ref(), resolved).unwrap_or(0.0);
+    let tl = resolve_geometry_px(rect.radius_tl.as_ref(), resolved).unwrap_or(uniform);
+    let tr = resolve_geometry_px(rect.radius_tr.as_ref(), resolved).unwrap_or(uniform);
+    let br = resolve_geometry_px(rect.radius_br.as_ref(), resolved).unwrap_or(uniform);
+    let bl = resolve_geometry_px(rect.radius_bl.as_ref(), resolved).unwrap_or(uniform);
+    if tl <= 0.0 && tr <= 0.0 && br <= 0.0 && bl <= 0.0 {
+        return None;
+    }
+    Some((tl.max(0.0), tr.max(0.0), br.max(0.0), bl.max(0.0)))
 }
 
 fn collect_instance_connector_targets(

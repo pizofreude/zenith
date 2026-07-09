@@ -725,6 +725,7 @@ pub fn run() -> ExitCode {
                 Some(cli::SchemaSub::Diagnostics) => commands::schema::diagnostics(json),
                 Some(cli::SchemaSub::Brand) => commands::schema::brand(json),
                 Some(cli::SchemaSub::Block) => commands::schema::block(json),
+                Some(cli::SchemaSub::Style) => commands::schema::style(json),
             };
             println!("{}", output);
             ExitCode::from(code)

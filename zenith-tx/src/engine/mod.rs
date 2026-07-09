@@ -32,6 +32,6 @@ pub use text_outline::{TextOutlineRequest, materialize_text_outlines};
 // `super::`, exactly as before the split.
 use run::{finish_candidate, format_source};
 use tree::{
-    find_node_any_mut, find_node_shared, node_id_of, node_kind_str, px, record_affected,
-    subtree_contains,
+    find_node_any_mut, find_node_any_shared, find_node_shared, node_id_of, node_kind_str, px,
+    record_affected, subtree_contains,
 };

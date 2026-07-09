@@ -142,6 +142,10 @@ pub(crate) const CONNECTOR_KNOWN_PROPS: &[&str] = &[
     "style",
     "text-style",
     "text_style",
+    "label-offset-x",
+    "label_offset_x",
+    "label-offset-y",
+    "label_offset_y",
 ];
 
 pub(super) fn transform_connector(node: &KdlNode) -> Result<ConnectorNode, ParseError> {
@@ -181,6 +185,10 @@ pub(super) fn transform_connector(node: &KdlNode) -> Result<ConnectorNode, Parse
         style: optional_string_prop(node, "style").map(str::to_owned),
         text_style: optional_string_prop_aliased(node, "text-style", "text_style")
             .map(str::to_owned),
+        label_offset_x: optional_dimension_prop(node, "label-offset-x")
+            .or_else(|| optional_dimension_prop(node, "label_offset_x")),
+        label_offset_y: optional_dimension_prop(node, "label-offset-y")
+            .or_else(|| optional_dimension_prop(node, "label_offset_y")),
         spans,
         source_span: node_span(node),
         unknown_props,

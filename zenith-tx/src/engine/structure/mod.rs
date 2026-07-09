@@ -21,7 +21,7 @@ pub(in crate::engine) use duplicate::{
 pub(crate) use duplicate::{suffix_ids_in_children, suffix_zone_and_fold_ids};
 pub(in crate::engine) use group::{apply_group, apply_reparent, apply_ungroup};
 pub(in crate::engine) use page::{
-    AddPageSpec, apply_add_page, apply_delete_page, apply_reorder_pages, apply_set_page_size,
-    parse_dimension_str,
+    AddPageSpec, apply_add_page, apply_create_master, apply_delete_master, apply_delete_page,
+    apply_reorder_pages, apply_set_page_master, apply_set_page_size, parse_dimension_str,
 };
 pub(in crate::engine) use reorder::{ReorderKind, apply_reorder};

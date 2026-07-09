@@ -23,16 +23,20 @@ use super::pattern::apply_detach_pattern;
 use super::recipe::{RecipeScalars, apply_create_recipe, apply_delete_recipe, apply_update_recipe};
 use super::structure;
 use super::structure::{
-    AddPathSpec, ReorderKind, apply_add_node, apply_add_page, apply_add_path, apply_delete_page,
-    apply_duplicate_node, apply_duplicate_page, apply_group, apply_remove_node, apply_reorder,
-    apply_reorder_pages, apply_reparent, apply_set_page_size, apply_ungroup,
+    AddPathSpec, ReorderKind, apply_add_node, apply_add_page, apply_add_path, apply_create_master,
+    apply_delete_master, apply_delete_page, apply_duplicate_node, apply_duplicate_page,
+    apply_group, apply_remove_node, apply_reorder, apply_reorder_pages, apply_reparent,
+    apply_set_page_master, apply_set_page_size, apply_ungroup,
 };
 use super::style::{
-    apply_find_replace_text, apply_replace_text, apply_set_fill, apply_set_opacity,
-    apply_set_stroke, apply_set_stroke_width, apply_set_style_property, apply_set_text_align,
-    apply_set_text_direction, apply_set_text_overflow,
+    apply_create_style, apply_delete_style, apply_find_replace_text, apply_replace_text,
+    apply_set_fill, apply_set_opacity, apply_set_stroke, apply_set_stroke_width,
+    apply_set_style_property, apply_set_text_align, apply_set_text_direction,
+    apply_set_text_overflow,
 };
-use super::token::{apply_create_token, apply_update_token_value};
+use super::token::{
+    CreateTokenBody, CreateTokenScalars, apply_create_token, apply_update_token_value,
+};
 use crate::op::Op;
 
 pub(super) fn apply_op(
@@ -445,12 +449,38 @@ pub(super) fn apply_op(
             token_type,
             value,
             set,
+            layers,
+            filter_ops,
+            stops,
+            angle,
+            radial,
+            center_x,
+            center_y,
+            radius,
+            shape,
+            feather,
+            invert,
         } => {
             apply_create_token(
-                id,
-                token_type,
-                value,
-                set.as_deref(),
+                &CreateTokenScalars {
+                    id,
+                    token_type,
+                    value,
+                    set: set.as_deref(),
+                },
+                &CreateTokenBody {
+                    layers,
+                    filter_ops,
+                    stops,
+                    angle: *angle,
+                    radial: *radial,
+                    center_x: *center_x,
+                    center_y: *center_y,
+                    radius: *radius,
+                    shape: shape.as_deref(),
+                    feather: *feather,
+                    invert: *invert,
+                },
                 doc,
                 diagnostics,
                 affected,
@@ -465,6 +495,21 @@ pub(super) fn apply_op(
             value,
         } => {
             apply_set_style_property(style_id, property, value, doc, diagnostics, affected);
+        }
+        Op::CreateStyle { id, properties } => {
+            apply_create_style(id, properties, doc, diagnostics, affected);
+        }
+        Op::DeleteStyle { id } => {
+            apply_delete_style(id, doc, diagnostics, affected);
+        }
+        Op::CreateMaster { id } => {
+            apply_create_master(id, doc, diagnostics, affected);
+        }
+        Op::DeleteMaster { id } => {
+            apply_delete_master(id, doc, diagnostics, affected);
+        }
+        Op::SetPageMaster { page, master } => {
+            apply_set_page_master(page, master.as_deref(), doc, diagnostics, affected);
         }
         Op::SetTextDirection { node, direction } => {
             apply_set_text_direction(node, direction, doc, diagnostics, affected);

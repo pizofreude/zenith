@@ -20,6 +20,7 @@ zenith schema variant               # variants block and override entry structur
 zenith schema diagnostics           # diagnostic-policy verbs + governable codes\n  \
 zenith schema brand                 # brand-contract block (allowed colors/fonts/weights)\n  \
 zenith schema block                 # block role declaration: vocab, props, scopes, cascade\n  \
+zenith schema style                 # styles block keys + create_style / set_style_property\n  \
 zenith schema nodes --json          # machine-readable JSON")]
 pub struct SchemaArgs {
     #[command(subcommand)]
@@ -142,4 +143,11 @@ pub enum SchemaSub {
     /// precedence is text > page > document (highest specificity wins). Block decls
     /// are consumed only on text nodes with `format="markdown"`.
     Block,
+
+    /// Show the `styles { style id=… { … } }` block: recognized keys and tx ops.
+    ///
+    /// Documents placement, the recognized visual property keys (`fill`,
+    /// `font-family`, …), and the transaction ops `create_style`,
+    /// `set_style_property`, and `delete_style`. Includes a worked example.
+    Style,
 }

@@ -97,6 +97,8 @@ pub(super) fn write_connector(c: &ConnectorNode, out: &mut String, depth: usize)
     write_opt_dimension(out, "rotate", &c.rotate);
     write_opt_str(out, "style", &c.style);
     write_opt_str(out, "text-style", &c.text_style);
+    write_opt_dimension(out, "label-offset-x", &c.label_offset_x);
+    write_opt_dimension(out, "label-offset-y", &c.label_offset_y);
 
     // Unknown properties in sorted key order (BTreeMap iteration is sorted).
     for (key, prop) in &c.unknown_props {

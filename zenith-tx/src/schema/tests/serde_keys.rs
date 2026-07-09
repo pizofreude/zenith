@@ -367,6 +367,17 @@ fn op_fields_names_match_serde_keys() {
                 token_type: "color".into(),
                 value: "#e11d48".into(),
                 set: Some("@zenith/theme.cobalt".into()),
+                layers: vec![],
+                filter_ops: vec![],
+                stops: vec![],
+                angle: None,
+                radial: None,
+                center_x: None,
+                center_y: None,
+                radius: None,
+                shape: None,
+                feather: None,
+                invert: None,
             },
         ),
         (
@@ -383,6 +394,41 @@ fn op_fields_names_match_serde_keys() {
                 style_id: "heading".into(),
                 property: "font-family".into(),
                 value: "font.body".into(),
+            },
+        ),
+        (
+            "create_style",
+            Op::CreateStyle {
+                id: "cta.label".into(),
+                properties: std::collections::BTreeMap::from([(
+                    "fill".into(),
+                    "color.primary.content".into(),
+                )]),
+            },
+        ),
+        (
+            "delete_style",
+            Op::DeleteStyle {
+                id: "cta.label".into(),
+            },
+        ),
+        (
+            "create_master",
+            Op::CreateMaster {
+                id: "m.deck".into(),
+            },
+        ),
+        (
+            "delete_master",
+            Op::DeleteMaster {
+                id: "m.deck".into(),
+            },
+        ),
+        (
+            "set_page_master",
+            Op::SetPageMaster {
+                page: "page.1".into(),
+                master: Some("m.deck".into()),
             },
         ),
         (

@@ -5,7 +5,7 @@ use zenith_core::{Diagnostic, Dimension, Document, Node, PropertyValue, Unit, di
 
 use super::structure::parse_dimension_str;
 use super::{
-    find_node_any_mut, find_node_shared, node_kind_str, px, record_affected, subtree_contains,
+    find_node_any_mut, find_node_any_shared, node_kind_str, px, record_affected, subtree_contains,
 };
 
 /// Valid alignment directions for `Op::AlignNodes`.
@@ -67,10 +67,8 @@ pub(in crate::engine) fn node_geometry_mut(node: &mut Node) -> Option<GeometryMu
         Node::Chart(c) => Some((&mut c.x, &mut c.y, &mut c.w, &mut c.h)),
         Node::Mesh(m) => Some((&mut m.x, &mut m.y, &mut m.w, &mut m.h)),
         Node::Light(_) => None,
-        // `Instance` is excluded: it carries only an x/y origin, no w/h box, so
-        // the four-slot bbox setter does not apply. A set_geometry on an instance
-        // honestly surfaces tx.unsupported_property rather than silently dropping
-        // the requested w/h.
+        // `Instance` uses `Option<Dimension>` slots (not `PropertyValue`);
+        // layout writes go through [`write_node_xy`] / [`apply_set_geometry`].
         // A footnote has NO x/y/w/h box (the renderer positions it in the
         // footnote zone), so set_geometry does not apply — it honestly surfaces
         // tx.unsupported_property rather than silently dropping the request.
@@ -85,6 +83,36 @@ pub(in crate::engine) fn node_geometry_mut(node: &mut Node) -> Option<GeometryMu
         | Node::Connector(_)
         | Node::Unknown(_) => None,
     }
+}
+
+/// Write absolute `x`/`y` (px) onto a node that participates in layout ops.
+///
+/// Handles both `PropertyValue` geometry (via [`node_geometry_mut`]) and
+/// `Instance` `Option<Dimension>` slots. Returns `true` when a write path
+/// existed for the node kind.
+fn write_node_xy(node: &mut Node, new_x: Option<f64>, new_y: Option<f64>) -> bool {
+    if new_x.is_none() && new_y.is_none() {
+        return false;
+    }
+    if let Node::Instance(inst) = node {
+        if let Some(v) = new_x {
+            inst.x = Some(px(v));
+        }
+        if let Some(v) = new_y {
+            inst.y = Some(px(v));
+        }
+        return true;
+    }
+    if let Some((nx, ny, _, _)) = node_geometry_mut(node) {
+        if let Some(v) = new_x {
+            *nx = Some(PropertyValue::Dimension(px(v)));
+        }
+        if let Some(v) = new_y {
+            *ny = Some(PropertyValue::Dimension(px(v)));
+        }
+        return true;
+    }
+    false
 }
 
 // ── SetGeometry ───────────────────────────────────────────────────────────────
@@ -181,6 +209,33 @@ pub(super) fn apply_set_geometry(
             // (no unsupported_property for the geometry side).
             let has_geom_delta = x.is_some() || y.is_some() || w.is_some() || h.is_some();
             if has_geom_delta {
+                // Instance stores placement as Option<Dimension>, not PropertyValue.
+                if let Node::Instance(inst) = node {
+                    if let Some(v) = x {
+                        inst.x = Some(px(v));
+                    }
+                    if let Some(v) = y {
+                        inst.y = Some(px(v));
+                    }
+                    if let Some(v) = w {
+                        inst.w = Some(px(v));
+                    }
+                    if let Some(v) = h {
+                        inst.h = Some(px(v));
+                    }
+                    if rotate.is_some() {
+                        diagnostics.push(Diagnostic::error(
+                            "tx.unsupported_property",
+                            "set_geometry: rotate is not supported on instance nodes".to_owned(),
+                            None,
+                            Some(node_id.to_owned()),
+                        ));
+                        return;
+                    }
+                    record_affected(node_id, affected);
+                    return;
+                }
+
                 match node_geometry_mut(node) {
                     None => {
                         diagnostics.push(Diagnostic::error(
@@ -257,16 +312,27 @@ fn read_geometry_px(node: &Node) -> Option<(f64, f64, f64, f64)> {
         Node::Pattern(p) => (p.x.as_ref(), p.y.as_ref(), p.w.as_ref(), p.h.as_ref()),
         Node::Chart(c) => (c.x.as_ref(), c.y.as_ref(), c.w.as_ref(), c.h.as_ref()),
         Node::Mesh(m) => (m.x.as_ref(), m.y.as_ref(), m.w.as_ref(), m.h.as_ref()),
+        Node::Field(f) => (f.x.as_ref(), f.y.as_ref(), f.w.as_ref(), f.h.as_ref()),
+        Node::Toc(t) => (t.x.as_ref(), t.y.as_ref(), t.w.as_ref(), t.h.as_ref()),
+        Node::Table(t) => (t.x.as_ref(), t.y.as_ref(), t.w.as_ref(), t.h.as_ref()),
         Node::Light(_) => return None,
+        // Instance stores x/y/w/h as Option<Dimension> (not PropertyValue).
+        Node::Instance(i) => {
+            let resolve_dim = |d: Option<&Dimension>| -> Option<f64> {
+                d.and_then(|dim| dim_to_px(dim.value, &dim.unit))
+            };
+            return Some((
+                resolve_dim(i.x.as_ref())?,
+                resolve_dim(i.y.as_ref())?,
+                resolve_dim(i.w.as_ref())?,
+                resolve_dim(i.h.as_ref())?,
+            ));
+        }
         Node::Line(_)
         | Node::Polygon(_)
         | Node::Polyline(_)
         | Node::Path(_)
-        | Node::Instance(_)
-        | Node::Field(_)
         | Node::Footnote(_)
-        | Node::Toc(_)
-        | Node::Table(_)
         | Node::Connector(_)
         | Node::Unknown(_) => return None,
     };
@@ -353,15 +419,8 @@ pub(super) fn apply_align_nodes(
     let mut alignable: Vec<NodeBbox> = Vec::new();
 
     for node_id in node_ids {
-        // Shared-borrow scan across all pages.
-        let found: Option<Option<(f64, f64, f64, f64)>> = 'page_scan: {
-            for page in doc.body.pages.iter() {
-                if let Some(node) = find_node_shared(&page.children, node_id) {
-                    break 'page_scan Some(read_geometry_px(node));
-                }
-            }
-            None // not found in any page
-        };
+        // Shared-borrow scan across pages and masters.
+        let found = find_node_any_shared(doc, node_id).map(read_geometry_px);
 
         match found {
             None => {
@@ -420,13 +479,10 @@ pub(super) fn apply_align_nodes(
         // is ever read, so the inactive-axis edges are harmless.
         (coord, coord, coord, coord)
     } else if anchor == "page" {
-        // Find the page that contains the first alignable node.
+        // Find the page that contains the first alignable node, or a page that
+        // references the master hosting it (master chrome is authored in page coords).
         let first_id = &alignable[0].id;
-        let page_opt = doc
-            .body
-            .pages
-            .iter()
-            .find(|page| page.children.iter().any(|n| subtree_contains(n, first_id)));
+        let page_opt = page_bounds_for_node(doc, first_id);
         match page_opt {
             None => {
                 diagnostics.push(Diagnostic::error(
@@ -440,22 +496,7 @@ pub(super) fn apply_align_nodes(
                 ));
                 return;
             }
-            Some(page) => {
-                let pw = dim_to_px(page.width.value, &page.width.unit);
-                let ph = dim_to_px(page.height.value, &page.height.unit);
-                match (pw, ph) {
-                    (Some(w), Some(h)) => (0.0_f64, w, 0.0_f64, h),
-                    _ => {
-                        diagnostics.push(Diagnostic::error(
-                            "tx.invalid_parent",
-                            "align_nodes: page width/height cannot be resolved to px".to_owned(),
-                            None,
-                            None,
-                        ));
-                        return;
-                    }
-                }
-            }
+            Some((w, h)) => (0.0_f64, w, 0.0_f64, h),
         }
     } else if anchor == "selection" {
         // union bbox of all alignable nodes.
@@ -472,14 +513,7 @@ pub(super) fn apply_align_nodes(
         (ref_left, ref_right, ref_top, ref_bottom)
     } else {
         // anchor is a NODE ID: align relative to that node's bbox.
-        let found: Option<Option<(f64, f64, f64, f64)>> = 'anchor_scan: {
-            for page in doc.body.pages.iter() {
-                if let Some(node) = find_node_shared(&page.children, anchor) {
-                    break 'anchor_scan Some(read_geometry_px(node));
-                }
-            }
-            None
-        };
+        let found = find_node_any_shared(doc, anchor).map(read_geometry_px);
         match found {
             Some(Some((x, y, w, h))) => (x, x + w, y, y + h),
             Some(None) => {
@@ -512,8 +546,7 @@ pub(super) fn apply_align_nodes(
     // ── Phase 2: exclusive borrow — write new x or y for each node ───────────
     //
     // Compute the new position per node from the captured bbox, then apply via
-    // find_node_any_mut + node_geometry_mut, mirroring apply_set_geometry's
-    // write path.
+    // find_node_any_mut + write_node_xy (covers PropertyValue and Instance).
 
     for bbox in &alignable {
         let new_x = match align {
@@ -541,20 +574,49 @@ pub(super) fn apply_align_nodes(
                 ));
             }
             Some(node) => {
-                // node_geometry_mut is guaranteed Some here: we filtered on
-                // read_geometry_px which uses the same set of node kinds.
-                if let Some((nx, ny, _, _)) = node_geometry_mut(node) {
-                    if let Some(v) = new_x {
-                        *nx = Some(PropertyValue::Dimension(px(v)));
-                    }
-                    if let Some(v) = new_y {
-                        *ny = Some(PropertyValue::Dimension(px(v)));
-                    }
+                if write_node_xy(node, new_x, new_y) {
                     record_affected(&bbox.id, affected);
                 }
             }
         }
     }
+}
+
+/// Resolve page width/height in px for the page that owns `node_id`, or for a
+/// page that references the master hosting `node_id` (chrome is page-coordinate).
+fn page_bounds_for_node(doc: &Document, node_id: &str) -> Option<(f64, f64)> {
+    for page in &doc.body.pages {
+        if page.children.iter().any(|n| subtree_contains(n, node_id)) {
+            let pw = dim_to_px(page.width.value, &page.width.unit)?;
+            let ph = dim_to_px(page.height.value, &page.height.unit)?;
+            return Some((pw, ph));
+        }
+    }
+    // Master-hosted: prefer a page that references that master.
+    for (mi, master) in doc.masters.iter().enumerate() {
+        if !master.children.iter().any(|n| subtree_contains(n, node_id)) {
+            continue;
+        }
+        let master_id = master.id.as_str();
+        if let Some(page) = doc
+            .body
+            .pages
+            .iter()
+            .find(|p| p.master.as_deref() == Some(master_id))
+        {
+            let pw = dim_to_px(page.width.value, &page.width.unit)?;
+            let ph = dim_to_px(page.height.value, &page.height.unit)?;
+            return Some((pw, ph));
+        }
+        // No page opts into this master yet — fall back to first page artboard.
+        let _ = mi;
+        if let Some(page) = doc.body.pages.first() {
+            let pw = dim_to_px(page.width.value, &page.width.unit)?;
+            let ph = dim_to_px(page.height.value, &page.height.unit)?;
+            return Some((pw, ph));
+        }
+    }
+    None
 }
 
 // ── AlignToEdge ───────────────────────────────────────────────────────────────
@@ -591,15 +653,8 @@ pub(super) fn apply_align_to_edge(
 
     // ── Phase 1 (shared scan): read the node's geometry and find its page ────
 
-    // Find the node and read its geometry (x, y, w, h) in px.
-    let node_geom: Option<Option<(f64, f64, f64, f64)>> = 'node_scan: {
-        for page in doc.body.pages.iter() {
-            if let Some(node) = find_node_shared(&page.children, node_id) {
-                break 'node_scan Some(read_geometry_px(node));
-            }
-        }
-        None // not found in any page
-    };
+    // Find the node and read its geometry (x, y, w, h) in px (pages + masters).
+    let node_geom = find_node_any_shared(doc, node_id).map(read_geometry_px);
 
     let (_, _, node_w, node_h) = match node_geom {
         None => {
@@ -626,18 +681,7 @@ pub(super) fn apply_align_to_edge(
         Some(Some(geom)) => geom,
     };
 
-    // Find the page that contains the node (same pattern as align_nodes' page branch).
-    let page_bounds: Option<(f64, f64)> = doc.body.pages.iter().find_map(|page| {
-        if page.children.iter().any(|n| subtree_contains(n, node_id)) {
-            let pw = dim_to_px(page.width.value, &page.width.unit);
-            let ph = dim_to_px(page.height.value, &page.height.unit);
-            pw.zip(ph)
-        } else {
-            None
-        }
-    });
-
-    let (page_w, page_h) = match page_bounds {
+    let (page_w, page_h) = match page_bounds_for_node(doc, node_id) {
         Some(bounds) => bounds,
         None => {
             diagnostics.push(Diagnostic::error(
@@ -684,15 +728,7 @@ pub(super) fn apply_align_to_edge(
             ));
         }
         Some(node) => {
-            // node_geometry_mut is guaranteed Some here: read_geometry_px succeeded
-            // above, which uses the same set of node variants.
-            if let Some((nx, ny, _, _)) = node_geometry_mut(node) {
-                if let Some(v) = new_x {
-                    *nx = Some(PropertyValue::Dimension(px(v)));
-                }
-                if let Some(v) = new_y {
-                    *ny = Some(PropertyValue::Dimension(px(v)));
-                }
+            if write_node_xy(node, new_x, new_y) {
                 record_affected(node_id, affected);
             }
         }
@@ -740,14 +776,7 @@ pub(super) fn apply_distribute_nodes(
     let mut boxes: Vec<AxisBox> = Vec::new();
 
     for node_id in node_ids {
-        let found: Option<Option<(f64, f64, f64, f64)>> = 'page_scan: {
-            for page in doc.body.pages.iter() {
-                if let Some(node) = find_node_shared(&page.children, node_id) {
-                    break 'page_scan Some(read_geometry_px(node));
-                }
-            }
-            None
-        };
+        let found = find_node_any_shared(doc, node_id).map(read_geometry_px);
 
         match found {
             None => {
@@ -832,12 +861,12 @@ pub(super) fn apply_distribute_nodes(
                 ));
             }
             Some(node) => {
-                if let Some((nx, ny, _, _)) = node_geometry_mut(node) {
-                    if horizontal {
-                        *nx = Some(PropertyValue::Dimension(px(*new_pos)));
-                    } else {
-                        *ny = Some(PropertyValue::Dimension(px(*new_pos)));
-                    }
+                let (new_x, new_y) = if horizontal {
+                    (Some(*new_pos), None)
+                } else {
+                    (None, Some(*new_pos))
+                };
+                if write_node_xy(node, new_x, new_y) {
                     record_affected(id, affected);
                 }
             }

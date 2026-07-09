@@ -259,3 +259,46 @@ fn set_geometry_rotate_on_line_rejected() {
     );
     assert_eq!(result.source_after, result.source_before);
 }
+
+const INSTANCE_DOC: &str = r##"zenith version=1 {
+  project id="proj" name="Test"
+  tokens format="zenith-token-v1" { }
+  styles {}
+  components {
+    component id="badge" {
+      rect id="shape" x=(px)0 y=(px)0 w=(px)24 h=(px)24
+    }
+  }
+  document id="doc1" title="T" {
+    page id="pg1" w=(px)400 h=(px)300 {
+      instance id="icon.1" component="badge" x=(px)10 y=(px)20
+    }
+  }
+}"##;
+
+#[test]
+fn set_geometry_on_instance_sets_origin_and_box() {
+    let doc = parse(INSTANCE_DOC);
+    let tx = Transaction {
+        ops: vec![Op::SetGeometry {
+            node: "icon.1".to_owned(),
+            x: Some(40.0),
+            y: Some(60.0),
+            w: Some(48.0),
+            h: Some(48.0),
+            rotate: None,
+        }],
+        permissions: Permissions::default(),
+    };
+    let result = run_transaction(&doc, &tx).expect("run_transaction should not error");
+    assert_eq!(
+        result.status,
+        TxStatus::Accepted,
+        "diagnostics: {:?}",
+        result.diagnostics
+    );
+    assert!(result.source_after.contains("x=(px)40"));
+    assert!(result.source_after.contains("y=(px)60"));
+    assert!(result.source_after.contains("w=(px)48"));
+    assert!(result.source_after.contains("h=(px)48"));
+}

@@ -196,16 +196,36 @@ pub(in crate::engine) fn apply_duplicate_node(
     diagnostics: &mut Vec<Diagnostic>,
     affected: &mut Vec<String>,
 ) {
-    // 1. Verify the source node exists anywhere in the document (shared scan).
+    // 1. Verify the source node exists on a page or master (shared scan).
     //    We also need its variant to enforce the v0 leaf-only restriction.
     //    Use a two-phase approach mirroring find_node_any_mut.
-    let page_index = doc.body.pages.iter().enumerate().find_map(|(pi, page)| {
-        let found = page.children.iter().any(|n| subtree_contains(n, node_id));
-        if found { Some(pi) } else { None }
-    });
+    enum Host {
+        Page(usize),
+        Master(usize),
+    }
+    let host = doc
+        .body
+        .pages
+        .iter()
+        .enumerate()
+        .find_map(|(pi, page)| {
+            page.children
+                .iter()
+                .any(|n| subtree_contains(n, node_id))
+                .then_some(Host::Page(pi))
+        })
+        .or_else(|| {
+            doc.masters.iter().enumerate().find_map(|(mi, master)| {
+                master
+                    .children
+                    .iter()
+                    .any(|n| subtree_contains(n, node_id))
+                    .then_some(Host::Master(mi))
+            })
+        });
 
-    let pi = match page_index {
-        Some(pi) => pi,
+    let host = match host {
+        Some(h) => h,
         None => {
             diagnostics.push(Diagnostic::error(
                 "tx.unknown_node",
@@ -221,10 +241,18 @@ pub(in crate::engine) fn apply_duplicate_node(
     //    We must obtain a shared reference to inspect the variant, then release
     //    it before taking the mutable borrow needed for the clone-insert step.
     {
-        let Some(page) = doc.body.pages.get(pi) else {
-            return; // unreachable: pi came from the enumerate scan above.
+        let src = match host {
+            Host::Page(pi) => doc
+                .body
+                .pages
+                .get(pi)
+                .and_then(|page| find_node_shared(&page.children, node_id)),
+            Host::Master(mi) => doc
+                .masters
+                .get(mi)
+                .and_then(|master| find_node_shared(&master.children, node_id)),
         };
-        if let Some(src) = find_node_shared(&page.children, node_id)
+        if let Some(src) = src
             && node_is_container(src)
         {
             let kind = node_kind_str(src);
@@ -240,15 +268,25 @@ pub(in crate::engine) fn apply_duplicate_node(
             ));
             return;
         }
-        // Shared borrow of `page` ends here.
+        // Shared borrow ends here.
     }
 
     // 3. Clone the source and insert it immediately after the original.
     //    `duplicate_in_children` does the clone+id-set+insert in one pass.
-    let Some(page) = doc.body.pages.get_mut(pi) else {
-        return; // unreachable: pi came from the enumerate scan above.
-    };
-    duplicate_in_children(&mut page.children, node_id, new_id);
+    match host {
+        Host::Page(pi) => {
+            let Some(page) = doc.body.pages.get_mut(pi) else {
+                return;
+            };
+            duplicate_in_children(&mut page.children, node_id, new_id);
+        }
+        Host::Master(mi) => {
+            let Some(master) = doc.masters.get_mut(mi) else {
+                return;
+            };
+            duplicate_in_children(&mut master.children, node_id, new_id);
+        }
+    }
 
     // 4. Record the clone as affected. Post-validation (step 4 of run_transaction)
     //    will catch a new_id collision with an existing node via id.duplicate.

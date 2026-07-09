@@ -84,17 +84,24 @@ is APCA `Lc` (WCAG 3 draft). Three governable codes, all reported by `zenith val
 - `contrast.low` (advisory) — sub-threshold but legible (`Lc` under 60, or 45 for large/bold
   text). Often intentional brand contrast; suppress with `allow "contrast.low"` when deliberate.
 - `contrast.indeterminate_backdrop` (advisory) — the backdrop cannot be sampled at validate time
-  (an `image`, a `path` fill, or a rotated / masked / blurred / non-normal-blended fill), or an
-  anchored text node has no resolvable extent. The validator refuses to guess.
+  (an `image`, a `path` fill, a full-bleed **filter/noise/grain** layer, or a rotated / masked /
+  blurred / non-normal-blended fill), or an anchored text node has no resolvable extent. The
+  validator refuses to guess.
 
 Resolve an indeterminate backdrop by telling the validator what the viewer sees:
 
 ```kdl
 text id="badge.label" contrast-bg=(token)"color.brand.navy" fill=(token)"color.ink" { span "FS" }
+// story/hero over grain or photo — name the effective solid:
+text id="hero.title" contrast-bg=(token)"color.base.100" fill=(token)"color.base.content" { span "Title" }
 ```
 
 `contrast-bg` takes precedence over the detected backdrop (`zenith schema node text`). For CI,
 `deny "contrast.invisible"` turns invisible text into a hard failure.
+
+**Muted chrome on dark themes:** `color.base.200` / `color.base.300` are **surfaces**, not body
+ink. Page numbers and captions on `color.base.100` should use `color.base.content` (optionally
+with `opacity`) — otherwise you often get `contrast.invisible` while `valid: true`.
 
 ## Policy only changes reporting
 

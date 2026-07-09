@@ -58,14 +58,26 @@ pub(super) fn emit_connector_label(
         ctx,
     } = env;
 
+    // Optional authored offset from the geometric midpoint (px).
+    let ox = connector
+        .label_offset_x
+        .as_ref()
+        .and_then(|d| zenith_core::dim_to_px(d.value, &d.unit))
+        .unwrap_or(0.0);
+    let oy = connector
+        .label_offset_y
+        .as_ref()
+        .and_then(|d| zenith_core::dim_to_px(d.value, &d.unit))
+        .unwrap_or(0.0);
+
     // Fixed label box dimensions: wide enough for a short branch label, short
     // enough to not overlap arrowheads on typical connectors. The box is
-    // centered on the midpoint.
+    // centered on the midpoint (+ offset).
     const LABEL_W: f64 = 120.0;
     const LABEL_H: f64 = 40.0;
 
-    let lx = mx - LABEL_W / 2.0;
-    let ly = my - LABEL_H / 2.0;
+    let lx = mx + ox - LABEL_W / 2.0;
+    let ly = my + oy - LABEL_H / 2.0;
 
     let mut synth = TextNode {
         id: format!("{}/label", connector.id),

@@ -1,8 +1,8 @@
 //! The [`Op`] enum: every mutating operation a [`super::Transaction`] can carry.
 
 use super::types::{
-    AddAssetMetadata, OpPathAnchor, OpPathBooleanOperation, OpPathHandle, OpPathSubpath,
-    OpPathTransform, OpPoint, OpSpan, Position,
+    AddAssetMetadata, FilterOpInput, GradientStopInput, OpPathAnchor, OpPathBooleanOperation,
+    OpPathHandle, OpPathSubpath, OpPathTransform, OpPoint, OpSpan, Position, ShadowLayerInput,
 };
 
 /// A single operation within a [`super::Transaction`].
@@ -133,9 +133,10 @@ pub enum Op {
     /// `rotate` is in degrees (`(deg)` unit at storage; pass a raw `f64` here).
     ///
     /// Supported nodes for x/y/w/h: `rect`, `ellipse`, `frame`, `image`,
-    /// `text`, `code`, `group`, `field`.
+    /// `text`, `code`, `group`, `field`, `shape`, `chart`, `pattern`, `table`,
+    /// `instance` (placement box: origin + optional `w`/`h` for fit scaling).
     /// Supported nodes for rotate: `rect`, `ellipse`, `frame`, `image`, `text`,
-    /// `code`, `group`, `polygon`, `polyline`.
+    /// `code`, `group`, `polygon`, `polyline`, `shape`, `chart`.
     /// Unsupported for rotate: `line`, `instance`, `field`, `footnote`,
     /// `unknown` — yields `tx.unsupported_property`.
     ///
@@ -515,7 +516,8 @@ pub enum Op {
     /// Post-validation rejects an incomplete/invalid node automatically (missing
     /// required geometry, duplicate id, unknown token/asset ref, too few points, …).
     AddNode {
-        /// Stable id of the container to insert into: a page id, or a group/frame id.
+        /// Stable id of the container to insert into: a page id, master id, or
+        /// a group/frame id.
         parent: String,
         /// Where among the container's children to insert. Defaults to `last`.
         #[serde(default)]
@@ -531,7 +533,8 @@ pub enum Op {
     /// `closed` value. Ambiguous or empty payloads are rejected with
     /// `tx.invalid_node_spec`.
     AddPath {
-        /// Stable id of the container to insert into: a page id, or a group/frame id.
+        /// Stable id of the container to insert into: a page id, master id, or
+        /// a group/frame id.
         parent: String,
         /// Stable id assigned to the new path node.
         id: String,
@@ -911,37 +914,78 @@ pub enum Op {
     },
     /// Create a new design token in the document's `tokens` block.
     ///
-    /// `token_type` is one of `"color"`, `"dimension"`, `"number"`,
-    /// `"fontFamily"`, `"fontWeight"`. `value` is the literal in string form:
-    /// a color/family string (`"#e11d48"`, `"Inter"`), a dimension string
-    /// (`"(px)40"`), or a number (`"700"`, `"1.05"`).
+    /// Scalar types (`color`, `dimension`, `number`, `fontFamily`,
+    /// `fontWeight`) use `value`. Structured types use dedicated fields:
+    /// - `shadow` → `layers` (at least one `{dx,dy,blur,color}`)
+    /// - `filter` → `filter_ops` (at least one `{kind, …}`)
+    /// - `gradient` → `stops` (at least two `{offset,color}`) plus optional
+    ///   `angle` (linear) or `radial` / `center_x` / `center_y` / `radius`
+    /// - `mask` → `shape` (`rect` / `rounded` / `ellipse`) plus optional
+    ///   `radius` (rounded only), `feather`, `invert`
     ///
-    /// `set` is an optional free-form provenance id (e.g. a theme/pack id such
-    /// as `"@zenith/theme.cobalt"`) recorded on the created token. It is never
-    /// resolved — only grouped/echoed (e.g. by `token.set_partially_used`).
-    ///
+    /// `set` is an optional free-form provenance id (e.g. a theme/pack id).
     /// Eagerly rejected with `tx.duplicate_id` if a token with `id` already
-    /// exists.  Gradient/shadow/unknown types are rejected with
-    /// `tx.invalid_value` (v0: scalar literal token types only; gradient/shadow
-    /// tokens must be authored in source).
+    /// exists.
     ///
-    /// JSON example:
+    /// JSON examples:
     /// ```json
     /// {"op":"create_token","id":"color.brand","type":"color","value":"#e11d48"}
+    /// {"op":"create_token","id":"shadow.depth","type":"shadow","layers":[{"dx":0,"dy":8,"blur":24,"color":"color.shadow"}]}
+    /// {"op":"create_token","id":"filter.grain","type":"filter","filter_ops":[{"kind":"noise","amount":0.06,"seed":1,"scale":1}]}
+    /// {"op":"create_token","id":"grad.sky","type":"gradient","angle":90,"stops":[{"offset":0,"color":"color.a"},{"offset":1,"color":"color.b"}]}
+    /// {"op":"create_token","id":"mask.soft","type":"mask","shape":"ellipse","feather":48}
     /// ```
     CreateToken {
         /// Globally unique token id (e.g. `"color.brand"`).
         id: String,
-        /// Token type string: `"color"`, `"dimension"`, `"number"`,
-        /// `"fontFamily"`, or `"fontWeight"`.
+        /// Token type string: scalar types, `"shadow"`, `"filter"`,
+        /// `"gradient"`, or `"mask"`.
         #[serde(rename = "type")]
         token_type: String,
-        /// Literal value in string form appropriate for the declared type.
+        /// Literal value for scalar types. Optional for structured types.
+        #[serde(default)]
         value: String,
         /// Optional free-form provenance id (e.g. a theme/pack id). Omit for a
         /// plain, unstamped token.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         set: Option<String>,
+        /// Shadow layers when `type` is `"shadow"`. Each `color` is a color
+        /// token id.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        layers: Vec<ShadowLayerInput>,
+        /// Filter ops when `type` is `"filter"`.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        filter_ops: Vec<FilterOpInput>,
+        /// Gradient stops when `type` is `"gradient"`. At least two required.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        stops: Vec<GradientStopInput>,
+        /// Linear gradient angle in degrees (clockwise from +x). Default 0.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        angle: Option<f64>,
+        /// When `true`, create a radial gradient (uses `center_x`/`center_y`/
+        /// `radius`). Default linear.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        radial: Option<bool>,
+        /// Radial center X as a fraction of box width (0..1). Default 0.5.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        center_x: Option<f64>,
+        /// Radial center Y as a fraction of box height (0..1). Default 0.5.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        center_y: Option<f64>,
+        /// Radial gradient radius (fraction of box diagonal) **or** rounded-mask
+        /// corner radius in px, depending on `type`.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        radius: Option<f64>,
+        /// Mask coverage shape when `type` is `"mask"`: `"rect"`, `"rounded"`,
+        /// or `"ellipse"`.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        shape: Option<String>,
+        /// Mask feather sigma in px (>= 0). Default 0.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        feather: Option<f64>,
+        /// Invert mask coverage. Default false.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        invert: Option<bool>,
     },
     /// Replace the literal value of an existing token, preserving its declared
     /// type.
@@ -989,6 +1033,89 @@ pub enum Op {
         property: String,
         /// Token id to store as `PropertyValue::TokenRef` (e.g. `"font.body"`).
         value: String,
+    },
+    /// Create a named style in the document `styles { }` block.
+    ///
+    /// `properties` maps recognized style keys (`fill`, `font-family`, …) to
+    /// token ids. Underscore spellings are accepted. Rejected with
+    /// `tx.duplicate_id` if a style with `id` already exists, and
+    /// `tx.unsupported_property` if any key is not a recognized style key.
+    ///
+    /// JSON example:
+    /// ```json
+    /// {"op":"create_style","id":"cta.label","properties":{"font-family":"font.body","font-size":"size.body","fill":"color.primary.content"}}
+    /// ```
+    CreateStyle {
+        /// Globally unique style id (e.g. `"cta.label"`).
+        id: String,
+        /// Map of style property key → token id. May be empty (properties can
+        /// be filled later with `set_style_property`).
+        #[serde(default)]
+        properties: std::collections::BTreeMap<String, String>,
+    },
+    /// Remove a named style from the document `styles { }` block.
+    ///
+    /// Rejected with `tx.unknown_style` if no style with `id` exists. Does not
+    /// rewrite nodes that still reference the style via `style` / `text-style`
+    /// (post-validation surfaces dangling refs).
+    ///
+    /// JSON example:
+    /// ```json
+    /// {"op":"delete_style","id":"cta.label"}
+    /// ```
+    DeleteStyle {
+        /// The style id to remove.
+        id: String,
+    },
+    /// Create an empty master-page definition in the document `masters { }` block.
+    ///
+    /// The master starts with no children; populate it with `add_node` using
+    /// `parent` = this master's id (field/text/rect chrome, etc.). Assign pages
+    /// with `set_page_master`. Eagerly rejected with `tx.duplicate_id` if a
+    /// master or page already uses `id`. Collisions with other global ids
+    /// (tokens, styles, components, …) are caught by post-validation as
+    /// `id.duplicate`.
+    ///
+    /// JSON example:
+    /// ```json
+    /// {"op":"create_master","id":"m.deck"}
+    /// ```
+    CreateMaster {
+        /// Master id (must not collide with another master or page).
+        id: String,
+    },
+    /// Remove a master-page definition from the document `masters { }` block.
+    ///
+    /// Does not clear `page.master` references (post-validation surfaces
+    /// `master.unknown_reference`). Rejected with `tx.unknown_master` if no
+    /// master with `id` exists.
+    ///
+    /// JSON example:
+    /// ```json
+    /// {"op":"delete_master","id":"m.deck"}
+    /// ```
+    DeleteMaster {
+        /// The master id to remove.
+        id: String,
+    },
+    /// Set or clear a page's `master` attribute (shared chrome projection).
+    ///
+    /// When `master` is a non-empty string, the page references that master
+    /// (must exist — `tx.unknown_master` if not). When `master` is `null`/absent
+    /// or empty, the page's master is cleared. Rejected with `tx.unknown_node`
+    /// if no page with `page` exists.
+    ///
+    /// JSON examples:
+    /// ```json
+    /// {"op":"set_page_master","page":"page.1","master":"m.deck"}
+    /// {"op":"set_page_master","page":"page.1","master":null}
+    /// ```
+    SetPageMaster {
+        /// Page id to update.
+        page: String,
+        /// Master id to assign, or `null`/omit to clear.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        master: Option<String>,
     },
     /// Set the `direction` property on a text node. Valid values: `"ltr"`, `"rtl"`.
     /// Any other value is rejected with `tx.invalid_value`. A missing node yields

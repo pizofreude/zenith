@@ -248,6 +248,7 @@ fn attribute_type_generic(name: &str, fallback: &'static str) -> &'static str {
         "spacing" => "px literal",
         "padding-left" | "text-indent" => "px literal",
         "bullet-gap" => "px literal",
+        "label-offset-x" | "label-offset-y" => "px literal",
         "anchor-gap" => "px literal",
         "blur" => "px literal",
         "bleed" => "px literal",

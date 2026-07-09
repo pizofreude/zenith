@@ -55,18 +55,42 @@ pub(super) fn find_node_any_mut<'doc>(
     doc: &'doc mut zenith_core::Document,
     id: &str,
 ) -> Option<&'doc mut Node> {
-    // Phase 1: find which page (shared borrow only).
-    let page_index = doc.body.pages.iter().enumerate().find_map(|(pi, page)| {
-        let found = page.children.iter().any(|n| subtree_contains(n, id));
-        if found { Some(pi) } else { None }
-    });
+    // Phase 1: find which page or master hosts the id (shared borrow only).
+    enum Host {
+        Page(usize),
+        Master(usize),
+    }
+    let host = doc
+        .body
+        .pages
+        .iter()
+        .enumerate()
+        .find_map(|(pi, page)| {
+            page.children
+                .iter()
+                .any(|n| subtree_contains(n, id))
+                .then_some(Host::Page(pi))
+        })
+        .or_else(|| {
+            doc.masters.iter().enumerate().find_map(|(mi, master)| {
+                master
+                    .children
+                    .iter()
+                    .any(|n| subtree_contains(n, id))
+                    .then_some(Host::Master(mi))
+            })
+        });
 
-    // Phase 2: act on the found page with an exclusive borrow.
-    match page_index {
+    // Phase 2: act on the found host with an exclusive borrow.
+    match host {
         None => None,
-        Some(pi) => match doc.body.pages.get_mut(pi) {
+        Some(Host::Page(pi)) => match doc.body.pages.get_mut(pi) {
             None => None,
             Some(page) => find_in_children_any_mut(&mut page.children, id),
+        },
+        Some(Host::Master(mi)) => match doc.masters.get_mut(mi) {
+            None => None,
+            Some(master) => find_in_children_any_mut(&mut master.children, id),
         },
     }
 }
@@ -177,6 +201,24 @@ fn find_in_children_any_mut<'a>(children: &'a mut [Node], id: &str) -> Option<&'
             | None => None,
         },
     }
+}
+
+/// Shared-borrow document walk: find a node with `id` on any page or master.
+pub(super) fn find_node_any_shared<'doc>(
+    doc: &'doc zenith_core::Document,
+    id: &str,
+) -> Option<&'doc Node> {
+    for page in &doc.body.pages {
+        if let Some(found) = find_node_shared(&page.children, id) {
+            return Some(found);
+        }
+    }
+    for master in &doc.masters {
+        if let Some(found) = find_node_shared(&master.children, id) {
+            return Some(found);
+        }
+    }
+    None
 }
 
 /// Shared-borrow tree walk: find a node with `id` anywhere in `children`.

@@ -12,241 +12,164 @@ allowed-tools:
 
 # Zenith
 
-Zenith turns design into **plain-text `.zen` source** (KDL) that you read, diff, validate,
-edit with typed transactions, and render **deterministically** to pixel-exact PNG or
-print-ready PDF. You drive it through the `zenith` CLI. This is the opposite of an image
-model: you produce an editable, addressable _document_, not a bag of pixels.
+Plain-text `.zen` source (KDL) → validate → render to pixel-exact PNG or print PDF.
+Editable, addressable, deterministic. Drive it with the `zenith` CLI — not an image model.
 
-## When to use
+**Use** for posters, decks, social, flyers, diagrams, charts, ads, variants — source you can
+diff and re-render. **Don't use** for photographic *pictures* (generate elsewhere, place as
+`image`), pure code tasks, or in-place raster editing.
 
-**Use this skill when** the task is to create or change a visual design that should be
-editable and reproducible: posters, decks/slides, social graphics, flyers, brochures,
-banners, book/magazine pages, diagrams/flowcharts, ads, or on-brand variants — and when the
-user wants the result as source they can review, version, and re-render.
+## CLI is the source of truth
 
-**Don't use it for**: generating a photographic/illustrative _picture_ (use an image model
-for that, then compose the resulting asset into a `.zen` document — see `zenith schema node image`);
-pure backend/code tasks; or editing existing raster files.
-
-## The CLI is the source of truth
-
-The CLI is self-documenting and **authoritative** for node/attribute/op syntax. Always reach for
-it before this skill:
+Do **not** invent attribute names or op fields:
 
 ```bash
-zenith --version                  # if missing, see https://github.com/zenitheditor/zenith#install
-zenith --help                     # command list + the loop, in the tool itself
-zenith <command> --help           # exact flags and an EXAMPLE for any command
-zenith schema nodes               # all node kinds
-zenith schema node <kind>         # attributes, types, and required/optional for one kind
-zenith schema ops                 # all transaction op names
-zenith schema op <name>           # fields, types, and semantics for one op
-zenith validate <file> --json     # actionable diagnostics ("did you mean?", raw-literal hints, fit font-size)
-zenith inspect <file> --json      # resolved per-node geometry (px, tokens resolved) + role — the facts for a design critique
-zenith schema tokens              # all token types
-zenith schema token <type>        # exact value form + example for one token type
-zenith schema diagnostics         # governable diagnostic codes
-zenith fonts                      # list Bundled vs Local/system font families
+zenith --version                  # missing? https://github.com/zenitheditor/zenith#install
+zenith --help · zenith <cmd> --help
+zenith schema nodes | ops | tokens
+zenith schema node <kind> · zenith schema op <name> · zenith schema token <type>
+zenith validate <file> --json
+zenith inspect <file> --json      # geometry + role facts for critique
+zenith tokens <file>              # palette/type already on the document
+zenith library list               # every embedded + project pack
+zenith fonts                      # Bundled (portable) vs Local
 ```
 
-**Do not look up attribute names or op fields in this skill** — `zenith schema` emits them
-directly, with types and required/optional status. This skill holds what the CLI can't: conceptual
-guidance, design workflow, recipes, gotchas, and judgment calls.
+If `zenith` is missing, give the one-line installer from the repo README — do not fake a workflow.
+This skill is **judgment + routing**. Syntax lives in `zenith schema`.
 
-If `zenith` is not installed, tell the user the one-line installer
-(`curl -fsSL https://raw.githubusercontent.com/zenitheditor/zenith/main/scripts/install.sh | sh`)
-rather than guessing — do not fabricate a workflow you can't run.
+## Core loop
 
-## The core loop (always follow this)
+1. **Match the brief** → canvas + primitives (`By brief` below; details in `references/by-kind.md`).
+2. **Tokens first.** Project brand (`.zenith/brand.md` / `libraries/*.zen`) → else
+   `zenith new <path> --theme <name>`. Only invent a palette when neither fits.
+3. **Author.** Scaffold with `zenith new` (don't hand-write the outer skeleton). Prefer
+   `zenith tx` for later edits (dry-run by default). KDL: one node per line (or `\`);
+   booleans `#true` / `#false`.
+4. **Validate.** `zenith validate <file> --json` after every change. Never finalize with Errors.
+5. **Render and look.** `zenith render <file> --png out.png` (or `--all-pages` / `--pdf`), then
+   **open the PNG**. Clean validate ≠ good design. Critique:
+   `references/design-critique.md` + `inspect --json`.
+6. **Report** briefly: ids/tokens changed, validate result, output path.
 
-Zenith is deterministic and auditable; lean into that instead of guessing.
+`zenith fmt <file>` is idempotent. After placing siblings, prefer layout ops over eyeballing:
+`align_nodes`, `distribute_nodes`, `align_to_edge` (`zenith schema op <name>`).
 
-1. **Plan in source.** Capture the brief, palette, and layer plan as `note`/`role="guide"`
-   content or a sidecar, so the design can be traced back to intent.
-2. **Author / edit.** For **new** work, start from `zenith new <path> --theme <name>` when no
-   project brand exists (`.zenith/brand.md` / `libraries/*.zen`) — it scaffolds the full theme
-   token contract (10 embedded themes: `cobalt`, `ember`, `harbor`, `lagoon`, `pine`, `poppy`,
-   `prism`, `sorbet`, `sunset`, `volt`; `zenith library list` shows them) on top of the minimal
-   top-level skeleton (`zenith version=1 { project … tokens … styles … document { page … } }`)
-   with a doc-id already minted. Fall back to a bare `zenith new <path>` only when the doc really
-   should start unthemed. Edit the scaffold rather than hand-writing the outer structure from
-   memory (run `zenith schema document` / `zenith schema page` for the exact top-level shape). For **changes**
-   to existing nodes, apply a typed transaction with `zenith tx` — prefer it for edits: it is dry-run
-   by default, shows a source + scene diff, and enforces id-uniqueness and referential integrity.
-   Note: KDL nodes are **one per line** — a node and all its attributes go on a single line (or end
-   each line with `\` to continue), and booleans are written `#true` / `#false`.
-3. **Validate.** Run `zenith validate <file> --json` after every change. **Never finalize
-   while hard (Error) diagnostics remain.** Fix at the source.
-4. **Render to inspect — then actually LOOK.** `zenith render <file> --png out.png` (or
-   `--all-pages <dir>` for a contact sheet, `--pdf` for print), then OPEN the PNG and visually
-   verify before declaring success. Check, concretely: text is centered where you intended (both
-   axes), nothing overlaps or is clipped, labels sit inside their boxes, spacing/alignment look
-   deliberate. A clean `validate` does NOT mean it looks right — validation can't see a label
-   stuck to the top of a button or two boxes overlapping. If something is off, fix it; never
-   report "done" on a render you didn't inspect. For a deeper, **style-neutral critique** —
-   composition, balance, consistency, noise, semantic accuracy, and reading alignment/spacing/role
-   facts from `zenith inspect <file> --json` — see `references/design-critique.md`.
-5. **Iterate**, then report what changed and where the output is.
+### Token dialects (one per document)
 
-Run `zenith fmt <file>` to canonicalize source; it is idempotent.
+| Source | When | Ids |
+| --- | --- | --- |
+| **Theme** | No project brand | `color.primary`, `color.base.100`, `color.base.content`, `radius.box`, `size.h1`, … → `references/themes.md` |
+| **Project brand** | `.zenith/brand.md` + kit | Project roles (often `color.brand` / `color.ink`) → `references/brand.md` |
+| **Bespoke** | Explicit one-off look | Still tokenize; stable role ids |
 
-## Non-negotiable best practices
+Do not mix theme-contract ids and brand ids without a deliberate map. After scaffold:
+`zenith tokens <doc>` and use **only** those ids (plus any you add).
 
-These make designs editable, on-brand, and reproducible — and keep the agentic loop sound.
+## By brief — pick tools first
 
-- **Stable, meaningful ids.** Every node carries an `id`. Use semantic, hierarchical ids
-  (`bg.grunge`, `hero.title`, `cta.button`) so later edits and transactions target exactly
-  the right node. Anonymous node soup cannot be edited later.
-- **Tokenize everything.** Colors, fonts, sizes, gradients, shadows go through `token`s and
-  are referenced with `(token)"id"`. Never embed raw hex/sizes in nodes — a palette/brand
-  swap must be a token-value change, not a geometry rewrite. Token values use KDL typed
-  literals: `(px)28`, numeric weight `700`, color `"#hex"` — not CSS strings like `"28px"` or
-  `"900"`. Gradients, shadows, filters, and masks use child nodes inside the token, not a
-  bare `value=`. Run `zenith schema token <type>` (or `zenith schema tokens`) for the exact
-  value form and a working example per token type.
-- **Resolve text overflow by preserving intent first.** When `text.overflow` reports clipped
-  text, treat declared type scale as design intent, especially for titles, wordmarks, body systems,
-  and brand tokens. First enlarge the text box, move neighboring nodes, split content, reflow the
-  layout, or link boxes with `chain`. Shrink font size, lower shared size tokens, or use
-  `overflow="autofit"` only when smaller type is intended, the source explicitly opts into fitting,
-  or the layout/section constraints make geometry expansion impossible. If you shrink type to clear
-  overflow, report that tradeoff explicitly.
-- **Use the right primitive for a labeled box.** For anything that is a box WITH centered text
-  — a button/CTA, a flowchart node, a labelled card — prefer the `shape` node, not a `rect` plus a
-  separately-positioned `text`. `shape` carries an owned label (child `span`s) that it centers for
-  you via `h-align`/`v-align`, and `shape kind="decision"` gives a diamond, `terminator` a
-  pill, `process` a rounded box (run `zenith schema node shape`). Connectors anchor cleanly to a
-  `shape`'s real outline. If you DO overlay a standalone `text` on a box, set `v-align="middle"`
-  (and `align="center"`) on the text so the label is actually centered — a bare `text` sits at the
-  TOP of its box. For flowcharts and architecture diagrams, connect nodes with `connector`
-  (`from`/`to` + `marker-end`), never hand-drawn lines. Use divided anchors like
-  `from-anchor="35/60"` when several links leave the same outline, and use page/component
-  `ports { port node="..." id="..." anchor="..." }` plus `from="node#port"` for reusable
-  semantic attachment points.
-- **Use native icon components for real-world diagram objects.** Do not represent devices,
-  clouds, servers, databases, files, folders, locks, networks, or search/settings affordances as
-  generic labeled boxes when an icon is the visual object. The embedded `@zenith/icons-lucide`
-  pack carries the full Lucide set (~1745 icons), so assume the icon exists and search for it
-  rather than enumerating: `zenith library search <term>`, narrowed with `--category`, `--kind`,
-  `--pack`, and `--limit`. Results are ranked (exact name first, then aliases, then tags), so the
-  top hit is usually the right one. Inspect with `zenith library show @zenith/icons-lucide#<icon>`;
-  materialize with `zenith library add @zenith/icons-lucide#<icon> --into <file> --page <page-id> --at X,Y`.
-  Icons are editable native `path` components: size them with `w`/`h` (`fit` defaults to `contain`),
-  and restyle by overriding **every** path (`icon.0 … icon.N-1`; get `N` from `library show`).
-  See `references/icons.md`.
-- **A list of distinct things gets an icon per row; a bullet is a deliberate choice.** When each
-  item names a concrete thing or capability, the icon is the fastest way to scan the list. Use a
-  plain bullet (`text bullet="•" bullet-gap=(px)12`, or `format="markdown"` with `- item`) when the
-  same icon would repeat down every row (a repeated icon is a bullet in costume), when items run
-  longer than about a line, when the list is ordered (use numbers — an icon cannot express
-  position), or when you cannot name the icon in one word tied to that item. Never invent a
-  decorative icon for an abstract concept: it asserts a meaning that isn't there.
-- **A library pack is either a `.zen` file or a directory of `*.svg` files.** `.zen` packs carry
-  tokens, components, and actions; an SVG directory under `<project>/libraries/<name>/` is an
-  icon set with nothing to author — each `*.svg` is one icon, its id is the file stem, and it is
-  addressed `@local/<name>#<icon>`. Add an optional `library.kdl` beside the icons to declare
-  `id`/`version`/`license` and per-icon `aliases`, `tags`, and `categories` for search.
-  Add labels beside or below icon instances when text is needed; do not redraw the icon by hand.
-- **For quantitative/data content** (comparisons, trends, proportions) use the `chart` node
-  (bar/line/area/pie/donut/sparkline) — run `zenith schema node chart` for the series/categories
-  child syntax; bind a series to a `--data` JSON array or CSV column with `data-ref`.
-- **Group semantically.** Put related layers in `group`/`frame` with a stable id so a whole
-  motif can be moved, dimmed (`set_opacity`), or removed in one operation.
-- **Validate before render, render before finalize.** Hard diagnostics block finalization.
-  Suppress a known-OK advisory or gate CI with a `diagnostics` policy — see `references/diagnostics.md`.
-- **Keep real-object pixels external.** Photos/illustrations from an image model are declared
-  as `assets` (with `sha256` for lockable provenance) and placed as `image` nodes — never bake
-  text or layout into a flattened picture. See `zenith schema node image`.
-- **Determinism.** Same source + backend → same bytes. No reliance on time/randomness. If you
-  generate many nodes procedurally, record the parameters/seed in a note so it is replayable.
-- **Verify syntax against reality, not memory.** Exact node/attribute syntax lives in
-  `zenith schema node <kind>` (authoritative). When unsure of a property, run `zenith schema node
-<kind>` — then validate. Do not invent syntax.
+Read `references/by-kind.md` for the full recipe of the matching row. Always:
 
-## Command surface
+```bash
+zenith new <path> --theme <name> [canvas flags…]   # or brand tokens
+zenith tokens <path>                               # use these
+zenith library list                                # packs available now
+```
 
-Discover commands with `zenith --help` and flags with `zenith <cmd> --help` (each includes an
-example). Most commands support `--json` for machine-readable output. The groups, in brief:
-**author** (`new` — scaffold a fresh document; `validate`, `fmt`, `tokens`, `inspect`), **render**
-(`render`), **edit** (`tx` — typed, dry-run by default), **asset** (`asset import` — bring a local
-image/svg/font file in as a frozen, hash-pinned asset declaration; `asset zpx-bake` — bake a
-hand-authored `.zpx` raster manifest into a frozen PNG asset declaration), **variants**
-(`variant` — size/format variants from one page; `merge` — CSV data mail-merge), **perceive**
-(`perceive` — read-only, deterministic vector/path perception metrics and craftsmanship
-diagnostics; never edits), **library**
-(`library list`/`add`), **theme** (`theme new`, `theme apply`), **fonts** (`fonts` — list Bundled
-vs Local/system families), **workspace** (`workspace scratch`/`candidate`/`promote`/`finalize`/
-`bundle`/`unbundle` — store-backed scratch candidates), and **history** (`history`, `undo`,
-`redo`, `version`, `restore`, `sync`). Do not memorize flags from this file — ask the CLI.
+| Brief smells like… | Scaffold | Core tools (use these, not fakes) |
+| --- | --- | --- |
+| Social square | default 1080² | `text` + accent `rect` + CTA **`shape`** + optional icon |
+| Story / reel | `--width 1080 --height 1920` | same; safe-zone; strong hierarchy |
+| Banner / header | e.g. `--width 1600 --height 400` | horizontal lockup; anchors for logo/CTA |
+| Poster / flyer | `--format a4` / `tabloid` / custom | hierarchy; optional `pattern`/`light` depth |
+| Deck / slides | `--format letter --landscape --pages N` | one idea/page; `role`s; contact-sheet render |
+| Flow / process | any size | **`shape` + `connector`** or `@zenith/flowchart#process\|decision\|terminator` |
+| Architecture / product map | any | `zenith library search` icons + `connector` (+ ports) |
+| Numbers / KPIs | any | **`chart`** (bar/line/area/pie/donut/sparkline) — not hand-drawn bars |
+| Table / schedule | any | **`table`** |
+| Long article / report | `--format a4` + pages | `text` `format="markdown"` / `src=` / `chain`; `footnote`/`toc`/`code` |
+| Photo + type | any | `asset import` + `image` + **`@zenith/masks`** / **`@zenith/filters`** |
+| Fancy background | any | `pattern`, `mesh`, `light`, gradient/noise tokens — see polish |
+| Many sizes | one master + anchors | **`zenith variant`** |
+| Many rows / people | template + CSV | **`zenith merge`** (`role="data.<col>"`) |
+| Brand hexes only | — | **`zenith theme new`** then `theme apply` |
 
-> Two different "variant" tools — don't confuse them: `zenith variant` varies **size/format**
-> (one design → square/story/banner), `zenith merge` varies **content** (one template → many
-> data rows). `references/variants.md` covers both.
+**Canvas cheatsheet:** square `1080²` (default) · story `1080×1920` · landscape banner custom ·
+print `--format a4|a3|letter|tabloid` · deck `--format letter --landscape --pages N` ·
+`zenith new --help` for full list.
 
-## Routing — load a reference pack on demand
+## Built-in packs (don't rebuild these)
 
-Read only the pack you need for the current sub-task (progressive disclosure). Each lives in
-`references/` next to this file.
+Run `zenith library list` for the live catalog. Embedded presets:
 
-| The task involves…                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 | Read / command                                                                                                   |
-| ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------- |
-| Starting a brand-new document, or the top-level file structure (`zenith { project tokens styles document { page } }`)                                                                                                                                                                                                                                                                                                                                                                                              | `zenith new <path> --theme <name>` · `zenith schema document` · `zenith schema page`                             |
-| Node/attribute names, types, required/optional status                                                                                                                                                                                                                                                                                                                                                                                                                                                              | `zenith schema node <kind>` · `zenith schema nodes`                                                              |
-| Transaction op fields and semantics                                                                                                                                                                                                                                                                                                                                                                                                                                                                                | `zenith schema op <name>` · `zenith schema ops`                                                                  |
-| Command flags and usage                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            | `zenith <cmd> --help`                                                                                            |
-| Syntax errors, type mismatches, "did you mean?" — act on the diagnostic                                                                                                                                                                                                                                                                                                                                                                                                                                            | `zenith validate <file> --json`                                                                                  |
-| The full agent run: scratch experiments, multiple candidates, select, promote, clean up, provenance                                                                                                                                                                                                                                                                                                                                                                                                                | `references/agentic-workflow.md` + `zenith workspace --help`                                                     |
-| Judging/improving a finished render — composition, balance, consistency, noise, semantic accuracy; computing alignment/spacing/margins/role-divergence from resolved geometry (style-neutral)                                                                                                                                                                                                                                                                                                                      | `references/design-critique.md` + `zenith inspect <file> --json`                                                 |
-| Driving Zenith where the CLI can't run (remote/CI/sandboxed/hosted agents) — the MCP server                                                                                                                                                                                                                                                                                                                                                                                                                        | `references/agentic-workflow.md` (MCP section) + `zenith mcp --help`                                             |
-| Procedural grid/scatter tiling — the `pattern` node or the `detach_pattern` op                                                                                                                                                                                                                                                                                                                                                                                                                                     | `references/pattern.md`                                                                                          |
-| Recording a generated motif as a `recipes` block (provenance, seed/params, recipe `tx` ops)                                                                                                                                                                                                                                                                                                                                                                                                                        | `references/recipes-model.md`                                                                                    |
-| Picking or applying a ready-made visual theme (palette + shape language)                                                                                                                                                                                                                                                                                                                                                                                                                                           | `zenith new --theme <name>` · `zenith theme apply <name> <doc>` · `references/themes.md`                         |
-| Generating a theme from a brand (logo, website, brand colors)                                                                                                                                                                                                                                                                                                                                                                                                                                                      | `references/themes.md` → `zenith theme new --help`                                                               |
-| Color, gradients, glows, texture, typography, "make it premium" — visual effects                                                                                                                                                                                                                                                                                                                                                                                                                                   | `zenith schema node <kind>` · `zenith schema token <type>` + design judgment                                     |
-| Page setup, anchors, safe zones, frames, grids, spreads                                                                                                                                                                                                                                                                                                                                                                                                                                                            | `references/layout.md`                                                                                           |
-| Structured data tables — columns, rows, cells, header rows, borders, alignment                                                                                                                                                                                                                                                                                                                                                                                                                                     | `zenith schema node table`                                                                                       |
-| Long-form prose kept lean — inline markdown (`**bold**`, `==highlight==`, `[link](url)`, …), external `.md`/`.txt` files, or data-bound body text; **block-level markdown** (`format="markdown"`: headings h1–h6, paragraphs, blockquotes, lists, fenced code, `---` rules) with per-role styling via `block role="…"` decls (cascade doc > page > text); overflow fires `text.overflow` (preserve type scale first: enlarge/reflow/link boxes with `chain`; shrink only when intended or geometry is constrained) | `zenith schema node text` · `zenith schema block`                                                                |
-| Bringing in a photo/illustration asset and composing around it                                                                                                                                                                                                                                                                                                                                                                                                                                                     | `zenith asset import` (register the file) · `zenith schema node image` · `zenith schema asset`                   |
-| Reusing another `.zen` as live structured source — a brand logo/lockup, a shared diagram, or composing specific pages of a deck/report from dedicated files — via a root `imports { import … }` block, then `instance source="import-id#component.id"` (with `x`/`y`/`w`/`h`/`fit=contain\|fill\|none` placement) or `page source="import-id#page.id"`; imported tokens stay isolated unless bridged with `token-map from=… to=…`. Prefer this over recreating a lockup by hand or flattening to an image.                | `zenith schema node instance` · `zenith schema node page` · `zenith validate <file> --json` (import diagnostics) |
-| Baking a hand-authored `.zpx` raster manifest (painted layers, blend modes, gradient-map adjustments) into a frozen PNG asset                                                                                                                                                                                                                                                                                                                                                                                      | `zenith asset zpx-bake`                                                                                          |
-| Defining or applying a brand/identity, or per-project style                                                                                                                                                                                                                                                                                                                                                                                                                                                        | `references/brand.md`                                                                                            |
-| Many outputs from one design — **sizes/formats** (`zenith variant`) or **data** rows (`zenith merge`, binding nodes with `role="data.<column>"`)                                                                                                                                                                                                                                                                                                                                                                   | `references/variants.md` · `zenith merge --help`                                                                 |
-| Per-variant tweaks (the `variants`/`override` block: hide nodes, swap text/fill, reposition with x/y/w/h)                                                                                                                                                                                                                                                                                                                                                                                                          | `zenith schema variant`                                                                                          |
-| Flowcharts / diagrams / labeled boxes & buttons (boxes with centered labels + arrows)                                                                                                                                                                                                                                                                                                                                                                                                                              | `zenith schema node shape` (kind, owned label) · `zenith schema node connector`                                  |
-| Vector/logo marks, custom lettering, non-rectilinear shapes — cubic Bézier `path` nodes (anchors + handles, fill-rule, joins), boolean combine (union/subtract/intersect/exclude), point simplify, live/bake **symmetry** (radial rotation or `symmetry-mode="mirror"` dihedral kaleidoscope for crests/monograms/mandalas), and converting shaped text to editable outlines                                                                                                                                          | `zenith schema node path` · `zenith schema op path_boolean` · `zenith schema op simplify_path_anchors` · `zenith schema op make_path_symmetric` · `zenith outline-text --help` |
-| Read-only craft/quality metrics over paths — anchor-point economy, B&W legibility at small sizes, grid conformance, optical balance, and craftsmanship diagnostics (`path.anchor_off_extrema`, `path.handle_crossing`, `path.tangent_discontinuity`, `path.handle_ratio_out_of_range`, `path.turn_too_sharp`, `path.redundant_anchor`)                                                                                                                                                                                | `zenith perceive --help`                                                                                         |
-| Architecture/product diagram icons — the full Lucide set (~1745) ships embedded; search rather than guess, and narrow with `--category` / `--kind` / `--limit` | `references/icons.md` · `zenith library search <term>` · `zenith library show @zenith/icons-lucide#<icon>` · `zenith library add @zenith/icons-lucide#<icon> --into <file> --page <id> --at X,Y` |
-| Bringing your own icon set, or extending one — drop `*.svg` files into `<project>/libraries/<name>/`; each file is an icon, addressed `@local/<name>#<stem>`. An optional `library.kdl` adds id/version/license and per-icon `aliases`/`tags`/`categories` | `zenith library list <project>` · `zenith library search <term> <project>` |
-| Icon craft — sizing an icon (`w`/`h`/`fit`), recoloring every path, stroke weight at large sizes, and when a list wants icons vs plain bullets | `references/icons.md` · `zenith schema node instance` |
-| Charts / data visualization (bar, line, area, pie, donut, sparkline; grouped/stacked/horizontal bars; legend; value labels)                                                                                                                                                                                                                                                                                                                                                                                        | `zenith schema node chart` · bind series to data with `render --data <file.json\|csv>` (`series data-ref="col"`) |
-| Diagnostic policy (`allow`/`deny`/`warn` codes, CI gating, config files, CLI flags)                                                                                                                                                                                                                                                                                                                                                                                                                                | `references/diagnostics.md` + `zenith schema diagnostics`                                                        |
-| Text legibility — is the text readable on what is actually painted behind it? APCA `Lc` contrast, `contrast.invisible` (a warning, NOT an error — a clean `valid: true` does not mean legible), `contrast.low` for intentional brand contrast, and `contrast-bg` when the backdrop can't be sampled (image / `path` fill / rotated / masked / blurred)                                                                                                                                                                | `references/diagnostics.md` (contrast section) · `zenith validate <file> --json` · `zenith schema node text`      |
-| Local/system fonts, portability, deterministic rendering, `font.local` advisory                                                                                                                                                                                                                                                                                                                                                                                                                                    | `references/diagnostics.md` · `zenith fonts`                                                                     |
-| Reporting a Zenith bug or feature request (the `gh` feedback loop)                                                                                                                                                                                                                                                                                                                                                                                                                                                 | `references/reporting-issues.md`                                                                                 |
+| Pack | Use for | Add |
+| --- | --- | --- |
+| `@zenith/theme.*` (10) | Full token contract | `zenith new --theme <name>` or `theme apply` |
+| `@zenith/icons-lucide` | Devices, cloud, lock, UI affordances (~1745) | `library search` → `library add …#icon --into doc --page id --at X,Y` |
+| `@zenith/flowchart` | process / decision / terminator components | `library add @zenith/flowchart#decision --into … --page … --at X,Y` |
+| `@zenith/filters` | Photo/grade looks (duotone, noir, vintage, …) | `library add @zenith/filters#duotone-gold --into doc` then `filter=(token)"…"` |
+| `@zenith/masks` | Vignette, spotlight, soft card/portrait clips | `library add @zenith/masks#vignette --into doc` then `mask=(token)"…"` |
+| `@zenith/brand-kit` | Re-skin actions | `library list` / apply via `tx` or brand workflow |
 
-## Project configuration (brand / identity / style)
+Icons judgment: `references/icons.md`. Never invent decorative icons for abstract concepts.
 
-Before authoring, check whether the project pins its own design system:
+## Non-negotiables
 
-1. **Brief for the agent** — if `.zenith/brand.md` exists in (or above) the working dir, **read
-   it and conform to it** (palette, type, spacing, voice, do/don't). It overrides generic
-   defaults. Scaffold one from `templates/brand.md` when the user wants to "set up a brand".
-2. **No brand yet** — start from an embedded theme: `zenith new <path> --theme <name>` for a new
-   doc, or `zenith theme apply <name|pack-id> <doc>` to re-skin one later. Project library packs
-   under `libraries/*.zen` (and the embedded presets) are materializable design systems too —
-   list them with `zenith library list <dir>` and pull items in with
-   `zenith library add @scope/pack#item --into <file> --page <id>`. A brand kit pack can also
-   ship `actions` (typed `tx` bundles) that re-skin a document's tokens in one step. See
-   `references/brand.md` and `references/themes.md`.
-3. **Canonical design source** — when a project keeps brand, component, or layout source in a canonical `.zen` file, import it with root-level `imports { import id="..." kind="zen" src="..." }` and reference exported pages/components with `source="import-id#page.page-id"` or `source="import-id#component.component-id"` instead of copying geometry by hand. This keeps documents DRY while preserving editable native scene output.
-4. **Bespoke palette** — only invent one when the user explicitly wants a look no embedded theme
-   or brand pack covers.
+- **Stable ids** — `hero.title`, `cta.button`. No anonymous node soup.
+- **Tokenize visuals** — fill/font/size/stroke/shadow via `(token)"id"`. Geometry `x y w h` may be raw px. Values: `(px)28`, weight `700`, `"#hex"` — not CSS strings. **`create_token`** supports scalars plus structured **`shadow`** (`layers`), **`filter`** (`filter_ops`), **`gradient`** (`stops` + `angle`/`radial`), **`mask`** (`shape`/`feather`/`radius`) — see `zenith schema op create_token`. Pack filters/masks also via `library add`.
+- **Shared chrome** — decks/books: `create_master` + `add_node` into the master + `set_page_master` on each page (not copy-paste footers).
+- **Labeled box → `shape`** with `text-style` pointing at a style that uses the readable ink
+  (theme: `color.primary.content` on `color.primary` fill). Not `rect` + floating `text`.
+  Create styles with **`create_style`** / **`set_style_property`** (`zenith schema style`,
+  `zenith schema op create_style`) — or hand-author `styles { }` then `zenith sync`.
+- **Right primitive** — flow: `shape`+`connector`; data: `chart`/`table`; things: Lucide icons;
+  prose: `text` (+ markdown/`src`/`chain`).
+- **Type box ≥ type size** — theme `size.h1` is 64px → give the text node **h ≈ 90+** (body 28 →
+  h ≈ 40+). First overflow fix is **grow the box**, not shrink the token.
+- **Muted text on dark themes** — captions/page numbers use `color.base.content` (optionally lower
+  `opacity`), never a dark surface token like `color.base.300` as fill on `color.base.100`.
+- **Icons on dark themes** — Lucide defaults to near-black stroke. After `library add`, recolor
+  **before** first render (shared `lib.icons.stroke` or every `icon.N` path). Resize with
+  `set_geometry` on the instance (`w`/`h`/`x`/`y`) or source. See `references/icons.md`.
+- **Overflow preserves type** — enlarge/reflow/`chain` before shrink/`autofit`; report if you shrink.
+- **Group motifs** — `group`/`frame` with stable id for one-op move/dim/delete.
+- **Assets external** — `zenith asset import` + `image`; never bake layout into a flat picture.
+- **Align with ops** — `align_nodes` / `distribute_nodes` / `align_to_edge` after rough placement.
+- **Only add packs you use** — unused filter/mask tokens leave advisories; strip or apply them.
+- **Look at the PNG** — schema for syntax; eyes for judgment.
 
-Project config is loaded, not assumed: prefer the project's tokens/packs over inventing a new
-palette, so output stays on-brand and consistent across documents.
+### Optional polish (after structure works)
 
-## Reporting
+Depth without clutter: `pattern` (grid/scatter) · `mesh` · `light` · gradient/`shadow` tokens ·
+`@zenith/filters` · `@zenith/masks` · noise filter (`zenith schema token filter`).
+One strong motif beats five competing effects. Pattern details: `references/pattern.md`.
 
-After acting, briefly state: what changed (which ids/tokens), the validate result (clean or
-the remaining diagnostics), and the path to the rendered output. Keep it short; the source and
-the render are the artifacts.
+## Routing (load on demand)
+
+| Need | Open / run |
+| --- | --- |
+| **Document-type recipes** (start here for new work) | `references/by-kind.md` |
+| Layout, anchors, safe zones, frames | `references/layout.md` |
+| Themes catalog / apply / `theme new` | `references/themes.md` |
+| Brand kit / `.zenith/brand.md` | `references/brand.md` · `templates/brand.md` |
+| Icons craft | `references/icons.md` · `library search` |
+| Design critique | `references/design-critique.md` · `inspect --json` |
+| Multi-candidate / MCP | `references/agentic-workflow.md` |
+| Size variants vs mail-merge | `references/variants.md` |
+| Styles block / create_style | `zenith schema style` · `zenith schema op create_style` |
+| Diagnostics, contrast, fonts | `references/diagnostics.md` |
+| Pattern / detach | `references/pattern.md` |
+| Recipe provenance block | `references/recipes-model.md` |
+| Bug/feature report | `references/reporting-issues.md` |
+| Any node/op/flag syntax | `zenith schema …` · `zenith <cmd> --help` |
+| Path craft / logo outlines | `zenith schema node path` · `zenith outline-text --help` · `zenith perceive --help` |
+| Live import of another `.zen` | `zenith schema node instance` · `page` |
+
+**Two "variant" tools:** `zenith variant` = size/format; `zenith merge` = content rows.
+
+## Project config
+
+1. `.zenith/brand.md` exists (walk up) → read and conform.
+2. Else `zenith new <path> --theme <name>` (or later `theme apply`).
+3. Prefer `imports` + `instance`/`page source=…` over copying shared lockups.
+4. Invent a palette only when brand and themes both fail the brief.

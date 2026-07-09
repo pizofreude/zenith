@@ -1,7 +1,8 @@
 //! Page-structure ops: `AddPage` / `DeletePage` / `SetPageSize` / `ReorderPages`,
-//! plus the canonical dimension-string parser they share with geometry/token ops.
+//! master create/delete/assign, plus the canonical dimension-string parser they
+//! share with geometry/token ops.
 
-use zenith_core::{Diagnostic, Dimension, Document, Page, PropertyValue, Unit};
+use zenith_core::{Diagnostic, Dimension, Document, MasterDef, Page, PropertyValue, Unit};
 
 use super::super::record_affected;
 
@@ -298,4 +299,105 @@ pub(in crate::engine) fn apply_reorder_pages(
     for id in order {
         record_affected(id, affected);
     }
+}
+
+// ── Masters ───────────────────────────────────────────────────────────────────
+
+/// Create an empty master-page definition in `doc.masters`.
+pub(in crate::engine) fn apply_create_master(
+    id: &str,
+    doc: &mut Document,
+    diagnostics: &mut Vec<Diagnostic>,
+    affected: &mut Vec<String>,
+) {
+    if doc.masters.iter().any(|m| m.id == id) {
+        diagnostics.push(Diagnostic::error(
+            "tx.duplicate_id",
+            format!("create_master: a master with id {:?} already exists", id),
+            None,
+            Some(id.to_owned()),
+        ));
+        return;
+    }
+    // Also reject collision with a page id (masters and pages share the global
+    // id space for container parent resolution).
+    if doc.body.pages.iter().any(|p| p.id == id) {
+        diagnostics.push(Diagnostic::error(
+            "tx.duplicate_id",
+            format!("create_master: id {:?} collides with an existing page", id),
+            None,
+            Some(id.to_owned()),
+        ));
+        return;
+    }
+
+    doc.masters.push(MasterDef {
+        id: id.to_owned(),
+        children: Vec::new(),
+        source_span: None,
+    });
+    record_affected(id, affected);
+}
+
+/// Remove a master-page definition from `doc.masters`.
+pub(in crate::engine) fn apply_delete_master(
+    id: &str,
+    doc: &mut Document,
+    diagnostics: &mut Vec<Diagnostic>,
+    affected: &mut Vec<String>,
+) {
+    let Some(idx) = doc.masters.iter().position(|m| m.id == id) else {
+        diagnostics.push(Diagnostic::error(
+            "tx.unknown_master",
+            format!("delete_master: master {:?} not found", id),
+            None,
+            Some(id.to_owned()),
+        ));
+        return;
+    };
+    doc.masters.remove(idx);
+    record_affected(id, affected);
+}
+
+/// Set or clear a page's `master` attribute.
+pub(in crate::engine) fn apply_set_page_master(
+    page_id: &str,
+    master: Option<&str>,
+    doc: &mut Document,
+    diagnostics: &mut Vec<Diagnostic>,
+    affected: &mut Vec<String>,
+) {
+    if !doc.body.pages.iter().any(|p| p.id == page_id) {
+        diagnostics.push(Diagnostic::error(
+            "tx.unknown_node",
+            format!("set_page_master: page {:?} not found", page_id),
+            None,
+            Some(page_id.to_owned()),
+        ));
+        return;
+    }
+
+    let new_master = match master {
+        None | Some("") => None,
+        Some(mid) => {
+            if !doc.masters.iter().any(|m| m.id == mid) {
+                diagnostics.push(Diagnostic::error(
+                    "tx.unknown_master",
+                    format!(
+                        "set_page_master: master {:?} not found (create it with create_master first)",
+                        mid
+                    ),
+                    None,
+                    Some(mid.to_owned()),
+                ));
+                return;
+            }
+            Some(mid.to_owned())
+        }
+    };
+
+    if let Some(page) = doc.body.pages.iter_mut().find(|p| p.id == page_id) {
+        page.master = new_master;
+    }
+    record_affected(page_id, affected);
 }
