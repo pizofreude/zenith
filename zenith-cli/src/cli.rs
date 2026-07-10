@@ -780,7 +780,8 @@ pub enum InspectSub {
 #[derive(Debug, Args)]
 #[command(after_help = "EXAMPLES:\n  \
 zenith imports list deck.zen\n  \
-zenith imports list deck.zen --json")]
+zenith imports list deck.zen --json\n  \
+zenith imports materialize deck.zen --target brand#component.logo --page page.1")]
 pub struct ImportsArgs {
     #[command(subcommand)]
     pub command: ImportsSub,
@@ -797,6 +798,15 @@ pub enum ImportsSub {
     /// command still exits 0. Host parse failure exits 2. Does not materialize
     /// imports into the host.
     List(ImportsListArgs),
+
+    /// Copy an imported component into the host document with provenance.
+    ///
+    /// Escape hatch for live `source="import#component.id"` references: clones
+    /// the component subtree plus tokens/styles/assets into the host, places an
+    /// instance on `--page`, and records a detached (`linked=false`) provenance
+    /// entry under a synthetic `import:<id>` libraries record. Only
+    /// `#component.*` targets are accepted in this cut.
+    Materialize(ImportsMaterializeArgs),
 }
 
 /// Arguments for `zenith imports list`.
@@ -807,6 +817,42 @@ pub struct ImportsListArgs {
     pub path: PathBuf,
 
     /// Emit machine-readable JSON (`zenith-imports-list-v1`).
+    #[arg(long)]
+    pub json: bool,
+}
+
+/// Arguments for `zenith imports materialize`.
+#[derive(Debug, Args)]
+#[command(after_help = "EXAMPLES:\n  \
+zenith imports materialize deck.zen --target brand#component.logo --page page.1\n  \
+zenith imports materialize deck.zen --target brand#component.logo --page page.1 --at 120,80 --dry-run")]
+pub struct ImportsMaterializeArgs {
+    /// Path to the host `.zen` document (written in-place unless `--dry-run`).
+    pub path: PathBuf,
+
+    /// Import target to materialize: `<import-id>#component.<component-id>`.
+    #[arg(long, value_name = "IMPORT#component.ID")]
+    pub target: String,
+
+    /// Id of the host page to place the instance on.
+    #[arg(long, value_name = "ID")]
+    pub page: String,
+
+    /// Instance origin as `X,Y` in pixels (default `0,0`).
+    #[arg(long, value_name = "X,Y")]
+    pub at: Option<String>,
+
+    /// Override the generated instance id base (default: the component id).
+    #[arg(long, value_name = "ID")]
+    pub id: Option<String>,
+
+    /// Print the resulting source to stdout WITHOUT writing the file.
+    #[arg(long)]
+    pub dry_run: bool,
+
+    /// Emit machine-readable JSON (`zenith-imports-materialize-v1`).
+    ///
+    /// On `--dry-run`, the formatted host source is included under `source`.
     #[arg(long)]
     pub json: bool,
 }

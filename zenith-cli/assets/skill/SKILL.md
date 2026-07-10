@@ -167,7 +167,7 @@ One strong motif beats five competing effects. Pattern details: `references/patt
 | Any node/op/flag syntax | `zenith schema …` · `zenith <cmd> --help` |
 | Path craft / logo outlines | `zenith schema node path` · `zenith inspect path <doc> <id> --json` · `zenith outline-text --help` · `zenith perceive --help` |
 | Font OT features / alternates | `zenith fonts features <family|file> --json` · `zenith fonts alternates … --char A --json` |
-| Live import of another `.zen` | `zenith schema node instance` · `page` |
+| Live import of another `.zen` | `zenith schema node instance` · `page` · `zenith imports list` · `zenith imports materialize` |
 
 **Two "variant" tools:** `zenith variant` = size/format; `zenith merge` = content rows.
 

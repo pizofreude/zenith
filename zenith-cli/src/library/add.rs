@@ -291,7 +291,7 @@ pub fn collect_all_ids(doc: &Document) -> BTreeSet<String> {
 
 /// Deterministically pick `base`, or `base.1`, `base.2`, … — the first variant
 /// not present in `taken`.
-pub(super) fn unique_id(base: &str, taken: &BTreeSet<String>) -> String {
+pub(crate) fn unique_id(base: &str, taken: &BTreeSet<String>) -> String {
     if !taken.contains(base) {
         return base.to_owned();
     }
@@ -306,6 +306,8 @@ pub(super) fn unique_id(base: &str, taken: &BTreeSet<String>) -> String {
 }
 
 /// A pixel [`Dimension`].
+///
+/// Shared by library and composition-import materialization.
 pub(crate) fn px(value: f64) -> Dimension {
     Dimension {
         value,

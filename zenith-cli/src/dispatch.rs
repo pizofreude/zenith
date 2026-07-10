@@ -5,7 +5,7 @@ use clap::Parser;
 
 use crate::cli;
 use crate::cli::{Cli, Command};
-use crate::cli_helpers::{read_file, scope_from_arg, targets_from_flags};
+use crate::cli_helpers::{parse_at_spec, read_file, scope_from_arg, targets_from_flags};
 use crate::commands::serialize_pretty;
 use crate::{commands, history, mcp, selfupdate};
 
@@ -181,6 +181,77 @@ pub fn run() -> ExitCode {
                 match commands::composition_imports::list_imports(&src, &a.path, a.json) {
                     Ok(out) => {
                         println!("{out}");
+                        ExitCode::SUCCESS
+                    }
+                    Err(e) => {
+                        eprintln!("{}", e.message);
+                        ExitCode::from(e.exit_code)
+                    }
+                }
+            }
+            cli::ImportsSub::Materialize(a) => {
+                let at = match parse_at_spec(a.at.as_deref()) {
+                    Ok(pair) => pair,
+                    Err(msg) => return fail(msg, 2),
+                };
+                let src = match read_file(&a.path) {
+                    Ok(s) => s,
+                    Err(msg) => return fail(msg, 2),
+                };
+                match commands::composition_imports::materialize_import(
+                    &src,
+                    &a.path,
+                    &a.target,
+                    &a.page,
+                    at,
+                    a.id.as_deref(),
+                ) {
+                    Ok(result) => {
+                        if a.dry_run {
+                            if a.json {
+                                println!(
+                                    "{}",
+                                    commands::composition_imports::format_materialize_json(
+                                        &a.path, &result, true,
+                                    )
+                                );
+                            } else {
+                                match String::from_utf8(result.formatted) {
+                                    Ok(s) => print!("{s}"),
+                                    Err(_) => {
+                                        return fail(
+                                            "error: formatted output is not valid UTF-8",
+                                            2,
+                                        );
+                                    }
+                                }
+                            }
+                        } else {
+                            let recorded = history::record_edit(
+                                &result.formatted,
+                                &a.path,
+                                "imports.materialize",
+                            );
+                            if let Some(w) = &recorded.warning {
+                                warn(w);
+                            }
+                            if let Err(e) = std::fs::write(&a.path, &recorded.bytes) {
+                                return fail(
+                                    format!("error writing '{}': {}", a.path.display(), e),
+                                    2,
+                                );
+                            }
+                            if a.json {
+                                println!(
+                                    "{}",
+                                    commands::composition_imports::format_materialize_json(
+                                        &a.path, &result, false,
+                                    )
+                                );
+                            } else {
+                                println!("{}", result.summary);
+                            }
+                        }
                         ExitCode::SUCCESS
                     }
                     Err(e) => {

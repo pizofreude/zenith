@@ -8,6 +8,7 @@
 //! - `loaded` — the [`LoadedImportGraph`] result type and import edge records.
 //! - `loader` — recursive traversal, parsing, hash verification, cycle detection.
 //! - `list` — read-only `zenith imports list` formatting over the loaded graph.
+//! - `materialize` — copy an imported component into the host with provenance.
 //! - `validate` — root-target validation and expanded-id collision detection.
 //! - `diagnostics` — the `import.*` diagnostic constructors.
 //! - `source` — import-source string parsing.
@@ -18,6 +19,7 @@ mod diagnostics;
 mod list;
 mod loaded;
 mod loader;
+mod materialize;
 mod path;
 mod source;
 mod validate;
@@ -29,3 +31,4 @@ mod tests;
 pub(crate) use list::run as list_imports;
 pub(crate) use loaded::LoadedImportGraph;
 pub(crate) use loader::load_import_graph;
+pub(crate) use materialize::{format_json as format_materialize_json, run as materialize_import};
